@@ -1,0 +1,24 @@
+# ── usageBar 公开仓库 · 白名单 ──
+# 默认忽略仓库内所有内容,只放开发布所需的目录/文件。
+# 内部研发笔记(docs/、CHANGELOG.md、CLAUDE.md、AGENT.md、extras/ 等)
+# 保留在本地工作目录,但不进公开仓库。
+
+/*
+
+!/app/
+!/icon/
+!/install-usagebar/
+!/README.md
+!/LICENSE
+!/.gitignore
+
+# ── 放开目录内仍需忽略的构建产物 ──
+app/.build/
+app/.swiftpm/
+app/Packages/
+app/dist/
+app/*.app/
+app/DerivedData/
+app/xcuserdata/
+**/.DS_Store
+**/*.swp

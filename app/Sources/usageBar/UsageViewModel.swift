@@ -1,0 +1,142 @@
+import Foundation
+import SwiftUI
+import usageBarCore
+import usageBarProviders
+
+@MainActor
+final class UsageViewModel: ObservableObject {
+    @Published var window: TimeWindow = .today
+    /// 当前窗口的 5 条 StatRecord（UI 直接用）
+    @Published var stats: [StatRecord] = []
+    @Published var isRefreshing: Bool = false
+    @Published var lastRefreshAt: Date?
+    @Published var justRefreshed: Bool = false
+
+    /// 全量缓存：4 窗口 × 5 provider = 20 条
+    private var allStats: [StatRecord] = []
+
+    /// generation 计数器，旧请求结果被丢弃
+    private var refreshGen: Int = 0
+
+    private var justRefreshedTask: Task<Void, Never>?
+
+    var grandTotalToken: Int {
+        stats.reduce(0) { $0 + $1.token }
+    }
+
+    /// 可见 provider 的合计(用户在 Settings 关闭的不计入,菜单栏 title 用这个)
+    var visibleGrandTotalToken: Int {
+        let visible = Set(ProviderVisibilitySettings.shared.visibleProviderIds())
+        return stats
+            .filter { visible.contains($0.provider) }
+            .reduce(0) { $0 + $1.token }
+    }
+
+    /// 当前窗口内最大 token 数（条形归一化）
+    var maxToken: Int {
+        stats.map { $0.token }.max() ?? 0
+    }
+
+    /// 触发一次"所有 provider 并发扫盘刷新缓存 + 按缓存全量(持久账本)聚合"。
+    ///
+    /// **持久账本语义**(2026-05-29 拍板):聚合数据源是 `FileMtimeCache.allEntries()`(按 path
+    /// 的全量缓存),而非各 provider 当前扫到的现存文件。这样会话文件被删/轮转后,其历史条目仍
+    /// 留在缓存里继续计入「累计/近 30 天」——消耗过的 token 不丢。providers 的 fetchDailyRecords
+    /// 在这里只为**副作用**:把新增/变更文件解析进缓存(命中 mtime/size 则跳过)。
+    ///
+    /// ⚠️ 代价:`file-cache.json` 升为承载历史真相的关键文件,损坏/删除会丢失已删源文件的历史
+    /// (现存文件仍可重扫恢复)。后续建议加定期备份。
+    func refresh() async {
+        refreshGen += 1
+        let myGen = refreshGen
+        // 调试日志只在 DEBUG 构建保留;release .app(swift build -c release)编译掉,避免污染系统日志
+        let log: (String) -> Void = { msg in
+            #if DEBUG
+            fputs("[\(Date())] [refresh gen=\(myGen)] \(msg)\n", stderr)
+            #endif
+        }
+        log("called")
+        isRefreshing = true
+
+        let providers = ProviderRegistry.all
+        let providerIds = providers.map { $0.id }
+
+        // 1) 并发扫盘:解析新增/变更文件 → 存入 FileMtimeCache(副作用)。返回值仅 DEBUG 计时用。
+        await withTaskGroup(of: Void.self) { group in
+            for p in providers {
+                group.addTask {
+                    #if DEBUG
+                    let t0 = Date()
+                    let name = p.displayName
+                    let recs = (try? await p.fetchDailyRecords()) ?? []
+                    let dt = Date().timeIntervalSince(t0)
+                    fputs("[\(Date())] [refresh gen=\(myGen)]   '\(name)' done in \(String(format: "%.2fs", dt)), records=\(recs.count)\n", stderr)
+                    #else
+                    _ = try? await p.fetchDailyRecords()
+                    #endif
+                }
+            }
+        }
+
+        // 只有最新 generation 才 commit
+        guard myGen == refreshGen else {
+            log("discarded (stale)")
+            return
+        }
+
+        // 2) 第一阶段聚合(本地数据,秒回)。Cursor 此刻读的是已有 mirror(可能是旧值)。
+        await commitAggregation(providerIds: providerIds, log: log)
+        self.lastRefreshAt = Date()
+        self.isRefreshing = false
+        log("local done, total \(allStats.count) records")
+        triggerJustRefreshedFlash()
+
+        // 3) 第二阶段:Cursor 联网拉取(慢,~1.5s),不阻塞上面的 UI commit。
+        //    拉到新数据 → 让 Cursor 重新进 FileMtimeCache(mirror mtime 变了触发 cache miss)→ 二次聚合刷新那一行。
+        //    见 docs/cursor-refresh-latency.md 方案 B(渐进式刷新)。
+        await refreshCursorInBackground(myGen: myGen, providerIds: providerIds, log: log)
+    }
+
+    /// 从 FileMtimeCache 全量聚合并 commit 到 UI(持久账本语义)。
+    private func commitAggregation(providerIds: [String], log: (String) -> Void) async {
+        let allDaily = await FileMtimeCache.shared.allEntries().flatMap { $0.records }
+        let computed = DailyAggregator.aggregate(
+            allDailyRecords: allDaily,
+            providerIds: providerIds
+        )
+        self.allStats = computed
+        self.stats = computed.filter { $0.time == window.id }
+    }
+
+    /// 方案 B 第二阶段:Cursor 后台联网拉取,完成后二次聚合(仅当本次刷新仍是最新 generation)。
+    private func refreshCursorInBackground(myGen: Int, providerIds: [String], log: @escaping (String) -> Void) async {
+        guard let cursor = ProviderRegistry.all.first(where: { $0.id == "cursor" }) as? CursorProvider else { return }
+        let changed = await cursor.refreshFromNetwork()
+        guard myGen == refreshGen else { log("cursor bg discarded (stale)"); return }
+        guard changed else { log("cursor bg: no new data"); return }
+        // mirror 已更新 → 让 Cursor 重新解析进缓存 → 二次聚合
+        _ = try? await cursor.fetchDailyRecords()
+        guard myGen == refreshGen else { return }
+        await commitAggregation(providerIds: providerIds, log: log)
+        log("cursor bg: updated")
+    }
+
+    /// 切窗口：纯走缓存，0ms
+    func changeWindow(_ newWindow: TimeWindow) {
+        guard newWindow != window else { return }
+        window = newWindow
+        self.stats = allStats.filter { $0.time == newWindow.id }
+    }
+
+    private func triggerJustRefreshedFlash() {
+        justRefreshedTask?.cancel()
+        justRefreshed = true
+        justRefreshedTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await MainActor.run {
+                guard !Task.isCancelled else { return }
+                self?.justRefreshed = false
+            }
+        }
+    }
+}
