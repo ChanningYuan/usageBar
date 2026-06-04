@@ -73,9 +73,7 @@ usageBar 会读取你本地 AI 工具的会话数据。如果你不放心运行�
 ## 反馈 & 支持
 
 - 有 bug、想法或想要的功能，欢迎提 [Issue](../../issues)。
-- 如果 usageBar 帮到了你，可以请我喝杯咖啡 ☕
-
-<img src="assets/coffee.png" alt="请我喝杯咖啡" width="220">
+- 如果 usageBar 帮到了你，**点个 Star ⭐ 就是最好的支持**。
 
 ## License
 
