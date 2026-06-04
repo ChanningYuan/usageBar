@@ -8,14 +8,14 @@ set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"           # .../usageBar/app
 USAGEBAR_ROOT="$(cd "$PROJECT_DIR/.." && pwd)"            # .../usageBar
-APP_ZIP="$PROJECT_DIR/dist/usageBar.zip"
+APP_DIR="$PROJECT_DIR/dist/usageBar.app"
 SKILL_DIR="$USAGEBAR_ROOT/install-usagebar"
 SKILL_ZIP="$USAGEBAR_ROOT/install-usagebar.zip"
 
-# 1. 检查 app zip 是否存在
-if [ ! -f "$APP_ZIP" ]; then
-  echo "❌ 找不到 $APP_ZIP"
-  echo "   请先跑 ./Scripts/build-app.sh 生成 .app 安装包"
+# 1. 检查 .app 是否存在
+if [ ! -d "$APP_DIR" ]; then
+  echo "❌ 找不到 $APP_DIR"
+  echo "   请先跑 ./Scripts/build-app.sh 生成 .app"
   exit 1
 fi
 
@@ -31,9 +31,10 @@ if [ ! -f "$SKILL_DIR/SKILL.md" ]; then
   exit 1
 fi
 
-# 3. 同步最新 usageBar.zip 到 skill 目录
-echo "→ 同步 usageBar.zip 到 skill 目录..."
-cp "$APP_ZIP" "$SKILL_DIR/usageBar.zip"
+# 3. 从最新 .app 生成 skill 用的 usageBar.tar.gz（install.sh 解压的就是它）
+echo "→ 生成 usageBar.tar.gz 到 skill 目录..."
+tar -czf "$SKILL_DIR/usageBar.tar.gz" -C "$PROJECT_DIR/dist" usageBar.app
+rm -f "$SKILL_DIR/usageBar.zip"   # 清掉历史遗留冗余 zip
 
 # 4. 打包 skill 目录
 echo "→ 打包 install-usagebar.zip..."

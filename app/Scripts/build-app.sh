@@ -39,10 +39,14 @@ cd "$DIST_DIR"
 zip -r -q usageBar.zip usageBar.app
 
 # 自动同步到 install-usagebar skill（如果存在）
-SKILL_ZIP="$PROJECT_DIR/../install-usagebar/usageBar.zip"
-if [ -d "$PROJECT_DIR/../install-usagebar" ]; then
-  cp usageBar.zip "$SKILL_ZIP"
-  echo "→ 同步到 skill 包: $(cd "$(dirname "$SKILL_ZIP")" && pwd)/usageBar.zip"
+SKILL_DIR_PATH="$PROJECT_DIR/../install-usagebar"
+if [ -d "$SKILL_DIR_PATH" ]; then
+  # ⚠️ skill 的 install.sh 解压的是 usageBar.tar.gz（不是 .zip）——必须从最新 .app
+  # 重新生成它，否则 AI 安装会装到旧版（曾出现 .zip 刷新了但 .tar.gz 没刷新的脱节 bug）
+  echo "→ 生成 skill 安装包 usageBar.tar.gz..."
+  tar -czf "$SKILL_DIR_PATH/usageBar.tar.gz" -C "$DIST_DIR" usageBar.app
+  # 清掉历史遗留的冗余 usageBar.zip（skill 不用它，留着会造成版本错乱）
+  rm -f "$SKILL_DIR_PATH/usageBar.zip"
 
   # 顺手重新打 install-usagebar.zip（顶层分发包）
   SKILL_PARENT="$PROJECT_DIR/.."

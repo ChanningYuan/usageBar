@@ -2,7 +2,7 @@
 
 > macOS 菜单栏工具，聚合显示多个 AI 编程工具（Claude Code / Codex / Qoder / 悟空 等）的 token 用量，全本地直读、零配置。
 
-**Swift 6 · macOS 14+**
+**Swift 6 · macOS 14+ · Apple Silicon**
 
 在 macOS 状态栏一眼看到你今天 / 近 7 天 / 近 30 天 / 累计在各个 AI 编程工具上烧了多少 token。除 Cursor 外，所有数据都从各工具落在本地的会话记录（jsonl / SQLite）直接读取，**不联网、不抓包、装上即用**。
 
@@ -38,10 +38,16 @@
 
 ### 给人类：下载即用
 
+> 仅支持 **Apple Silicon（M1/M2/M3/M4）**，暂无 Intel 版本。
+
 1. 到 [Releases](../../releases) 下载 `usageBar.zip`
 2. 解压得到 `usageBar.app`，拖进 `/Applications`，双击运行
 
-> ⚠️ 当前为**未签名**版本，首次打开 macOS Gatekeeper 会拦。**右键点 App → 打开** 即可放行；或在终端跑一次 `xattr -d com.apple.quarantine /Applications/usageBar.app`。后续计划做 Developer ID 签名 + 公证，免去这一步。
+> ⚠️ 当前为**未签名**版本，首次打开会被 Gatekeeper 拦。放行方式（二选一）：
+> - **macOS 15 (Sequoia) 及以上**：双击被拦后，打开 **系统设置 → 隐私与安全性 → 拉到底 → 点「仍要打开」**，再确认一次即可。
+> - **终端一行（任意版本通用）**：`xattr -d com.apple.quarantine /Applications/usageBar.app`，之后正常双击。
+>
+> （macOS 14 也可右键点 App → 「打开」放行。）后续做 Developer ID 签名 + 公证后，这一步会免掉。
 
 ### 给 AI Agent：让它帮你装
 
