@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import usageBarCore
 import usageBarProviders
@@ -233,6 +234,13 @@ struct UsageRootView: View {
     @ObservedObject var viewModel: UsageViewModel
     @ObservedObject var settings: ProviderVisibilitySettings = .shared
 
+    /// GitHub mark(模板图,跟随明暗主题色),给 footer 的"去 GitHub"入口用
+    private static let githubIcon: NSImage? = {
+        guard let img = BundleIconLoader.load(name: "github", ext: "svg") else { return nil }
+        img.isTemplate = true
+        return img
+    }()
+
     /// 按行数动态算 popover 内容区高度,空状态(0 行)给个最小占位
     /// 26pt 行高 + 5pt 间距,加 16pt 上下 padding。header/footer 各约 28pt。
     private var contentHeight: CGFloat {
@@ -333,6 +341,27 @@ struct UsageRootView: View {
                 .foregroundStyle(.secondary)
 
             Spacer()
+
+            // GitHub 按钮 → 打开仓库(低调常驻入口,想点 Star 的人随时点)
+            Button(action: {
+                if let url = URL(string: "https://github.com/ChanningYuan/usageBar") {
+                    NSWorkspace.shared.open(url)
+                }
+            }) {
+                Group {
+                    if let img = Self.githubIcon {
+                        Image(nsImage: img)
+                            .renderingMode(.template)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                    } else {
+                        Image(systemName: "star")
+                    }
+                }
+                .frame(width: 12, height: 12)
+            }
+            .buttonStyle(.borderless)
+            .help("在 GitHub 上点个 Star ⭐")
 
             // 齿轮按钮 → Settings 窗口(跟右键菜单 ⌘, 入口等价,popover 内快捷入口)
             Button(action: {

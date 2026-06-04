@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import usageBarCore
 import usageBarProviders
@@ -13,6 +14,13 @@ struct SettingsView: View {
     private let familyDisplayName: [String: String] = [
         "claude": "Claude Code",
     ]
+
+    /// GitHub mark(模板图,跟随主题/链接色)
+    private static let githubIcon: NSImage? = {
+        guard let img = BundleIconLoader.load(name: "github", ext: "svg") else { return nil }
+        img.isTemplate = true
+        return img
+    }()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -56,6 +64,25 @@ struct SettingsView: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             Spacer()
+            Button(action: {
+                if let url = URL(string: "https://github.com/ChanningYuan/usageBar") {
+                    NSWorkspace.shared.open(url)
+                }
+            }) {
+                HStack(spacing: 4) {
+                    if let img = Self.githubIcon {
+                        Image(nsImage: img)
+                            .renderingMode(.template)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 11, height: 11)
+                    }
+                    Text("在 GitHub 点个 Star")
+                }
+                .font(.system(size: 10))
+            }
+            .buttonStyle(.link)
+            .help("在 GitHub 上点个 Star ⭐")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
