@@ -35,7 +35,7 @@ public enum UsageBarProviders {
             CodexProvider(),
             WukongProvider(),
             WorkBuddyProvider(),
-            CursorProvider(),  // ⚠️ 唯一联网 provider，勾选即联网拉取
+            CursorProvider(),  // ⚠️ 唯一联网 provider（本地无真实 token，必须联网拉取）
             OpenClawProvider(),
             HermesProvider(),
             // TODO: TongyiProvider(IndexedDB,无法解析)

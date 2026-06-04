@@ -4,7 +4,7 @@
 
 **Swift 6 · macOS 14+**
 
-在 macOS 状态栏一眼看到你今天 / 近 7 天 / 近 30 天 / 累计在各个 AI 编程工具上烧了多少 token。所有数据都从各工具落在本地的会话记录（jsonl / SQLite）直接读取，**不联网、不抓包、装上即用**（Cursor 除外，见下）。
+在 macOS 状态栏一眼看到你今天 / 近 7 天 / 近 30 天 / 累计在各个 AI 编程工具上烧了多少 token。除 Cursor 外，所有数据都从各工具落在本地的会话记录（jsonl / SQLite）直接读取，**不联网、不抓包、装上即用**。
 
 ## 支持的 Provider
 
@@ -18,7 +18,7 @@
 | Codex（OpenAI） | rollout jsonl | **累计值**，跨窗口做差分 |
 | 悟空 | 本地 jsonl | flat 结构，毫秒时间戳 |
 | WorkBuddy | `~/.workbuddy/projects/**/*.jsonl` | Claude Code 风格会话记录 |
-| Cursor | Cursor 服务端 API | ⚠️ **唯一联网** provider，勾选才会联网拉取 |
+| Cursor | Cursor 服务端 API | ⚠️ **唯一联网** provider（本地无真实 token，必须联网拉取） |
 | OpenClaw | 本地（mtime 增量） | 社区个人 AI Agent |
 | Hermes | `~/.hermes/state.db` | Hermes Agent（NousResearch），SQLite |
 
@@ -26,33 +26,28 @@
 
 状态栏右键 → 偏好设置，可自定义每个 provider 的可见性。
 
+## 技术亮点
+
+- **Codex 跨窗口差分**：Codex 的 rollout 是 session 累计值，按相邻事件差分归到日期桶，避免跨天 session 被重复计算（否则会虚报十几倍）。
+- **持久账本**：会话文件被删 / 轮转后，其历史 token 仍计入累计——消耗发生过就保留，不会因源文件消失而丢失。
+- **mtime/size 增量缓存**：只重读发生变化的文件，刷新快、CPU 占用低。
+
 ## 安装
 
-1. 到 [Releases](../../releases) 下载最新的 `install-usagebar.zip`
+### 给人类：下载即用
+
+1. 到 [Releases](../../releases) 下载 `usageBar.zip`
+2. 解压得到 `usageBar.app`，拖进 `/Applications`，双击运行
+
+> ⚠️ 当前为**未签名**版本，首次打开 macOS Gatekeeper 会拦。**右键点 App → 打开** 即可放行；或在终端跑一次 `xattr -d com.apple.quarantine /Applications/usageBar.app`。后续计划做 Developer ID 签名 + 公证，免去这一步。
+
+### 给 AI Agent：让它帮你装
+
+1. 到 [Releases](../../releases) 下载 `install-usagebar.zip`
 2. 解压到 AI Agent 的 skill 目录，例如 Claude Code：`~/.claude/skills/install-usagebar/`
 3. 跟 AI 说"装一下 usageBar"，它会自动跑 `scripts/install.sh`（解压 .app → 清 Gatekeeper 隔离 → 拷到 `/Applications` → 启动）
 
 诊断 / 卸载等更多用法见 [`install-usagebar/README.md`](install-usagebar/README.md)。
-
-> ⚠️ 当前为**未签名**版本，首次打开 macOS 会拦。安装脚本已自动 `xattr -d com.apple.quarantine` 处理；若手动安装，需自行执行一次。后续计划做 Developer ID 签名 + 公证。
-
-## 从源码编译
-
-```bash
-cd app
-swift build              # 编译
-swift run usageBar       # 运行
-```
-
-打包成 `.app` bundle 见 [`app/Scripts/build-app.sh`](app/Scripts/build-app.sh)，更多调试说明见 [`app/SETUP.md`](app/SETUP.md)。
-
-### 加一个新 Provider（5 步）
-
-1. 在 `app/Sources/usageBarProviders/` 新建 `XxxProvider.swift`
-2. 实现 `UsageProvider` 协议（`WukongProvider.swift` 是最简单的 flat jsonl 模板）
-3. 实现 `fetchDailyRecords()`
-4. 在 `ProvidersBootstrap.swift` 的 `registerAll()` 里加一行
-5. `swift run usageBar` 验证
 
 ## 工程结构
 
@@ -68,6 +63,17 @@ usageBar/
 ├── icon/                      App 图标资源
 └── install-usagebar/          安装 / 诊断 / 卸载 skill
 ```
+
+## 自己构建 / 审计代码
+
+usageBar 会读取你本地 AI 工具的会话数据。如果你不放心运行未签名的二进制，可以自己 clone 下来构建、审计源码：`cd app && swift build`，详见 [`app/SETUP.md`](app/SETUP.md)。
+
+## 反馈 & 支持
+
+- 有 bug、想法或想要的功能，欢迎提 [Issue](../../issues)。
+- 如果 usageBar 帮到了你，可以请我喝杯咖啡 ☕
+
+<img src="assets/coffee.png" alt="请我喝杯咖啡" width="220">
 
 ## License
 
