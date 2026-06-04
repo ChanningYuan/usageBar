@@ -6,6 +6,8 @@
 
 在 macOS 状态栏一眼看到你今天 / 近 7 天 / 近 30 天 / 累计在各个 AI 编程工具上烧了多少 token。除 Cursor 外，所有数据都从各工具落在本地的会话记录（jsonl / SQLite）直接读取，**不联网、不抓包、装上即用**。
 
+> 🥇 **GitHub 上唯一一个把 Qoder 全家桶（CLI / Work / IDE）token 全部打通可计量的项目。** 三条产品线各自落盘的格式完全不同（npm transcript jsonl / 应用日志 mirror / SQLite），usageBar 把它们统一读出来，一个菜单栏就能看全。
+
 <img src="assets/screenshot.png" alt="usageBar 效果图" width="420">
 
 ## 支持的 Provider
@@ -14,9 +16,9 @@
 |---|---|---|
 | Claude Code（订阅） | `~/.claude/projects/**/*.jsonl` | 按 `message.id` 前缀 `msg_01` 识别 Anthropic 直连 |
 | Claude Code（API） | 同上 | `msg_vrtx_` / `msg_bdrk_` 前缀（Vertex / Bedrock 代理） |
-| Qoder（CLI） | `~/.qoder/projects/**/*.jsonl` | npm `qodercli` 1.0.x+ transcript，完整 4 列 |
-| Qoder（Work） | `~/Library/Application Support/QoderWork/logs/<ts>/main.log` | 增量 mirror 到本地 jsonl，精确 input/output 两列 |
-| Qoder（IDE） | `~/Library/Application Support/Qoder/SharedClientCache/.../local.db` | 直读 SQLite `chat_message.token_info` |
+| **Qoder（CLI）** 🥇 | `~/.qoder/projects/**/*.jsonl` | npm `qodercli` 1.0.x+ transcript，完整 4 列 |
+| **Qoder（Work）** 🥇 | `~/Library/Application Support/QoderWork/logs/<ts>/main.log` | 增量 mirror 到本地 jsonl，精确 input/output 两列 |
+| **Qoder（IDE）** 🥇 | `~/Library/Application Support/Qoder/SharedClientCache/.../local.db` | 直读 SQLite `chat_message.token_info` |
 | Codex（OpenAI） | rollout jsonl | **累计值**，跨窗口做差分 |
 | 悟空 | 本地 jsonl | flat 结构，毫秒时间戳 |
 | WorkBuddy | `~/.workbuddy/projects/**/*.jsonl` | Claude Code 风格会话记录 |
@@ -24,6 +26,8 @@
 | OpenClaw | 本地（mtime 增量） | 社区个人 AI Agent |
 | Hermes | `~/.hermes/state.db` | Hermes Agent（NousResearch），SQLite |
 
+> 🥇 标记的三行 = **Qoder 全家桶**：CLI、Work、IDE 三条线全部覆盖，目前 GitHub 上仅此一家做到全部可计量。
+>
 > 各工具的 "token" 口径不完全一致（有的含 cache 拆分、有的只有 input/output），所以条形图长度是**量级参考**，不是严格同口径对比。
 
 状态栏右键 → 偏好设置，可自定义每个 provider 的可见性。
