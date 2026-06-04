@@ -6,6 +6,8 @@
 
 在 macOS 状态栏一眼看到你今天 / 近 7 天 / 近 30 天 / 累计在各个 AI 编程工具上烧了多少 token。除 Cursor 外，所有数据都从各工具落在本地的会话记录（jsonl / SQLite）直接读取，**不联网、不抓包、装上即用**。
 
+<img src="assets/screenshot.png" alt="usageBar 效果图" width="420">
+
 ## 支持的 Provider
 
 | Provider | 数据源 | 说明 |
