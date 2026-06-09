@@ -71,6 +71,22 @@ echo "→ 打 zip..."
 cd "$DIST_DIR"
 zip -r -q usageBar.zip usageBar.app
 
+echo "→ 打 DMG (拖拽安装界面)..."
+DMG_STAGE="$DIST_DIR/dmg-stage"
+rm -rf "$DMG_STAGE"; mkdir -p "$DMG_STAGE"
+cp -R "$APP_DIR" "$DMG_STAGE/usageBar.app"
+ln -s /Applications "$DMG_STAGE/Applications"   # 拖进去就装
+rm -f "$DIST_DIR/usageBar.dmg"
+hdiutil create -volname "usageBar" -srcfolder "$DMG_STAGE" -ov -format UDZO "$DIST_DIR/usageBar.dmg" >/dev/null
+rm -rf "$DMG_STAGE"
+if [ "$DO_SIGN" = "1" ]; then
+  echo "→ 签名 + 公证 DMG..."
+  codesign --force --timestamp --sign "$DEV_ID" "$DIST_DIR/usageBar.dmg"
+  xcrun notarytool submit "$DIST_DIR/usageBar.dmg" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple "$DIST_DIR/usageBar.dmg"
+  echo "✓ DMG 已签名 + 公证 + 装订"
+fi
+
 # 自动同步到 install-usagebar skill（如果存在）
 SKILL_DIR_PATH="$PROJECT_DIR/../install-usagebar"
 if [ -d "$SKILL_DIR_PATH" ]; then
@@ -94,7 +110,8 @@ echo "✅ 完成"
 echo ""
 echo "产物："
 echo "  $APP_DIR"
-echo "  $DIST_DIR/usageBar.zip                ← 单独 .app zip"
+echo "  $DIST_DIR/usageBar.dmg                ← DMG 拖拽安装包（给人类，推荐）"
+echo "  $DIST_DIR/usageBar.zip                ← 单独 .app zip（备选）"
 if [ -d "$PROJECT_DIR/../install-usagebar" ]; then
   echo "  $(cd "$PROJECT_DIR/.." && pwd)/install-usagebar.zip   ← skill 完整包（发同事用）"
 fi

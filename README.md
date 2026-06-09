@@ -44,10 +44,11 @@
 
 > 仅支持 **Apple Silicon（M1/M2/M3/M4）**，暂无 Intel 版本。
 
-1. 到 [Releases](../../releases) 下载 `usageBar.zip`
-2. 解压得到 `usageBar.app`，拖进 `/Applications`，**双击运行**
+1. 到 [Releases](../../releases) 下载 **`usageBar.dmg`**
+2. 双击打开，把 `usageBar.app` **拖进 Applications 文件夹**
 
 > ✅ 已做 Apple **Developer ID 签名 + 公证**，双击即开，无需任何额外放行步骤。
+> （也提供 `usageBar.zip`：解压出 `.app` 拖进 `/Applications`，效果相同。）
 
 ### 给 AI Agent：让它帮你装
 
