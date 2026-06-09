@@ -10,6 +10,16 @@ DIST_DIR="$PROJECT_DIR/dist"
 APP_DIR="$DIST_DIR/usageBar.app"
 BUILD_DIR="$PROJECT_DIR/.build/release"
 
+# ── 签名 / 公证配置（可用环境变量覆盖）──
+# 只有当本机存在对应 Developer ID 证书、且未显式 SIGN=0 时才签名+公证；
+# 否则自动跳过，产出未签名版本（方便没有证书的人 clone 后也能 build）。
+DEV_ID="${DEV_ID:-Developer ID Application: Channing Yuan (9RCMA8NVFX)}"
+NOTARY_PROFILE="${NOTARY_PROFILE:-usagebar-notary}"
+DO_SIGN=0
+if [ "${SIGN:-1}" != "0" ] && security find-identity -v -p codesigning 2>/dev/null | grep -qF "$DEV_ID"; then
+  DO_SIGN=1
+fi
+
 echo "→ 编译 release 模式..."
 cd "$PROJECT_DIR"
 swift build -c release
@@ -33,6 +43,29 @@ cp "$PROJECT_DIR/../icon/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns
 
 echo "→ 写 PkgInfo..."
 printf "APPL????" > "$APP_DIR/Contents/PkgInfo"
+
+if [ "$DO_SIGN" = "1" ]; then
+  echo "→ 代码签名 (Developer ID + Hardened Runtime)..."
+  # 先签内层资源 bundle，再签外层 app（inside-out，公证要求所有嵌套 bundle 都签）
+  codesign --force --options runtime --timestamp \
+    --sign "$DEV_ID" "$APP_DIR/Contents/Resources/usageBar_usageBar.bundle"
+  codesign --force --options runtime --timestamp \
+    --sign "$DEV_ID" "$APP_DIR"
+  codesign --verify --strict --verbose=1 "$APP_DIR"
+
+  echo "→ 提交公证 (notarytool，通常几分钟)..."
+  ditto -c -k --keepParent "$APP_DIR" "$DIST_DIR/usageBar-notarize.zip"
+  xcrun notarytool submit "$DIST_DIR/usageBar-notarize.zip" \
+    --keychain-profile "$NOTARY_PROFILE" --wait
+  rm -f "$DIST_DIR/usageBar-notarize.zip"
+
+  echo "→ 装订公证票据 (stapler)..."
+  xcrun stapler staple "$APP_DIR"
+  xcrun stapler validate "$APP_DIR"
+  echo "✓ 已签名 + 公证 + 装订"
+else
+  echo "⚠️  跳过签名+公证（无对应 Developer ID 证书 或 SIGN=0），产出未签名版本"
+fi
 
 echo "→ 打 zip..."
 cd "$DIST_DIR"

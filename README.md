@@ -45,13 +45,9 @@
 > 仅支持 **Apple Silicon（M1/M2/M3/M4）**，暂无 Intel 版本。
 
 1. 到 [Releases](../../releases) 下载 `usageBar.zip`
-2. 解压得到 `usageBar.app`，拖进 `/Applications`，双击运行
+2. 解压得到 `usageBar.app`，拖进 `/Applications`，**双击运行**
 
-> ⚠️ 当前为**未签名**版本，首次打开会被 Gatekeeper 拦。放行方式（二选一）：
-> - **macOS 15 (Sequoia) 及以上**：双击被拦后，打开 **系统设置 → 隐私与安全性 → 拉到底 → 点「仍要打开」**，再确认一次即可。
-> - **终端一行（任意版本通用）**：`xattr -d com.apple.quarantine /Applications/usageBar.app`，之后正常双击。
->
-> （macOS 14 也可右键点 App → 「打开」放行。）后续做 Developer ID 签名 + 公证后，这一步会免掉。
+> ✅ 已做 Apple **Developer ID 签名 + 公证**，双击即开，无需任何额外放行步骤。
 
 ### 给 AI Agent：让它帮你装
 
@@ -78,7 +74,7 @@ usageBar/
 
 ## 自己构建 / 审计代码
 
-usageBar 会读取你本地 AI 工具的会话数据。如果你不放心运行未签名的二进制，可以自己 clone 下来构建、审计源码：`cd app && swift build`，详见 [`app/SETUP.md`](app/SETUP.md)。
+usageBar 会读取你本地 AI 工具的会话数据。虽然发布版已做 Developer ID 签名 + 公证，但如果你想彻底放心，可以自己 clone 下来构建、审计源码：`cd app && swift build`，详见 [`app/SETUP.md`](app/SETUP.md)。
 
 ## 反馈 & 支持
 
