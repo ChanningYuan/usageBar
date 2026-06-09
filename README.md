@@ -58,6 +58,8 @@
 
 诊断 / 卸载等更多用法见 [`install-usagebar/README.md`](install-usagebar/README.md)。
 
+> 🔄 **自动更新**：0.2.0 起内置 Sparkle——装好后会自动检查新版并提示一键升级，右键菜单也有"检查更新…"。
+
 ## 工程结构
 
 ```

@@ -15,9 +15,9 @@
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleVersion</key>
-    <string>0.1.0</string>
+    <string>0.2.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>0.2.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
@@ -26,6 +26,13 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>
+    <true/>
+    <!-- Sparkle 自动更新 -->
+    <key>SUFeedURL</key>
+    <string>https://raw.githubusercontent.com/ChanningYuan/usageBar/main/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>j+XhxVg+ZDMl63neHl7Wk0vcCdfMInGT4YAlcni9JHQ=</string>
+    <key>SUEnableAutomaticChecks</key>
     <true/>
 </dict>
 </plist>

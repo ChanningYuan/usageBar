@@ -12,6 +12,10 @@ let package = Package(
         .library(name: "usageBarCore", targets: ["usageBarCore"]),
         .library(name: "usageBarProviders", targets: ["usageBarProviders"]),
     ],
+    dependencies: [
+        // 自动更新框架（store 外分发的标准方案）
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+    ],
     targets: [
         // 协议层：UsageProvider 协议、数据模型、Pricing
         .target(
@@ -37,7 +41,11 @@ let package = Package(
         // —— 这是 SwiftPM 跑 macOS GUI App 的标准做法（不允许 Info.plist 作 resource）
         .executableTarget(
             name: "usageBar",
-            dependencies: ["usageBarCore", "usageBarProviders"],
+            dependencies: [
+                "usageBarCore",
+                "usageBarProviders",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
             path: "Sources/usageBar",
             exclude: ["Info.plist"],
             resources: [

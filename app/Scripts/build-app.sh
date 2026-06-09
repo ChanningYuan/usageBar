@@ -41,12 +41,29 @@ cp "$PROJECT_DIR/Sources/usageBar/Info.plist" "$APP_DIR/Contents/Info.plist"
 echo "→ 复制 AppIcon.icns..."
 cp "$PROJECT_DIR/../icon/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 
+echo "→ 嵌入 Sparkle.framework (自动更新)..."
+mkdir -p "$APP_DIR/Contents/Frameworks"
+ditto "$BUILD_DIR/Sparkle.framework" "$APP_DIR/Contents/Frameworks/Sparkle.framework"
+# 让主程序运行时能在 .app/Contents/Frameworks 找到 Sparkle（rpath 必须在签名前改好）
+install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/usageBar" 2>/dev/null || true
+
 echo "→ 写 PkgInfo..."
 printf "APPL????" > "$APP_DIR/Contents/PkgInfo"
 
 if [ "$DO_SIGN" = "1" ]; then
   echo "→ 代码签名 (Developer ID + Hardened Runtime)..."
-  # 先签内层资源 bundle，再签外层 app（inside-out，公证要求所有嵌套 bundle 都签）
+  # 先签 Sparkle.framework 内部嵌套代码(inside-out)：XPC → Updater.app → Autoupdate → framework
+  SPK="$APP_DIR/Contents/Frameworks/Sparkle.framework/Versions/B"
+  for nested in \
+    "$SPK/XPCServices/Downloader.xpc" \
+    "$SPK/XPCServices/Installer.xpc" \
+    "$SPK/Updater.app" \
+    "$SPK/Autoupdate"; do
+    codesign --force --options runtime --timestamp --sign "$DEV_ID" "$nested"
+  done
+  codesign --force --options runtime --timestamp \
+    --sign "$DEV_ID" "$APP_DIR/Contents/Frameworks/Sparkle.framework"
+  # 再签内层资源 bundle，最后签外层 app（公证要求所有嵌套 bundle 都签）
   codesign --force --options runtime --timestamp \
     --sign "$DEV_ID" "$APP_DIR/Contents/Resources/usageBar_usageBar.bundle"
   codesign --force --options runtime --timestamp \
@@ -85,6 +102,26 @@ if [ "$DO_SIGN" = "1" ]; then
   xcrun notarytool submit "$DIST_DIR/usageBar.dmg" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple "$DIST_DIR/usageBar.dmg"
   echo "✓ DMG 已签名 + 公证 + 装订"
+fi
+
+# 生成 appcast.xml（Sparkle 自动更新源：用 EdDSA 私钥给 usageBar.zip 签名 + 写版本/下载地址）
+if [ "$DO_SIGN" = "1" ]; then
+  echo "→ 生成 appcast.xml..."
+  GEN_APPCAST=$(find "$PROJECT_DIR/.build" -name generate_appcast -path '*artifacts*' 2>/dev/null | head -1)
+  if [ -n "$GEN_APPCAST" ] && [ -x "$GEN_APPCAST" ]; then
+    APPCAST_STAGE="$DIST_DIR/appcast-stage"
+    rm -rf "$APPCAST_STAGE"; mkdir -p "$APPCAST_STAGE"
+    cp "$DIST_DIR/usageBar.zip" "$APPCAST_STAGE/"
+    # 下载地址用 latest/download —— GitHub 永远重定向到最新 release 的同名资产,免得每版改 URL
+    "$GEN_APPCAST" \
+      --download-url-prefix "https://github.com/ChanningYuan/usageBar/releases/latest/download/" \
+      "$APPCAST_STAGE"
+    cp "$APPCAST_STAGE/appcast.xml" "$PROJECT_DIR/../appcast.xml"
+    rm -rf "$APPCAST_STAGE"
+    echo "✓ appcast.xml 已生成: $(cd "$PROJECT_DIR/.." && pwd)/appcast.xml"
+  else
+    echo "⚠️  找不到 generate_appcast,跳过 appcast 生成"
+  fi
 fi
 
 # 自动同步到 install-usagebar skill（如果存在）

@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Sparkle
 import SwiftUI
 import usageBarCore
 
@@ -8,6 +9,9 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     let viewModel: UsageViewModel
+
+    /// Sparkle 自动更新控制器（startingUpdater:true 即按 Info.plist 设置后台检查）
+    private let updaterController: SPUStandardUpdaterController
 
     private var refreshTimer: Timer?
     private var clickMonitor: Any?
@@ -23,6 +27,8 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         self.popover = NSPopover()
         self.viewModel = UsageViewModel()
+        self.updaterController = SPUStandardUpdaterController(
+            startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
         super.init()
 
         configureStatusItem()
@@ -114,10 +120,17 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         rightClickMenu.addItem(NSMenuItem.separator())
         let prefs = NSMenuItem(title: "偏好设置…", action: #selector(openPreferencesAction), keyEquivalent: ",")
         rightClickMenu.addItem(prefs)
+        let checkUpdate = NSMenuItem(
+            title: "检查更新…",
+            action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+            keyEquivalent: "")
+        rightClickMenu.addItem(checkUpdate)
         rightClickMenu.addItem(NSMenuItem.separator())
         let quit = NSMenuItem(title: "退出", action: #selector(quitAction), keyEquivalent: "q")
         rightClickMenu.addItem(quit)
         rightClickMenu.items.forEach { $0.target = self }
+        // "检查更新"交给 Sparkle 自己处理,覆盖上面统一设的 target
+        checkUpdate.target = updaterController
     }
 
     private func installRightClickMonitor() {

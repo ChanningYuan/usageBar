@@ -11,6 +11,8 @@
 !/assets/
 !/README.md
 !/LICENSE
+!/CHANGELOG.md
+!/appcast.xml
 !/.gitignore
 
 # ── 放开目录内仍需忽略的构建产物 ──

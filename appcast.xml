@@ -1,0 +1,15 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>usageBar</title>
+        <item>
+            <title>0.2.0</title>
+            <pubDate>Wed, 10 Jun 2026 01:00:40 +0800</pubDate>
+            <sparkle:version>0.2.0</sparkle:version>
+            <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="3625878" type="application/octet-stream" sparkle:edSignature="fGvFga98fQYTXGFT3+tid95qeohid5NQhnYJ37A6wC7PaBb0UeTYlnqALjW5a3nJMsnNVXJU1mcrnB6fD9FZAQ=="/>
+        </item>
+    </channel>
+</rss>
