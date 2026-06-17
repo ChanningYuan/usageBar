@@ -4,29 +4,20 @@
         <title>usageBar</title>
         <item>
             <description><![CDATA[
-<h3>usageBar 0.3.0</h3>
-<p><b>⚠️ 重要变更（升级后你的数字会变化）</b></p>
-<ul>
-<li><b>修正 Claude token 重复计数</b>：同一条 API 响应在流式落盘时会被写多行、usage 完全相同，旧版逐行累加导致 Claude（订阅 / API）数字虚高约 2 倍。现按 `message.id` 去重，只计一次。</li>
-</ul>
-<p>  <b>升级后你的 Claude 数字会一次性下降约一半——这是修正虚高、不是数据丢失</b>，历史趋势图会出现一个明显台阶。</p>
-<p><b>新增</b></p>
-<ul>
-<li><b>Claude Cowork 用量统计</b>：扫描桌面端 Claude（`~/.claude/local-agent-mode-sessions/`）的 transcript，归入 Claude 组。</li>
-<li><b>自动更新弹窗显示更新说明</b>：点&quot;检查更新…&quot;时直接看到这一版改了什么（自动取自本 CHANGELOG）。</li>
-</ul>
+<h3>usageBar 0.3.1</h3>
 <p><b>变更</b></p>
 <ul>
-<li>偏好设置里开关的开启态改为系统蓝，明暗主题下都清晰。</li>
+<li>自动更新弹窗等 Sparkle 界面现在<b>跟随系统语言</b>显示中文（之前固定英文）。</li>
+<li>偏好设置标题栏显示<b>当前版本号</b>。</li>
 </ul>
             ]]></description>
-            <title>0.3.0</title>
-            <pubDate>Wed, 17 Jun 2026 14:44:40 +0800</pubDate>
-            <sparkle:version>0.3.0</sparkle:version>
-            <sparkle:shortVersionString>0.3.0</sparkle:shortVersionString>
+            <title>0.3.1</title>
+            <pubDate>Wed, 17 Jun 2026 15:01:39 +0800</pubDate>
+            <sparkle:version>0.3.1</sparkle:version>
+            <sparkle:shortVersionString>0.3.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1576962" type="application/octet-stream" sparkle:edSignature="gpfsTjSevCnfxmBUipikxghGRJv0F5PCkp8CK4geSHSZLMSOJ3kPxsrbQCWgvBXJmEfDp4W1v6bUjPmr/hFOAw=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1580053" type="application/octet-stream" sparkle:edSignature="EnYgLxHtKa+U3sXKKbrW110Jsxiw78zB+BQwS76ANMjzAqVbr86hkZ0iAfE5c+j/soD6b/mh9+rL2/cnCc3HAw=="/>
         </item>
     </channel>
 </rss>

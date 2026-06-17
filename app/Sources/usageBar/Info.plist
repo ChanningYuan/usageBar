@@ -15,9 +15,9 @@
     <key>CFBundleIconName</key>
     <string>AppIcon</string>
     <key>CFBundleVersion</key>
-    <string>0.3.0</string>
+    <string>0.3.1</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.3.0</string>
+    <string>0.3.1</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
@@ -27,6 +27,14 @@
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <!-- 声明支持的本地化语言：让 Sparkle 等框架按系统语言显示自带的本地化 UI（中文/英文） -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>zh-Hans</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>zh-Hans</string>
+        <string>en</string>
+    </array>
     <!-- Sparkle 自动更新 -->
     <key>SUFeedURL</key>
     <string>https://raw.githubusercontent.com/ChanningYuan/usageBar/main/appcast.xml</string>

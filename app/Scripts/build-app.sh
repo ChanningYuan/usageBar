@@ -41,6 +41,13 @@ cp "$PROJECT_DIR/Sources/usageBar/Info.plist" "$APP_DIR/Contents/Info.plist"
 echo "→ 复制 AppIcon.icns..."
 cp "$PROJECT_DIR/../icon/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 
+echo "→ 建本地化 .lproj（让 Sparkle 等框架按系统语言显示中文/英文 UI）..."
+for loc in zh-Hans en; do
+  mkdir -p "$APP_DIR/Contents/Resources/$loc.lproj"
+  # 放个最小占位文件，确保 .lproj 被 NSBundle 识别 + 被 codesign 正确封装
+  : > "$APP_DIR/Contents/Resources/$loc.lproj/Localizable.strings"
+done
+
 echo "→ 嵌入 Sparkle.framework (自动更新)..."
 mkdir -p "$APP_DIR/Contents/Frameworks"
 ditto "$BUILD_DIR/Sparkle.framework" "$APP_DIR/Contents/Frameworks/Sparkle.framework"

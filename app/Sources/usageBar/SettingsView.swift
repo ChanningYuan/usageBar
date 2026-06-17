@@ -46,12 +46,19 @@ struct SettingsView: View {
 
     // MARK: - Header / Footer
 
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+    }
+
     private var header: some View {
         HStack(spacing: 6) {
             Image(systemName: "gearshape.fill")
                 .font(.system(size: 13, weight: .medium))
             Text("usageBar 偏好设置")
                 .font(.system(size: 13, weight: .semibold))
+            Text("v\(appVersion)")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
             Spacer()
         }
         .padding(.horizontal, 12)

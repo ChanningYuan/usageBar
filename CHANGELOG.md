@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.1] - 2026-06-17
+
+### 变更
+- 自动更新弹窗等 Sparkle 界面现在**跟随系统语言**显示中文（之前固定英文）。
+- 偏好设置标题栏显示**当前版本号**。
+
 ## [0.3.0] - 2026-06-17
 
 ### ⚠️ 重要变更（升级后你的数字会变化）
@@ -34,6 +40,7 @@
 - 全本地直读（jsonl / SQLite），零配置（Cursor 除外，需联网）。
 - 安装方式：人类下载 .app / AI Agent 走 install-usagebar skill 一句话装。
 
+[0.3.1]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.3.1
 [0.3.0]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.1.0
