@@ -86,6 +86,9 @@ final class UsageViewModel: ObservableObject {
 
         // 2) 第一阶段聚合(本地数据,秒回)。Cursor 此刻读的是已有 mirror(可能是旧值)。
         await commitAggregation(providerIds: providerIds, log: log)
+        // 首次运行智能默认：只保留有用量的 provider，零用量的自动隐藏（仅一次，不覆盖用户后续手动开关）。
+        let withUsage = Set(allStats.filter { $0.token > 0 }.map { $0.provider })
+        ProviderVisibilitySettings.shared.autoConfigureFirstRunIfNeeded(providerIdsWithUsage: withUsage)
         self.lastRefreshAt = Date()
         self.isRefreshing = false
         log("local done, total \(allStats.count) records")

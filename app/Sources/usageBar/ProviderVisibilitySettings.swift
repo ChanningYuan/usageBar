@@ -26,6 +26,7 @@ final class ProviderVisibilitySettings: ObservableObject {
 
     private enum Keys {
         static let disabledProviders = "usagebar.disabledProviders.v1"
+        static let didAutoConfigure = "usagebar.didAutoConfigureVisibility.v1"
     }
 
     private init() {
@@ -60,5 +61,21 @@ final class ProviderVisibilitySettings: ObservableObject {
         } else {
             disabledProviders.insert(id)
         }
+    }
+
+    /// 首次运行智能默认：第一次拉到数据后，把**零用量**的 provider 自动关掉，只留有用量的。
+    /// **只执行一次**（用 `didAutoConfigure` 标记），之后用户手动的开关不会被覆盖。
+    /// 调用方在每次 refresh 后调用即可，非首次是 no-op。
+    /// - Parameter providerIdsWithUsage: 本次聚合后 token > 0 的 provider id 集合。
+    func autoConfigureFirstRunIfNeeded(providerIdsWithUsage: Set<String>) {
+        guard !UserDefaults.standard.bool(forKey: Keys.didAutoConfigure) else { return }
+        // 还没拉到任何数据时（全 0）先不动，等有数据的那次 refresh 再配置，避免把所有人都关掉
+        guard !providerIdsWithUsage.isEmpty else { return }
+        var disabled = disabledProviders
+        for p in ProviderRegistry.all where !providerIdsWithUsage.contains(p.id) {
+            disabled.insert(p.id)
+        }
+        disabledProviders = disabled
+        UserDefaults.standard.set(true, forKey: Keys.didAutoConfigure)
     }
 }

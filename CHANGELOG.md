@@ -2,6 +2,14 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.2] - 2026-06-17
+
+### 新增
+- **首次运行智能默认**：第一次拉到数据后，只保留有用量的 provider，零用量的自动隐藏（仅一次，不覆盖你之后的手动开关）。新用户不再一打开就是一长串空行。
+
+### 变更
+- **DMG 安装窗口美化**：图标布局/窗口大小调整，更接近常规 app 的拖拽安装界面。
+
 ## [0.3.1] - 2026-06-17
 
 ### 变更
@@ -40,6 +48,7 @@
 - 全本地直读（jsonl / SQLite），零配置（Cursor 除外，需联网）。
 - 安装方式：人类下载 .app / AI Agent 走 install-usagebar skill 一句话装。
 
+[0.3.2]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.3.2
 [0.3.1]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.3.1
 [0.3.0]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.2.0

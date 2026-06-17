@@ -104,8 +104,36 @@ DMG_STAGE="$DIST_DIR/dmg-stage"
 rm -rf "$DMG_STAGE"; mkdir -p "$DMG_STAGE"
 cp -R "$APP_DIR" "$DMG_STAGE/usageBar.app"
 ln -s /Applications "$DMG_STAGE/Applications"   # 拖进去就装
-rm -f "$DIST_DIR/usageBar.dmg"
-hdiutil create -volname "usageBar" -srcfolder "$DMG_STAGE" -ov -format UDZO "$DIST_DIR/usageBar.dmg" >/dev/null
+rm -f "$DIST_DIR/usageBar.dmg" "$DIST_DIR/usageBar-rw.dmg"
+# 1) 先建可读写 DMG(留余量给 .DS_Store)
+hdiutil create -volname "usageBar" -srcfolder "$DMG_STAGE" -ov -format UDRW -size 40m "$DIST_DIR/usageBar-rw.dmg" >/dev/null
+# 2) 挂载 + AppleScript 摆窗口/图标(best-effort;失败只是不美化,不影响安装功能)
+hdiutil attach "$DIST_DIR/usageBar-rw.dmg" -readwrite -noverify -noautoopen >/dev/null
+osascript <<'APPLESCRIPT' 2>/dev/null || echo "  ⚠️ DMG 美化未生效(可能需在 系统设置→隐私与安全性→自动化 给终端授权控制 Finder);DMG 功能正常"
+tell application "Finder"
+  tell disk "usageBar"
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set the bounds of container window to {300, 200, 820, 540}
+    set theVO to the icon view options of container window
+    set arrangement of theVO to not arranged
+    set icon size of theVO to 104
+    set text size of theVO to 12
+    set position of item "usageBar.app" of container window to {140, 170}
+    set position of item "Applications" of container window to {380, 170}
+    update without registering applications
+    delay 1
+    close
+  end tell
+end tell
+APPLESCRIPT
+sync
+hdiutil detach "/Volumes/usageBar" >/dev/null 2>&1 || hdiutil detach "/Volumes/usageBar" -force >/dev/null 2>&1
+# 3) 转成压缩只读
+hdiutil convert "$DIST_DIR/usageBar-rw.dmg" -format UDZO -o "$DIST_DIR/usageBar.dmg" >/dev/null
+rm -f "$DIST_DIR/usageBar-rw.dmg"
 rm -rf "$DMG_STAGE"
 if [ "$DO_SIGN" = "1" ]; then
   echo "→ 签名 + 公证 DMG..."
