@@ -21,12 +21,12 @@
 </ul>
             ]]></description>
             <title>0.3.0</title>
-            <pubDate>Wed, 17 Jun 2026 14:27:28 +0800</pubDate>
+            <pubDate>Wed, 17 Jun 2026 14:44:40 +0800</pubDate>
             <sparkle:version>0.3.0</sparkle:version>
             <sparkle:shortVersionString>0.3.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="3628457" type="application/octet-stream" sparkle:edSignature="XSL4dkGRaOmYpYTqm5UaR+sOUfQWuHDQA8B98270G1dlR0PKhT/9uCiMJp45RNamnMpAc51Do64b1PgNMQJQBw=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1576962" type="application/octet-stream" sparkle:edSignature="gpfsTjSevCnfxmBUipikxghGRJv0F5PCkp8CK4geSHSZLMSOJ3kPxsrbQCWgvBXJmEfDp4W1v6bUjPmr/hFOAw=="/>
         </item>
     </channel>
 </rss>

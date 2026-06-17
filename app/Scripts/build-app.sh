@@ -86,7 +86,11 @@ fi
 
 echo "→ 打 zip..."
 cd "$DIST_DIR"
-zip -r -q usageBar.zip usageBar.app
+# ⚠️ 必须用 ditto,不能用 `zip -r`——zip 会把 Sparkle.framework 的符号链接(Versions/Current 等)
+# 展开成真实目录,导致框架结构损坏、解压后 app "已损坏"无法打开(Sparkle 更新和人类 zip 下载都会中招)。
+# ditto 保留符号链接。
+rm -f usageBar.zip
+ditto -c -k --keepParent usageBar.app usageBar.zip
 
 echo "→ 打 DMG (拖拽安装界面)..."
 DMG_STAGE="$DIST_DIR/dmg-stage"
