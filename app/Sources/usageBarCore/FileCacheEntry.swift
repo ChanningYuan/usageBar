@@ -47,7 +47,9 @@ public struct PersistedCache: Codable, Sendable {
     /// 版本变更日志:
     ///   1 → 2 (2026-05-25): provider id 改为连字符格式(如 `claude-sub` / `qoder-cli`)。
     ///                        bump 让所有旧 cache 自动失效,避免新代码 filter 不到旧 records 全显 0。
-    public static let currentSchemaVersion = 2
+    ///   2 → 3 (2026-06-15): Claude transcript 解析改为按 message.id 去重(流式重复落盘的同一响应
+    ///                        只计一次)。旧 cache 是逐行累加的放大值(约 2-3x),必须失效重算。
+    public static let currentSchemaVersion = 3
 
     public init(entries: [FileCacheEntry]) {
         self.schemaVersion = Self.currentSchemaVersion

@@ -112,10 +112,13 @@ if [ "$DO_SIGN" = "1" ]; then
     APPCAST_STAGE="$DIST_DIR/appcast-stage"
     rm -rf "$APPCAST_STAGE"; mkdir -p "$APPCAST_STAGE"
     cp "$DIST_DIR/usageBar.zip" "$APPCAST_STAGE/"
+    APP_VER=$(defaults read "$APP_DIR/Contents/Info" CFBundleShortVersionString)
     # 下载地址用 latest/download —— GitHub 永远重定向到最新 release 的同名资产,免得每版改 URL
     "$GEN_APPCAST" \
       --download-url-prefix "https://github.com/ChanningYuan/usageBar/releases/latest/download/" \
       "$APPCAST_STAGE"
+    # 把 CHANGELOG 当前版本段落**内联**进 appcast 的 <description>（更新弹窗直接显示，无需托管 html）
+    python3 "$PROJECT_DIR/Scripts/inject-release-notes.py" "$APPCAST_STAGE/appcast.xml" "$PROJECT_DIR/../CHANGELOG.md" "$APP_VER" || true
     cp "$APPCAST_STAGE/appcast.xml" "$PROJECT_DIR/../appcast.xml"
     rm -rf "$APPCAST_STAGE"
     echo "✓ appcast.xml 已生成: $(cd "$PROJECT_DIR/.." && pwd)/appcast.xml"

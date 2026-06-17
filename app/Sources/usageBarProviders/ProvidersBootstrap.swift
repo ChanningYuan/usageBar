@@ -27,6 +27,8 @@ public enum UsageBarProviders {
             // Claude family(按 message.id 前缀拆 2 行)
             ClaudeCodeProvider(variant: .subscription),
             ClaudeCodeProvider(variant: .api),
+            // Claude Cowork(桌面端,扫 local-agent-mode-sessions 下的 transcript)
+            CoworkProvider(),
             // Qoder family(三件套全部本地直读,零配置)
             QoderCliProvider(),
             QoderWorkProvider(),

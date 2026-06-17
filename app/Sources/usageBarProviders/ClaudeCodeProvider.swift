@@ -111,8 +111,33 @@ public actor ClaudeJsonlScanner {
     /// 解析单个 jsonl 文件，按 (variant, date) 聚合 token。
     /// 返回的 records 含 claude-sub 和 claude-api 两种 provider。
     private func parseFile(url: URL) throws -> [FileDailyRecord] {
+        // 按 message.id 前缀判断 sub / api：
+        // - msg_vrtx_ (Vertex) / msg_bdrk_ (Bedrock) → 第三方代理 → claude-api
+        // - msg_01... (Anthropic 官方直连) → OAuth/订阅 → claude-sub
+        try ClaudeTranscriptParser.parse(url: url) { messageId in
+            (messageId.hasPrefix("msg_vrtx_") || messageId.hasPrefix("msg_bdrk_"))
+                ? "claude-api" : "claude-sub"
+        }
+    }
+}
+
+// MARK: - 共享 transcript 解析器（Claude Code + Cowork 共用）
+
+/// 解析一个 Claude Code 风格的 jsonl transcript，按 (provider, date) 聚合 token。
+///
+/// **去重**：同一条 API 响应（`message.id`）在流式落盘时会被写多行，且每行的 usage 数值完全相同
+/// （实际只计费一次）。这里按 `message.id` 文件内去重，只计第一次出现。
+/// 实测 `message.id` 全局唯一、无跨文件重复，故文件级去重 == 全局去重，且契合按文件的 mtime 缓存。
+///
+/// `classify`：把 `message.id` 映射到 provider id（Claude Code 按前缀分 sub/api，Cowork 恒为 "cowork"）。
+public enum ClaudeTranscriptParser {
+    public static func parse(
+        url: URL,
+        classify: (_ messageId: String) -> String
+    ) throws -> [FileDailyRecord] {
         // key = "\(provider)|\(date)", value = total token
         var totals: [String: Int] = [:]
+        var seenIds = Set<String>()
 
         try JSONLReader.forEachLine(at: url) { obj in
             guard (obj["type"] as? String) == "assistant",
@@ -122,6 +147,13 @@ public actor ClaudeJsonlScanner {
                   let ts = ISODateParser.parse(tsStr)
             else { return }
 
+            // 同一 message.id 只计一次（流式重复落盘的多行 usage 完全相同）
+            let messageId = (message["id"] as? String) ?? ""
+            if !messageId.isEmpty {
+                if seenIds.contains(messageId) { return }
+                seenIds.insert(messageId)
+            }
+
             let input = (usage["input_tokens"] as? Int) ?? 0
             let output = (usage["output_tokens"] as? Int) ?? 0
             let cacheCreation = (usage["cache_creation_input_tokens"] as? Int) ?? 0
@@ -129,16 +161,9 @@ public actor ClaudeJsonlScanner {
             let total = input + output + cacheCreation + cacheRead
             if total == 0 { return }
 
-            // 按 message.id 前缀判断 sub / api
-            // - msg_vrtx_ (Vertex) / msg_bdrk_ (Bedrock) → 第三方代理 → claude-api
-            // - msg_01... (Anthropic 官方直连) → OAuth/订阅 → claude-sub
-            let messageId = (message["id"] as? String) ?? ""
-            let providerId = (messageId.hasPrefix("msg_vrtx_") || messageId.hasPrefix("msg_bdrk_"))
-                ? "claude-api" : "claude-sub"
-
+            let providerId = classify(messageId)
             let date = DailyAggregator.dateString(for: ts)
-            let key = "\(providerId)|\(date)"
-            totals[key, default: 0] += total
+            totals["\(providerId)|\(date)", default: 0] += total
         }
 
         return totals.map { (key, token) in

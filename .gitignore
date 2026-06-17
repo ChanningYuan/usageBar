@@ -25,3 +25,6 @@ app/DerivedData/
 app/xcuserdata/
 **/.DS_Store
 **/*.swp
+
+# 指向知识库文档（个人规划/调研/内部changelog），不进 git
+_notes

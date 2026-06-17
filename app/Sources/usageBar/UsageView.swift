@@ -31,6 +31,7 @@ enum ProviderMetaLookup {
         // Claude family
         "claude-sub": .init(id: "claude-sub", displayName: "Claude Code (订阅)", brandColor: "#D97757"),
         "claude-api": .init(id: "claude-api", displayName: "Claude Code (API)", brandColor: "#6F4A8A"),
+        "cowork": .init(id: "cowork", displayName: "Claude Cowork", brandColor: "#B05730"),
         // Qoder family(Qoder 自家 AI:CLI/Work/IDE,IDE 2026-05-28 接入 SharedClientCache SQLite 直读)
         "qoder-cli": .init(id: "qoder-cli", displayName: "Qoder (CLI)", brandColor: "#10A37F"),
         "qoder-work": .init(id: "qoder-work", displayName: "Qoder (Work)", brandColor: "#0E7A5F"),
@@ -115,9 +116,9 @@ struct ProviderIcon: View {
 
     @ViewBuilder
     var body: some View {
-        // family 模式优先(claude-* / qoder-*),fall back 到原 case
-        if providerId.hasPrefix("claude-") {
-            // Claude sub/api 沿用各自色 + claude.svg
+        // family 模式优先(claude-* / cowork / qoder-*),fall back 到原 case
+        if providerId.hasPrefix("claude-") || providerId == "cowork" {
+            // Claude sub/api/cowork 沿用各自色 + claude.svg(cowork 用更深的陶土底区分订阅版)
             let bg = ProviderMetaLookup.meta(for: providerId).brandColor
             roundedBoxWithBundleImage(bg: bg, name: "claude", ext: "svg")
         } else if providerId.hasPrefix("qoder-") {

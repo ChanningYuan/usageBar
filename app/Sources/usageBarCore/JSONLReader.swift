@@ -55,14 +55,20 @@ public enum JSONLReader {
     }
 
     /// 简单的递归 find 实现：在 root 目录下找所有匹配 `predicate` 的文件。
+    ///
+    /// `includeHidden`：是否进入隐藏目录/文件。默认 false（跳过 `.xxx`）。
+    /// Cowork 的 transcript 嵌在 `local_xxx/.claude/projects/...` 的隐藏 `.claude` 目录下，
+    /// 必须传 true，否则枚举器不会下钻到 `.claude` 里，一个文件都找不到。
     public static func findFiles(
         under root: URL,
+        includeHidden: Bool = false,
         where predicate: (URL) -> Bool
     ) -> [URL] {
+        let options: FileManager.DirectoryEnumerationOptions = includeHidden ? [] : [.skipsHiddenFiles]
         guard let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
+            options: options
         ) else { return [] }
         var out: [URL] = []
         for case let url as URL in enumerator {

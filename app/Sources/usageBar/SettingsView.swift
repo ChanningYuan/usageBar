@@ -12,7 +12,7 @@ struct SettingsView: View {
     @ObservedObject var settings: ProviderVisibilitySettings
 
     private let familyDisplayName: [String: String] = [
-        "claude": "Claude Code",
+        "claude": "Claude",  // 含 Claude Code(订阅/API) + Cowork,故组名用 "Claude"
     ]
 
     /// GitHub mark(模板图,跟随主题/链接色)
@@ -178,6 +178,7 @@ struct SettingsView: View {
             }
             .toggleStyle(.switch)
             .controlSize(.small)
+            .tint(Color(hex: "#007AFF"))  // 开启态用系统蓝,明暗主题都清晰
             Spacer()
         }
     }
@@ -196,6 +197,7 @@ struct SettingsView: View {
                 }
                 .toggleStyle(.switch)
                 .controlSize(.small)
+                .tint(Color(hex: "#007AFF"))  // 开启态用系统蓝,明暗主题都清晰
                 Spacer()
             }
 
