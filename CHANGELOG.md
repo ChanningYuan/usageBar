@@ -2,6 +2,14 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.3] - 2026-06-24
+
+### 新增
+- **Qoder (CLI) 用量统计一键开启**：新版 qodercli 默认不把 token 用量写到本地，导致「Qoder (CLI)」一直显示 0。现在偏好设置的 Qoder (CLI) 下会引导一键开启（写入环境变量 `QODER_EXPOSE_TOKEN_USAGE=1`，不会动你 `~/.zshrc` 里的其它内容），开启后**新开终端**跑 qodercli 即可正常统计；可随时一键撤销。菜单弹层也会在未开启时提示「去开启」。
+
+### 修复
+- **首次运行不再误隐藏 Qoder (CLI)**：用过 qodercli 但还没开启用量统计（本地全 0）的用户，首次运行不会再把「Qoder (CLI)」这一行自动隐藏，确保能看到开启引导。
+
 ## [0.3.2] - 2026-06-17
 
 ### 新增

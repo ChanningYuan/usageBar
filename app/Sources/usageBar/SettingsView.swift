@@ -10,6 +10,7 @@ import usageBarProviders
 /// 自己把子项各自关掉即可(UI 视觉用虚线框提示同组关联)。
 struct SettingsView: View {
     @ObservedObject var settings: ProviderVisibilitySettings
+    @ObservedObject private var qoderStatus: QoderCliUsageStatus = .shared
 
     private let familyDisplayName: [String: String] = [
         "claude": "Claude",  // 含 Claude Code(订阅/API) + Cowork,故组名用 "Claude"
@@ -42,6 +43,7 @@ struct SettingsView: View {
         }
         .frame(minWidth: 420, minHeight: 380)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { qoderStatus.refresh() }
     }
 
     // MARK: - Header / Footer
@@ -138,17 +140,21 @@ struct SettingsView: View {
     @ViewBuilder
     private func sectionView(_ section: SettingsSection) -> some View {
         if section.family != nil {
-            familyBox(title: section.title, providers: section.providers)
+            familyBox(title: section.title, family: section.family, providers: section.providers)
         } else if let provider = section.providers.first {
             standaloneRow(provider: provider)
         }
     }
 
     /// family 块:虚线圆角框 + 压边标题
-    private func familyBox(title: String, providers: [any UsageProvider]) -> some View {
+    private func familyBox(title: String, family: String?, providers: [any UsageProvider]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(providers, id: \.id) { p in
                 providerToggleRow(p)
+                // qoder 框内、Qoder (CLI) 行下方挂 token 统计开关横幅（仅 qodercli 用过时出现）
+                if family == "qoder" && p.id == "qoder-cli" {
+                    QoderCliUsageBanner(status: qoderStatus)
+                }
             }
         }
         .padding(.horizontal, 14)
@@ -219,5 +225,80 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Qoder CLI token 统计开关横幅
+
+/// 设置页 qoder 框内、Qoder (CLI) 行下方的 token 统计开关横幅（三态）。
+///
+/// - `isPresent==false`（没用过 qodercli）→ 整条不出现。
+/// - 未开启 → 橙底警告文案 + [一键开启]。
+/// - 已开启 → 绿底「✓ 已开启」+ 生效说明 + 撤销（开启后唯一样式，不分会话/重启）。
+/// 详见 docs/qoder-cli-usage-gate-fix.md。
+private struct QoderCliUsageBanner: View {
+    @ObservedObject var status: QoderCliUsageStatus
+
+    var body: some View {
+        if status.isPresent {
+            Group {
+                if status.isEnabled {
+                    enabledBanner
+                } else {
+                    notEnabledBanner
+                }
+            }
+            .padding(.trailing, 2)
+        }
+    }
+
+    // 未开启：警告 + 一键开启
+    private var notEnabledBanner: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 5) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.orange)
+                Text("qodercli 默认不记录本地 token 消耗。需把环境变量 \(status.envName) 从 0 改为 1 开启记录，才能统计。")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                if let err = status.lastError {
+                    Text(err).font(.system(size: 9)).foregroundStyle(.red)
+                }
+                Spacer()
+                Button("一键开启") { status.enable() }
+                    .controlSize(.small)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.orange.opacity(0.12)))
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // 已开启：绿底 + 生效说明 + 撤销（开启后唯一样式）
+    private var enabledBanner: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 10)).foregroundStyle(.green)
+                Text("已开启 token 统计").font(.system(size: 10, weight: .medium))
+                Spacer()
+                Button("撤销") { status.disable() }.controlSize(.mini).buttonStyle(.link)
+            }
+            Text("新开终端跑 qodercli 才开始记录用量")
+                .font(.system(size: 9)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("已写入 \(status.profileDisplayName)：export \(status.envName)=1")
+                .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 5).fill(Color.green.opacity(0.10)))
+        .fixedSize(horizontal: false, vertical: true)
     }
 }

@@ -6,11 +6,14 @@ import usageBarCore
 /// 数据源:`~/.qoder/projects/<encoded-cwd>/<sessionId>.jsonl`(嵌套结构,跟 Claude Code 同款)
 /// 字段:`type=="assistant"` + `message.usage.{input_tokens,output_tokens,cache_creation_input_tokens,cache_read_input_tokens}`
 ///
-/// 跟 QoderWork / Qoder IDE 不同源:CLI 是 npm Node.js bundle(版本 1.0.x+),自己做了 OpenAI→Anthropic
-/// 4 列翻译,transcript usage 字段完整;IDE/QoderWork 用的是嵌入式 Go binary,transcript usage 全 0,
+/// 跟 QoderWork / Qoder IDE 不同源:CLI 旧版是 npm Node.js bundle,自己做了 OpenAI→Anthropic
+/// 4 列翻译,transcript usage 字段完整;IDE/QoderWork 用的是嵌入式 binary,transcript usage 全 0,
 /// 改走各自的本地持久化数据源(QoderWork 读 main.log mirror,Qoder IDE 读 SharedClientCache SQLite)。
 ///
-/// 老版 Qoder CLI(< 1.0.x)写的 transcript usage 全 0,会被 total==0 自动过滤掉,无需特殊处理。
+/// ⚠️ 2026-06 起 CLI 也换成 Bun 编译 binary,默认不写 usage(内部 EMPTY_USAGE gate),transcript 四列全 0。
+/// 须设环境变量 `QODER_EXPOSE_TOKEN_USAGE=1` 才恢复写真值(本 provider 解析逻辑无需改)。
+/// usageBar 通过 `QoderUsageEnvGate` + 设置页横幅引导用户开启,详见 docs/qoder-cli-usage-gate-fix.md。
+/// 没开 env 时这里 total==0 的行会被下面自动过滤掉。
 public struct QoderCliProvider: UsageProvider {
     public let id = "qoder-cli"
     public let displayName = "Qoder (CLI)"

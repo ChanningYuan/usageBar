@@ -63,16 +63,21 @@ final class ProviderVisibilitySettings: ObservableObject {
         }
     }
 
-    /// 首次运行智能默认：第一次拉到数据后，把**零用量**的 provider 自动关掉，只留有用量的。
+    /// 首次运行智能默认：第一次拉到数据后，把**没用过**的 provider 自动关掉，只留用过的。
+    ///
+    /// 「用过」= 有用量（token>0）∪ 有本地数据。后者为 qodercli 特例：装了但因没开
+    /// `QODER_EXPOSE_TOKEN_USAGE` 而 transcript 零 token 时，仍按会话文件判定为用过，
+    /// 否则会被自动隐藏 → 连「去开启」横幅都看不到（见 docs/qoder-cli-usage-gate-fix.md）。
+    ///
     /// **只执行一次**（用 `didAutoConfigure` 标记），之后用户手动的开关不会被覆盖。
     /// 调用方在每次 refresh 后调用即可，非首次是 no-op。
-    /// - Parameter providerIdsWithUsage: 本次聚合后 token > 0 的 provider id 集合。
-    func autoConfigureFirstRunIfNeeded(providerIdsWithUsage: Set<String>) {
+    /// - Parameter providerIdsToKeep: 本次应保留可见的 provider id 集合（有用量或有本地数据）。
+    func autoConfigureFirstRunIfNeeded(providerIdsToKeep: Set<String>) {
         guard !UserDefaults.standard.bool(forKey: Keys.didAutoConfigure) else { return }
-        // 还没拉到任何数据时（全 0）先不动，等有数据的那次 refresh 再配置，避免把所有人都关掉
-        guard !providerIdsWithUsage.isEmpty else { return }
+        // 还没拉到任何数据时（全 0 且无本地数据）先不动，等有数据的那次 refresh 再配置，避免把所有人都关掉
+        guard !providerIdsToKeep.isEmpty else { return }
         var disabled = disabledProviders
-        for p in ProviderRegistry.all where !providerIdsWithUsage.contains(p.id) {
+        for p in ProviderRegistry.all where !providerIdsToKeep.contains(p.id) {
             disabled.insert(p.id)
         }
         disabledProviders = disabled

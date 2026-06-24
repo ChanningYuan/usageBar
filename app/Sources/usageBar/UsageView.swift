@@ -234,6 +234,7 @@ struct ProviderIcon: View {
 struct UsageRootView: View {
     @ObservedObject var viewModel: UsageViewModel
     @ObservedObject var settings: ProviderVisibilitySettings = .shared
+    @ObservedObject var qoderStatus: QoderCliUsageStatus = .shared
 
     /// GitHub mark(模板图,跟随明暗主题色),给 footer 的"去 GitHub"入口用
     private static let githubIcon: NSImage? = {
@@ -242,11 +243,18 @@ struct UsageRootView: View {
         return img
     }()
 
+    /// qodercli 装了但没开 token 统计 → 弹层挂一条引导行
+    private var showsQoderHint: Bool {
+        visibleProviderIds.contains("qoder-cli") && qoderStatus.isPresent && !qoderStatus.isEnabled
+    }
+
     /// 按行数动态算 popover 内容区高度,空状态(0 行)给个最小占位
     /// 26pt 行高 + 5pt 间距,加 16pt 上下 padding。header/footer 各约 28pt。
     private var contentHeight: CGFloat {
         let n = max(visibleProviderIds.count, 1)
-        return CGFloat(n) * 26 + CGFloat(max(0, n - 1)) * 5 + 16
+        var h = CGFloat(n) * 26 + CGFloat(max(0, n - 1)) * 5 + 16
+        if showsQoderHint { h += 23 }   // qodercli 未开启提示行(18) + 间距(5)
+        return h
     }
 
     private var totalHeight: CGFloat {
@@ -263,6 +271,7 @@ struct UsageRootView: View {
         }
         .frame(width: 440, height: totalHeight)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onAppear { qoderStatus.refresh() }
     }
 
     private var header: some View {
@@ -313,6 +322,9 @@ struct UsageRootView: View {
                     ForEach(ids, id: \.self) { pid in
                         let stat = viewModel.stats.first { $0.provider == pid } ?? StatRecord(provider: pid, time: viewModel.window.id, token: 0)
                         ProviderRowView(stat: stat, maxToken: max)
+                        if pid == "qoder-cli" && showsQoderHint {
+                            qoderHintRow
+                        }
                     }
                 }
                 .padding(.horizontal, 12)
@@ -320,6 +332,30 @@ struct UsageRootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
+    }
+
+    /// qodercli 装了但没开 token 统计 → 弹层引导行(点「去开启」跳设置页并高亮横幅)
+    private var qoderHintRow: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(.orange)
+            Text("token 统计未开启")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            Button {
+                SettingsWindowController.shared.showWindow()
+            } label: {
+                HStack(spacing: 2) {
+                    Text("去开启").font(.system(size: 10, weight: .medium))
+                    Image(systemName: "chevron.right").font(.system(size: 7))
+                }
+            }
+            .buttonStyle(.link)
+            Spacer()
+        }
+        .padding(.leading, 32)   // 对齐 provider 名(icon 22 + spacing 10)
+        .frame(height: 18)
     }
 
     /// 只算可见 provider 的合计
