@@ -4,23 +4,19 @@
         <title>usageBar</title>
         <item>
             <description><![CDATA[
-<h3>usageBar 0.3.3</h3>
-<p><b>新增</b></p>
+<h3>usageBar 0.3.4</h3>
+<p><b>变更</b></p>
 <ul>
-<li><b>Qoder (CLI) 用量统计一键开启</b>：新版 qodercli 默认不把 token 用量写到本地，导致「Qoder (CLI)」一直显示 0。现在偏好设置的 Qoder (CLI) 下会引导一键开启（写入环境变量 `QODER_EXPOSE_TOKEN_USAGE=1`，不会动你 `~/.zshrc` 里的其它内容），开启后<b>新开终端</b>跑 qodercli 即可正常统计；可随时一键撤销。菜单弹层也会在未开启时提示「去开启」。</li>
-</ul>
-<p><b>修复</b></p>
-<ul>
-<li><b>首次运行不再误隐藏 Qoder (CLI)</b>：用过 qodercli 但还没开启用量统计（本地全 0）的用户，首次运行不会再把「Qoder (CLI)」这一行自动隐藏，确保能看到开启引导。</li>
+<li><b>DMG 安装窗口加拖拽引导</b>：安装窗口新增一条从应用图标指向「应用程序」文件夹的虚线引导箭头，底部加上中英双语「拖拽到右侧安装」提示；应用图标加了柔和投影，在白色背景上更清晰、更易看出是一张可拖拽的卡片。</li>
 </ul>
             ]]></description>
-            <title>0.3.3</title>
-            <pubDate>Wed, 24 Jun 2026 13:28:30 +0800</pubDate>
-            <sparkle:version>0.3.3</sparkle:version>
-            <sparkle:shortVersionString>0.3.3</sparkle:shortVersionString>
+            <title>0.3.4</title>
+            <pubDate>Wed, 24 Jun 2026 20:19:45 +0800</pubDate>
+            <sparkle:version>0.3.4</sparkle:version>
+            <sparkle:shortVersionString>0.3.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1611672" type="application/octet-stream" sparkle:edSignature="mIcTwK1gRZfer6L14MaFz088AuxRkT6t3re+lX+egd06hxfdH/3om9WeWnjQUlxBct5P2nTVn6J75bTZJs9ZAw=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1611688" type="application/octet-stream" sparkle:edSignature="eCD3QG4kFX5X56/8XqbXMDae8HCRcPxjvqaSyzvZs0GcGp4nwC1ak9zEuUd3SHRCEvn59bKlP1Aaqc5AbXFbBA=="/>
         </item>
     </channel>
 </rss>

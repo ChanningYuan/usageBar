@@ -104,25 +104,40 @@ DMG_STAGE="$DIST_DIR/dmg-stage"
 rm -rf "$DMG_STAGE"; mkdir -p "$DMG_STAGE"
 cp -R "$APP_DIR" "$DMG_STAGE/usageBar.app"
 ln -s /Applications "$DMG_STAGE/Applications"   # 拖进去就装
+# 背景图（虚线弧形箭头 + 底部双语拖拽提示）。best-effort：生成失败就退化成无背景裸图标，不挡发版。
+# 多分辨率 TIFF（1x+2x）保证 Retina 下箭头/文字清晰。
+BG_STMT=""
+mkdir -p "$DMG_STAGE/.background"
+if swift "$PROJECT_DIR/Scripts/make-dmg-background.swift" "$DMG_STAGE/.background" >/dev/null 2>&1 \
+   && tiffutil -cathidpicheck "$DMG_STAGE/.background/background.png" "$DMG_STAGE/.background/background@2x.png" \
+        -out "$DMG_STAGE/.background/background.tiff" >/dev/null 2>&1; then
+  rm -f "$DMG_STAGE/.background/background.png" "$DMG_STAGE/.background/background@2x.png"
+  BG_STMT='set background picture of theVO to file ".background:background.tiff"'
+else
+  echo "  ⚠️ DMG 背景图生成失败，退化为无背景裸图标（不影响安装功能）"
+  rm -rf "$DMG_STAGE/.background"
+fi
 rm -f "$DIST_DIR/usageBar.dmg" "$DIST_DIR/usageBar-rw.dmg"
 # 1) 先建可读写 DMG(留余量给 .DS_Store)
 hdiutil create -volname "usageBar" -srcfolder "$DMG_STAGE" -ov -format UDRW -size 40m "$DIST_DIR/usageBar-rw.dmg" >/dev/null
 # 2) 挂载 + AppleScript 摆窗口/图标(best-effort;失败只是不美化,不影响安装功能)
 hdiutil attach "$DIST_DIR/usageBar-rw.dmg" -readwrite -noverify -noautoopen >/dev/null
-osascript <<'APPLESCRIPT' 2>/dev/null || echo "  ⚠️ DMG 美化未生效(可能需在 系统设置→隐私与安全性→自动化 给终端授权控制 Finder);DMG 功能正常"
+# ⚠️ 非引号 heredoc：要插值 $BG_STMT；AppleScript 正文里没有 $ / 反引号，安全。
+osascript <<APPLESCRIPT 2>/dev/null || echo "  ⚠️ DMG 美化未生效(可能需在 系统设置→隐私与安全性→自动化 给终端授权控制 Finder);DMG 功能正常"
 tell application "Finder"
   tell disk "usageBar"
     open
     set current view of container window to icon view
     set toolbar visible of container window to false
     set statusbar visible of container window to false
-    set the bounds of container window to {300, 200, 820, 540}
+    set the bounds of container window to {200, 160, 800, 580}
     set theVO to the icon view options of container window
     set arrangement of theVO to not arranged
     set icon size of theVO to 104
     set text size of theVO to 12
-    set position of item "usageBar.app" of container window to {140, 170}
-    set position of item "Applications" of container window to {380, 170}
+    $BG_STMT
+    set position of item "usageBar.app" of container window to {150, 190}
+    set position of item "Applications" of container window to {450, 190}
     update without registering applications
     delay 1
     close
