@@ -4,19 +4,19 @@
         <title>usageBar</title>
         <item>
             <description><![CDATA[
-<h3>usageBar 0.3.4</h3>
-<p><b>变更</b></p>
+<h3>usageBar 0.3.5</h3>
+<p><b>修复</b></p>
 <ul>
-<li><b>DMG 安装窗口加拖拽引导</b>：安装窗口新增一条从应用图标指向「应用程序」文件夹的虚线引导箭头，底部加上中英双语「拖拽到右侧安装」提示；应用图标加了柔和投影，在白色背景上更清晰、更易看出是一张可拖拽的卡片。</li>
+<li><b>修复「Qoder (Work)」统计归零</b>：QoderWork 桌面 app 升级到 0.6.3 后改了 token 数据的存放位置，导致这一行从某天起一直显示 0。现已接入新数据源，并与历史数据相加，「Qoder (Work)」恢复正常统计、历史数字不丢。</li>
 </ul>
             ]]></description>
-            <title>0.3.4</title>
-            <pubDate>Wed, 24 Jun 2026 20:19:45 +0800</pubDate>
-            <sparkle:version>0.3.4</sparkle:version>
-            <sparkle:shortVersionString>0.3.4</sparkle:shortVersionString>
+            <title>0.3.5</title>
+            <pubDate>Wed, 24 Jun 2026 20:45:26 +0800</pubDate>
+            <sparkle:version>0.3.5</sparkle:version>
+            <sparkle:shortVersionString>0.3.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1611688" type="application/octet-stream" sparkle:edSignature="eCD3QG4kFX5X56/8XqbXMDae8HCRcPxjvqaSyzvZs0GcGp4nwC1ak9zEuUd3SHRCEvn59bKlP1Aaqc5AbXFbBA=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1614209" type="application/octet-stream" sparkle:edSignature="18R1vElzQ0NKhDJpdksKFW0VVtxcWMYlm0hsPMbcYcuDgxJ0575oX8bPJHyXe1iCQKsdxMOnsa3HbXE04KPMBg=="/>
         </item>
     </channel>
 </rss>

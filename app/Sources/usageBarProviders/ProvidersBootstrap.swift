@@ -9,7 +9,7 @@ import usageBarCore
 ///   1. Claude 系(family="claude"):订阅 → cc-api(共 2 个实例)
 ///   2. Qoder 系(family="qoder"):CLI → Work → IDE(共 3 个实例)
 ///       - CLI 读 ~/.qoder/projects/.../*.jsonl(transcript)
-///       - Work 读 main.log → 本地 mirror jsonl(纯本地直读)
+///       - Work 读 ~/.qoderwork/projects transcript(0.6.3 起) + 旧 main.log mirror(历史,冻结)
 ///       - IDE 读 SharedClientCache SQLite(chat_message.token_info)
 ///   3. Codex(独立)
 ///   4. 悟空(独立)

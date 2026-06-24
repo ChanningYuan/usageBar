@@ -2,6 +2,11 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.5] - 2026-06-24
+
+### 修复
+- **修复「Qoder (Work)」统计归零**：QoderWork 桌面 app 升级到 0.6.3 后改了 token 数据的存放位置，导致这一行从某天起一直显示 0。现已接入新数据源，并与历史数据相加，「Qoder (Work)」恢复正常统计、历史数字不丢。
+
 ## [0.3.4] - 2026-06-24
 
 ### 变更
