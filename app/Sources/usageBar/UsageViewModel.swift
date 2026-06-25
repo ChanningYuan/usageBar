@@ -87,13 +87,15 @@ final class UsageViewModel: ObservableObject {
         // 2) 第一阶段聚合(本地数据,秒回)。Cursor 此刻读的是已有 mirror(可能是旧值)。
         await commitAggregation(providerIds: providerIds, log: log)
         // 首次运行智能默认：只保留「用过」的 provider（有用量 ∪ 有本地数据），其余自动隐藏（仅一次）。
-        // qodercli 特例：装了但没开 QODER_EXPOSE_TOKEN_USAGE 时 transcript 零 token，仍按会话文件算「用过」，
-        // 否则会被自动隐藏 → 连「去开启」横幅都看不到（见 docs/qoder-cli-usage-gate-fix.md）。
+        // Qoder CLI / Work 特例：装了但没开 QODER_EXPOSE_TOKEN_USAGE 时 transcript 零 token，仍按会话文件算
+        // 「用过」，否则会被自动隐藏 → 连「去开启」横幅都看不到（见 docs/qoder-family-token-gate.md）。
+        // （IDE 不受 gate，用过必有 token>0，本就进 keep，无需特判。）
         var keep = Set(allStats.filter { $0.token > 0 }.map { $0.provider })
         if QoderUsageEnvGate.isQoderCliPresent() { keep.insert("qoder-cli") }
+        if QoderUsageEnvGate.isQoderWorkPresent() { keep.insert("qoder-work") }
         ProviderVisibilitySettings.shared.autoConfigureFirstRunIfNeeded(providerIdsToKeep: keep)
-        // 每次刷新顺带扫一遍 qodercli 的 env 开关状态，驱动弹层/设置页横幅（见 docs/qoder-cli-usage-gate-fix.md）
-        QoderCliUsageStatus.shared.refresh()
+        // 每次刷新顺带扫一遍 Qoder 的 env 开关状态（CLI/Work 共用），驱动弹层/设置页横幅。
+        QoderUsageStatus.shared.refresh()
         self.lastRefreshAt = Date()
         self.isRefreshing = false
         log("local done, total \(allStats.count) records")

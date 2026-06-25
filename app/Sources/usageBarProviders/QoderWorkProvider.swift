@@ -21,8 +21,11 @@ import usageBarCore
 /// transcript 里是 model=None(新源贡献 0),重启后的 session 不在已死的 main.log 里。按天相加零双算。
 /// 下游 `DailyAggregator` 按 (provider,date) 求和,本 provider 直接拼接两源 records 返回即可。
 ///
-/// ⚠️ 与环境变量 `QODER_EXPOSE_TOKEN_USAGE` 无关(那是 Qoder CLI 的 gate;Work 实测无 env 也写真值),
-///    勿在此引入 env / launchctl 依赖。详见 `docs/qoder-work-schema-drift.md`。
+/// ⚠️ token 真值受环境变量 `QODER_EXPOSE_TOKEN_USAGE` gate 控制(与 Qoder CLI **共用同一个** gate):
+///    没设该变量时 transcript 的 `message.usage` 缺失/全 0(2026-06-25 双机实测证实,推翻早前"Work 与
+///    env 无关"的判断 —— 当初那台其实 .zshrc 里有该 export,Work 靠 zsh -ilc 抓登录 shell env 继承了它)。
+///    开关由 `QoderUsageEnvGate` + UI 层管(写 .zshrc;QoderWork 是 GUI app,改完需重启才生效)。
+///    本 provider 只管解析 transcript,不在此引入 env 检测。详见 `docs/qoder-family-token-gate.md`。
 public struct QoderWorkProvider: UsageProvider {
     public let id = "qoder-work"
     public let displayName = "Qoder (Work)"

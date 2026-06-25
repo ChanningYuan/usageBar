@@ -1,11 +1,13 @@
 import Foundation
 
-/// qodercli token 用量开关（env gate）的检测 / 写入 / 撤销。
+/// Qoder token 用量开关（env gate）的检测 / 写入 / 撤销。
 ///
-/// 背景：qodercli 新 binary（Bun 编译起）默认不往 transcript 写 token 用量
-/// （内部 `EMPTY_USAGE` gate），须设环境变量 `QODER_EXPOSE_TOKEN_USAGE=1` 才吐真值。
-/// usageBar 帮用户把这行 export 幂等地写进 shell profile（+ launchctl），可一键撤销。
-/// 详见 docs/qoder-cli-usage-gate-fix.md。
+/// 背景：Qoder CLI 与 QoderWork **共用同一个** `EMPTY_USAGE` gate —— 默认不往 transcript 写
+/// token 用量，须设环境变量 `QODER_EXPOSE_TOKEN_USAGE=1` 才吐真值。usageBar 帮用户把这行
+/// export 幂等地写进 shell profile（+ launchctl），可一键撤销。CLI 新开终端生效；QoderWork
+/// 是 GUI app，启动时用 `zsh -ilc` 抓登录 shell env 继承它，改完须重启 app 才生效。
+/// （Qoder IDE 不受此 gate，token 直写 SQLite，无需开关。）
+/// 详见 docs/qoder-family-token-gate.md（CLI 前身见 docs/qoder-cli-usage-gate-fix.md）。
 ///
 /// ⚠️ 只读检测会 spawn `launchctl getenv`（仅当 profile 标记块不存在时），
 /// 调用方应在 UI 出现时（onAppear）触发，不要放进高频循环。
@@ -19,8 +21,8 @@ public enum QoderUsageEnvGate {
     private static var block: String {
         """
         \(beginMarker)
-        # 让 qodercli 把真实 token 用量写进 transcript(message.usage 四列),供 usageBar 统计。
-        # 默认不记录(EMPTY_USAGE),设此变量=1 才吐真值;只对设后新建的会话生效。
+        # 让 qodercli / QoderWork 把真实 token 用量写进 transcript(message.usage 四列),供 usageBar 统计。
+        # 默认不记录(EMPTY_USAGE gate),设此变量=1 才吐真值;只对设后新建的会话生效(QoderWork 需重启 app)。
         export \(envName)=1
         \(endMarker)
         """
@@ -50,6 +52,17 @@ public enum QoderUsageEnvGate {
     /// 用作 first-run keep-set 判定 + 横幅是否出现的开关。
     public static func isQoderCliPresent() -> Bool {
         let projects = home.appendingPathComponent(".qoder/projects")
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: projects.path) else {
+            return false
+        }
+        return !entries.isEmpty
+    }
+
+    /// QoderWork 是否「用过」：`~/.qoderwork/projects` 下有会话条目即算。
+    /// 与 CLI 共用同一个 env gate（同一个 `QODER_EXPOSE_TOKEN_USAGE`），故同样用作
+    /// first-run keep-set 判定 + 横幅是否出现的开关。
+    public static func isQoderWorkPresent() -> Bool {
+        let projects = home.appendingPathComponent(".qoderwork/projects")
         guard let entries = try? FileManager.default.contentsOfDirectory(atPath: projects.path) else {
             return false
         }

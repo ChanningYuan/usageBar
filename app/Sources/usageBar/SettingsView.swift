@@ -10,7 +10,7 @@ import usageBarProviders
 /// 自己把子项各自关掉即可(UI 视觉用虚线框提示同组关联)。
 struct SettingsView: View {
     @ObservedObject var settings: ProviderVisibilitySettings
-    @ObservedObject private var qoderStatus: QoderCliUsageStatus = .shared
+    @ObservedObject private var qoderStatus: QoderUsageStatus = .shared
 
     private let familyDisplayName: [String: String] = [
         "claude": "Claude",  // 含 Claude Code(订阅/API) + Cowork,故组名用 "Claude"
@@ -149,12 +149,14 @@ struct SettingsView: View {
     /// family 块:虚线圆角框 + 压边标题
     private func familyBox(title: String, family: String?, providers: [any UsageProvider]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
+            // qoder 框顶挂一条共享 token 统计开关横幅（CLI/Work 共用一个 env gate）。
+            // 按 presence 判定（有会话即出现），不挂在"行可见"上 —— 存量用户即使 Work 行被关着，
+            // 打开设置页照样能看到"去开启"。IDE 不受 gate，不在此横幅范围。
+            if family == "qoder" {
+                QoderUsageBanner(status: qoderStatus)
+            }
             ForEach(providers, id: \.id) { p in
                 providerToggleRow(p)
-                // qoder 框内、Qoder (CLI) 行下方挂 token 统计开关横幅（仅 qodercli 用过时出现）
-                if family == "qoder" && p.id == "qoder-cli" {
-                    QoderCliUsageBanner(status: qoderStatus)
-                }
             }
         }
         .padding(.horizontal, 14)
@@ -228,19 +230,19 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - Qoder CLI token 统计开关横幅
+// MARK: - Qoder token 统计开关横幅（CLI / Work 共用）
 
-/// 设置页 qoder 框内、Qoder (CLI) 行下方的 token 统计开关横幅（三态）。
+/// 设置页 qoder 框顶的 token 统计开关横幅（三态）。CLI 与 QoderWork 共用同一个 env gate。
 ///
-/// - `isPresent==false`（没用过 qodercli）→ 整条不出现。
+/// - `isAnyGatedPresent==false`（CLI / Work 都没用过）→ 整条不出现。
 /// - 未开启 → 橙底警告文案 + [一键开启]。
-/// - 已开启 → 绿底「✓ 已开启」+ 生效说明 + 撤销（开启后唯一样式，不分会话/重启）。
-/// 详见 docs/qoder-cli-usage-gate-fix.md。
-private struct QoderCliUsageBanner: View {
-    @ObservedObject var status: QoderCliUsageStatus
+/// - 已开启 → 绿底「✓ 已开启」+ 生效说明 + 撤销（开启后唯一样式）。
+/// 详见 docs/qoder-family-token-gate.md。
+private struct QoderUsageBanner: View {
+    @ObservedObject var status: QoderUsageStatus
 
     var body: some View {
-        if status.isPresent {
+        if status.isAnyGatedPresent {
             Group {
                 if status.isEnabled {
                     enabledBanner
@@ -259,7 +261,7 @@ private struct QoderCliUsageBanner: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(.orange)
-                Text("qodercli 默认不记录本地 token 消耗。需把环境变量 \(status.envName) 从 0 改为 1 开启记录，才能统计。")
+                Text("Qoder CLI / QoderWork 默认不记录本地 token 消耗。需把环境变量 \(status.envName) 从 0 改为 1 开启记录，才能统计。")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -284,11 +286,11 @@ private struct QoderCliUsageBanner: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.circle.fill").font(.system(size: 10)).foregroundStyle(.green)
-                Text("已开启 token 统计").font(.system(size: 10, weight: .medium))
+                Text("已开启 token 统计（CLI 和 QoderWork 都生效）").font(.system(size: 10, weight: .medium))
                 Spacer()
                 Button("撤销") { status.disable() }.controlSize(.mini).buttonStyle(.link)
             }
-            Text("新开终端跑 qodercli 才开始记录用量")
+            Text("首次开启后 CLI 新开终端 / QoderWork 重启 app 后才能开始记录")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Text("已写入 \(status.profileDisplayName)：export \(status.envName)=1")

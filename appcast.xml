@@ -4,19 +4,23 @@
         <title>usageBar</title>
         <item>
             <description><![CDATA[
-<h3>usageBar 0.3.5</h3>
+<h3>usageBar 0.3.6</h3>
+<p><b>新增</b></p>
+<ul>
+<li><b>「Qoder (Work)」用量统计一键开启</b>：QoderWork 和 Qoder CLI 一样，默认不把 token 用量写到本地（显示 0）。现在偏好设置的 Qoder 区<b>顶部有一个共享开关</b>，一键开启后 <b>Qoder CLI 和 QoderWork 同时生效</b>（写入环境变量 `QODER_EXPOSE_TOKEN_USAGE=1`，不动你 `~/.zshrc` 里的其它内容）；首次开启后 CLI 新开终端、QoderWork 重启 app 才开始记录，可随时一键撤销。菜单弹层也会在未开启时于对应行下提示「去开启」。（Qoder IDE 不受此限制，本就正常统计。）</li>
+</ul>
 <p><b>修复</b></p>
 <ul>
-<li><b>修复「Qoder (Work)」统计归零</b>：QoderWork 桌面 app 升级到 0.6.3 后改了 token 数据的存放位置，导致这一行从某天起一直显示 0。现已接入新数据源，并与历史数据相加，「Qoder (Work)」恢复正常统计、历史数字不丢。</li>
+<li><b>首次运行不再误隐藏「Qoder (Work)」</b>：用过 QoderWork 但还没开启用量统计（本地全 0）的用户，首次运行不会再把这一行自动隐藏，确保能看到开启引导。</li>
 </ul>
             ]]></description>
-            <title>0.3.5</title>
-            <pubDate>Wed, 24 Jun 2026 20:45:26 +0800</pubDate>
-            <sparkle:version>0.3.5</sparkle:version>
-            <sparkle:shortVersionString>0.3.5</sparkle:shortVersionString>
+            <title>0.3.6</title>
+            <pubDate>Thu, 25 Jun 2026 11:24:29 +0800</pubDate>
+            <sparkle:version>0.3.6</sparkle:version>
+            <sparkle:shortVersionString>0.3.6</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1614209" type="application/octet-stream" sparkle:edSignature="18R1vElzQ0NKhDJpdksKFW0VVtxcWMYlm0hsPMbcYcuDgxJ0575oX8bPJHyXe1iCQKsdxMOnsa3HbXE04KPMBg=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1614379" type="application/octet-stream" sparkle:edSignature="kMEyWRhDhRq8zy1Bf1EkqCsWpcmHFvjUc0PL5getfmfruKCnsRvZNqbaueJmq4faw71vWXiRHX6J5l76AZDFAw=="/>
         </item>
     </channel>
 </rss>

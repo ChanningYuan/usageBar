@@ -2,6 +2,14 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.6] - 2026-06-25
+
+### 新增
+- **「Qoder (Work)」用量统计一键开启**：QoderWork 和 Qoder CLI 一样，默认不把 token 用量写到本地（显示 0）。现在偏好设置的 Qoder 区**顶部有一个共享开关**，一键开启后 **Qoder CLI 和 QoderWork 同时生效**（写入环境变量 `QODER_EXPOSE_TOKEN_USAGE=1`，不动你 `~/.zshrc` 里的其它内容）；首次开启后 CLI 新开终端、QoderWork 重启 app 才开始记录，可随时一键撤销。菜单弹层也会在未开启时于对应行下提示「去开启」。（Qoder IDE 不受此限制，本就正常统计。）
+
+### 修复
+- **首次运行不再误隐藏「Qoder (Work)」**：用过 QoderWork 但还没开启用量统计（本地全 0）的用户，首次运行不会再把这一行自动隐藏，确保能看到开启引导。
+
 ## [0.3.5] - 2026-06-24
 
 ### 修复
@@ -66,6 +74,10 @@
 - 全本地直读（jsonl / SQLite），零配置（Cursor 除外，需联网）。
 - 安装方式：人类下载 .app / AI Agent 走 install-usagebar skill 一句话装。
 
+[0.3.6]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.3.6
+[0.3.5]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.3.5
+[0.3.4]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.3.4
+[0.3.3]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.3.3
 [0.3.2]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.3.2
 [0.3.1]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.3.1
 [0.3.0]: https://github.com/ChanningYuan/usageBar/releases/tag/v0.3.0

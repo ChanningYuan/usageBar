@@ -234,7 +234,7 @@ struct ProviderIcon: View {
 struct UsageRootView: View {
     @ObservedObject var viewModel: UsageViewModel
     @ObservedObject var settings: ProviderVisibilitySettings = .shared
-    @ObservedObject var qoderStatus: QoderCliUsageStatus = .shared
+    @ObservedObject var qoderStatus: QoderUsageStatus = .shared
 
     /// GitHub mark(模板图,跟随明暗主题色),给 footer 的"去 GitHub"入口用
     private static let githubIcon: NSImage? = {
@@ -243,9 +243,20 @@ struct UsageRootView: View {
         return img
     }()
 
-    /// qodercli 装了但没开 token 统计 → 弹层挂一条引导行
-    private var showsQoderHint: Bool {
-        visibleProviderIds.contains("qoder-cli") && qoderStatus.isPresent && !qoderStatus.isEnabled
+    /// 某个受 gate 的 qoder 产品(cli/work)是否该在它行下挂"未开启"提示。
+    /// CLI 与 Work 各自挂一条（同一个 env，点任一跳设置页都能看到是共享开关）。
+    private func showsQoderHint(for pid: String) -> Bool {
+        guard !qoderStatus.isEnabled, visibleProviderIds.contains(pid) else { return false }
+        switch pid {
+        case "qoder-cli":  return qoderStatus.isCliPresent
+        case "qoder-work": return qoderStatus.isWorkPresent
+        default:           return false
+        }
+    }
+
+    /// 当前要显示的 qoder 未开启提示行条数(0~2),用于算高度。
+    private var qoderHintCount: Int {
+        (showsQoderHint(for: "qoder-cli") ? 1 : 0) + (showsQoderHint(for: "qoder-work") ? 1 : 0)
     }
 
     /// 按行数动态算 popover 内容区高度,空状态(0 行)给个最小占位
@@ -253,7 +264,7 @@ struct UsageRootView: View {
     private var contentHeight: CGFloat {
         let n = max(visibleProviderIds.count, 1)
         var h = CGFloat(n) * 26 + CGFloat(max(0, n - 1)) * 5 + 16
-        if showsQoderHint { h += 23 }   // qodercli 未开启提示行(18) + 间距(5)
+        h += CGFloat(qoderHintCount) * 23   // 每条未开启提示行(18) + 间距(5)
         return h
     }
 
@@ -322,7 +333,7 @@ struct UsageRootView: View {
                     ForEach(ids, id: \.self) { pid in
                         let stat = viewModel.stats.first { $0.provider == pid } ?? StatRecord(provider: pid, time: viewModel.window.id, token: 0)
                         ProviderRowView(stat: stat, maxToken: max)
-                        if pid == "qoder-cli" && showsQoderHint {
+                        if showsQoderHint(for: pid) {
                             qoderHintRow
                         }
                     }
@@ -334,7 +345,7 @@ struct UsageRootView: View {
         }
     }
 
-    /// qodercli 装了但没开 token 统计 → 弹层引导行(点「去开启」跳设置页并高亮横幅)
+    /// Qoder CLI / Work 用过但没开 token 统计 → 弹层在对应行下挂引导行(点「去开启」跳设置页)
     private var qoderHintRow: some View {
         HStack(spacing: 4) {
             Image(systemName: "exclamationmark.triangle.fill")
