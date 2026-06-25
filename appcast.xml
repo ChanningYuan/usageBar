@@ -4,23 +4,20 @@
         <title>usageBar</title>
         <item>
             <description><![CDATA[
-<h3>usageBar 0.3.6</h3>
-<p><b>新增</b></p>
+<h3>usageBar 0.3.7</h3>
+<p><b>⚠️ 重要变更（升级后你的 Claude 数字会变大）</b></p>
 <ul>
-<li><b>「Qoder (Work)」用量统计一键开启</b>：QoderWork 和 Qoder CLI 一样，默认不把 token 用量写到本地（显示 0）。现在偏好设置的 Qoder 区<b>顶部有一个共享开关</b>，一键开启后 <b>Qoder CLI 和 QoderWork 同时生效</b>（写入环境变量 `QODER_EXPOSE_TOKEN_USAGE=1`，不动你 `~/.zshrc` 里的其它内容）；首次开启后 CLI 新开终端、QoderWork 重启 app 才开始记录，可随时一键撤销。菜单弹层也会在未开启时于对应行下提示「去开启」。（Qoder IDE 不受此限制，本就正常统计。）</li>
+<li><b>补回 Claude 子代理 / workflow 用量</b>：之前「Claude Code（订阅 / API）」的统计漏掉了所有<b>子代理（Task）</b>和 <b>ultracode workflow</b> 跑出来的 token——它们的 transcript 存在各会话的 `subagents/` 子目录里，旧版扫描时被整体跳过、从未计入。现已纳入。</li>
 </ul>
-<p><b>修复</b></p>
-<ul>
-<li><b>首次运行不再误隐藏「Qoder (Work)」</b>：用过 QoderWork 但还没开启用量统计（本地全 0）的用户，首次运行不会再把这一行自动隐藏，确保能看到开启引导。</li>
-</ul>
+<p>  <b>升级后你的 Claude 数字会上升</b>，跑过 workflow / 大量子代理的用户升幅明显——这是补回此前漏算、<b>不是重复计数</b>：这部分用量独立于主对话（`message.id` 不与主对话重叠），不会和已有数字相加成双。</p>
             ]]></description>
-            <title>0.3.6</title>
-            <pubDate>Thu, 25 Jun 2026 11:24:29 +0800</pubDate>
-            <sparkle:version>0.3.6</sparkle:version>
-            <sparkle:shortVersionString>0.3.6</sparkle:shortVersionString>
+            <title>0.3.7</title>
+            <pubDate>Thu, 25 Jun 2026 16:32:58 +0800</pubDate>
+            <sparkle:version>0.3.7</sparkle:version>
+            <sparkle:shortVersionString>0.3.7</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1614379" type="application/octet-stream" sparkle:edSignature="kMEyWRhDhRq8zy1Bf1EkqCsWpcmHFvjUc0PL5getfmfruKCnsRvZNqbaueJmq4faw71vWXiRHX6J5l76AZDFAw=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1614398" type="application/octet-stream" sparkle:edSignature="6lAsW8/tSsEFk1oRcyFQa4Wdow3gddqabz4HRhJVviT9zt5wqK1CubBtaSrBxGgtBQNFQSwyQ2rcue3MD+A9CA=="/>
         </item>
     </channel>
 </rss>

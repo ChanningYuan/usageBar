@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.7] - 2026-06-25
+
+### ⚠️ 重要变更（升级后你的 Claude 数字会变大）
+- **补回 Claude 子代理 / workflow 用量**：之前「Claude Code（订阅 / API）」的统计漏掉了所有**子代理（Task）**和 **ultracode workflow** 跑出来的 token——它们的 transcript 存在各会话的 `subagents/` 子目录里，旧版扫描时被整体跳过、从未计入。现已纳入。
+  **升级后你的 Claude 数字会上升**，跑过 workflow / 大量子代理的用户升幅明显——这是补回此前漏算、**不是重复计数**：这部分用量独立于主对话（`message.id` 不与主对话重叠），不会和已有数字相加成双。
+
 ## [0.3.6] - 2026-06-25
 
 ### 新增

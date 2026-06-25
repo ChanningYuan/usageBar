@@ -85,8 +85,11 @@ public actor ClaudeJsonlScanner {
         let projectsDir = home.appendingPathComponent(".claude/projects")
         guard FileManager.default.fileExists(atPath: projectsDir.path) else { return [] }
 
+        // 含 subagents/（Task 子代理 + ultracode workflow agent 的 transcript）。
+        // 它们的 usage 完全独立于父对话、message.id 不跨文件重复（实测 0 重叠），
+        // 漏收即漏算 workflow/子代理用量。文件级 dedup 已够，无需跨文件去重。
         let jsonlFiles = JSONLReader.findFiles(under: projectsDir) { url in
-            url.pathExtension == "jsonl" && !url.path.contains("/subagents/")
+            url.pathExtension == "jsonl"
         }
 
         var allRecords: [FileDailyRecord] = []
