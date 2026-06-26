@@ -67,7 +67,7 @@ let package = Package(
         // 单测
         .testTarget(
             name: "usageBarCoreTests",
-            dependencies: ["usageBarCore"],
+            dependencies: ["usageBarCore", "usageBarProviders"],
             path: "Tests/usageBarCoreTests"
         ),
     ]

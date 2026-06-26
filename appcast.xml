@@ -4,20 +4,20 @@
         <title>usageBar</title>
         <item>
             <description><![CDATA[
-<h3>usageBar 0.3.7</h3>
-<p><b>⚠️ 重要变更（升级后你的 Claude 数字会变大）</b></p>
+<h3>usageBar 0.3.8</h3>
+<p><b>修复</b></p>
 <ul>
-<li><b>补回 Claude 子代理 / workflow 用量</b>：之前「Claude Code（订阅 / API）」的统计漏掉了所有<b>子代理（Task）</b>和 <b>ultracode workflow</b> 跑出来的 token——它们的 transcript 存在各会话的 `subagents/` 子目录里，旧版扫描时被整体跳过、从未计入。现已纳入。</li>
+<li><b>修复 Codex「fork」会话 token 重复计数</b>：用 `codex fork` 从已有会话分叉时，新会话文件会把父会话的整段 token 历史一并 replay 进去；旧版逐文件独立统计会把这段重复计入，导致 Codex 用量虚高（实测可达 2~2.5 倍）。现已按会话的 `forked_from_id` 识别 fork 文件、以父会话最终值作差分基线去重，只统计 fork 后的真实新增。</li>
 </ul>
-<p>  <b>升级后你的 Claude 数字会上升</b>，跑过 workflow / 大量子代理的用户升幅明显——这是补回此前漏算、<b>不是重复计数</b>：这部分用量独立于主对话（`message.id` 不与主对话重叠），不会和已有数字相加成双。</p>
+<p>  没用过 `codex fork` 的用户数字不变；交互式 / `codex exec resume` 不受影响（它们只追加回原会话文件、本就不会重复计）；子代理（subagent）会话独立计账、不参与去重。</p>
             ]]></description>
-            <title>0.3.7</title>
-            <pubDate>Thu, 25 Jun 2026 16:32:58 +0800</pubDate>
-            <sparkle:version>0.3.7</sparkle:version>
-            <sparkle:shortVersionString>0.3.7</sparkle:shortVersionString>
+            <title>0.3.8</title>
+            <pubDate>Fri, 26 Jun 2026 17:17:39 +0800</pubDate>
+            <sparkle:version>0.3.8</sparkle:version>
+            <sparkle:shortVersionString>0.3.8</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1614398" type="application/octet-stream" sparkle:edSignature="6lAsW8/tSsEFk1oRcyFQa4Wdow3gddqabz4HRhJVviT9zt5wqK1CubBtaSrBxGgtBQNFQSwyQ2rcue3MD+A9CA=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1622717" type="application/octet-stream" sparkle:edSignature="cAL9op5VErXitGKRbXETfrKkJ70r+8OixMF2alB9JfoATs74b4ihaTpPfkYkyanzrb6tI3oZhD7jEf4PUq+LDw=="/>
         </item>
     </channel>
 </rss>

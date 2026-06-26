@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.8] - 2026-06-26
+
+### 修复
+- **修复 Codex「fork」会话 token 重复计数**：用 `codex fork` 从已有会话分叉时，新会话文件会把父会话的整段 token 历史一并 replay 进去；旧版逐文件独立统计会把这段重复计入，导致 Codex 用量虚高（实测可达 2~2.5 倍）。现已按会话的 `forked_from_id` 识别 fork 文件、以父会话最终值作差分基线去重，只统计 fork 后的真实新增。
+  没用过 `codex fork` 的用户数字不变；交互式 / `codex exec resume` 不受影响（它们只追加回原会话文件、本就不会重复计）；子代理（subagent）会话独立计账、不参与去重。
+
 ## [0.3.7] - 2026-06-25
 
 ### ⚠️ 重要变更（升级后你的 Claude 数字会变大）
