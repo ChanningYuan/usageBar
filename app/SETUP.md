@@ -12,7 +12,7 @@ app/
 │   ├── usageBar/          主 App：main.swift + AppDelegate + StatusBarController + SwiftUI 视图
 │   ├── usageBarCore/      协议层：UsageProvider 协议 + 数据模型 + 增量缓存
 │   └── usageBarProviders/ 各 provider 实现
-├── Scripts/              打包脚本（build-app.sh / build-skill.sh）
+├── Scripts/              打包脚本（build-app.sh）
 └── Tests/usageBarCoreTests/  单测
 ```
 
@@ -51,13 +51,13 @@ cd app
 | 产物 | 路径 | 用途 |
 |---|---|---|
 | `usageBar.app` | `app/dist/usageBar.app` | 本机测试：`open app/dist/usageBar.app` |
-| `usageBar.zip` | `app/dist/usageBar.zip` | **给人类**：解压双击安装的 .app |
-| `install-usagebar.zip` | `install-usagebar.zip`（仓库根） | **给 AI Agent**：完整 skill 包（含 SKILL.md + 脚本 + .app） |
+| `usageBar.zip` | `app/dist/usageBar.zip` | Sparkle 更新包 + 官网镜像 / skill 用 |
+| `usageBar.dmg` | `app/dist/usageBar.dmg` | **给人类**：拖拽安装的 DMG（推荐） |
 
-> `build-app.sh` 会自动把最新 `.app` 同步进 `install-usagebar/` 并重打 skill 包。
-> 如果只想单独重打 skill 包，用 `./Scripts/build-skill.sh`。
+> 「给 AI 装」改走远程 skill.md（[usagebar.cn/skill.md](https://usagebar.cn/skill.md)）+ 火山镜像
+> （`usagebar.cn/dl/usageBar.zip`，服务器 cron 每天自动从 GitHub 同步），**不再随仓库分发** install-usagebar.zip。
 
-把这两个 zip 传到 GitHub Releases，README 的两条安装路径就指向它们。
+发布把 `usageBar.dmg` + `usageBar.zip` 传到 GitHub Releases。
 
 ## 五、添加新 Provider（5 步）
 

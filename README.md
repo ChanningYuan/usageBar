@@ -50,13 +50,13 @@
 > ✅ 已做 Apple **Developer ID 签名 + 公证**，双击即开，无需任何额外放行步骤。
 > （也提供 `usageBar.zip`：解压出 `.app` 拖进 `/Applications`，效果相同。）
 
-### 给 AI Agent：让它帮你装
+### 给 AI Agent：一句话装
 
-1. 到 [Releases](../../releases) 下载 `install-usagebar.zip`
-2. 解压到 AI Agent 的 skill 目录，例如 Claude Code：`~/.claude/skills/install-usagebar/`
-3. 跟 AI 说"装一下 usageBar"，它会自动跑 `scripts/install.sh`（解压 .app → 清 Gatekeeper 隔离 → 拷到 `/Applications` → 启动）
+把这句话发给你的 AI（Claude Code / Cursor 等）——它会自动下载、验签、装好并启动，你啥都不用下：
 
-诊断 / 卸载等更多用法见 [`install-usagebar/README.md`](install-usagebar/README.md)。
+> 照着 https://usagebar.cn/skill.md 给我装一下 usageBar
+
+全程可见可审计：从官方镜像下载**已公证**的 `.app` → `spctl` 验签 → 装到 `/Applications` → 启动。
 
 > 🔄 **自动更新**：0.2.0 起内置 Sparkle——装好后会自动检查新版并提示一键升级，右键菜单也有"检查更新…"。
 
@@ -71,9 +71,10 @@ usageBar/
 │   │   ├── usageBarCore/      协议层：Provider 协议 + 数据模型 + 增量缓存
 │   │   └── usageBarProviders/ 各 provider 实现
 │   └── Scripts/               打包脚本
-├── icon/                      App 图标资源
-└── install-usagebar/          安装 / 诊断 / 卸载 skill
+└── icon/                      App 图标资源
 ```
+
+> 「给 AI 装」的 skill 托管在 [usagebar.cn/skill.md](https://usagebar.cn/skill.md)（不在仓库内）。
 
 ## 自己构建 / 审计代码
 

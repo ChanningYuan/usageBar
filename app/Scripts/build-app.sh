@@ -181,23 +181,11 @@ if [ "$DO_SIGN" = "1" ]; then
   fi
 fi
 
-# 自动同步到 install-usagebar skill（如果存在）
-SKILL_DIR_PATH="$PROJECT_DIR/../install-usagebar"
-if [ -d "$SKILL_DIR_PATH" ]; then
-  # ⚠️ skill 的 install.sh 解压的是 usageBar.tar.gz（不是 .zip）——必须从最新 .app
-  # 重新生成它，否则 AI 安装会装到旧版（曾出现 .zip 刷新了但 .tar.gz 没刷新的脱节 bug）
-  echo "→ 生成 skill 安装包 usageBar.tar.gz..."
-  tar -czf "$SKILL_DIR_PATH/usageBar.tar.gz" -C "$DIST_DIR" usageBar.app
-  # 清掉历史遗留的冗余 usageBar.zip（skill 不用它，留着会造成版本错乱）
-  rm -f "$SKILL_DIR_PATH/usageBar.zip"
-
-  # 顺手重新打 install-usagebar.zip（顶层分发包）
-  SKILL_PARENT="$PROJECT_DIR/.."
-  cd "$SKILL_PARENT"
-  rm -f install-usagebar.zip
-  zip -r -q install-usagebar.zip install-usagebar -x "*.DS_Store"
-  echo "→ 重新打 install-usagebar.zip: $(pwd)/install-usagebar.zip"
-fi
+# 「给 AI 装」自 2026-06-30 起改为**远程 skill.md**（https://usagebar.cn/skill.md）+
+# **火山镜像**（https://usagebar.cn/dl/usageBar.zip，服务器 cron 每天自动从 GitHub release
+# 同步 usageBar.zip）。skill 让 agent 现拉 usageBar.zip 安装，不再随包分发。
+# 故本脚本**不再生成** usageBar.tar.gz / install-usagebar.zip（旧本地 zip 安装方式已废弃，
+# 该方式 8 个版本累计 0 下载）。需要镜像更新时由服务器 cron 自动完成，无需 build 侧介入。
 
 echo ""
 echo "✅ 完成"
@@ -205,13 +193,10 @@ echo ""
 echo "产物："
 echo "  $APP_DIR"
 echo "  $DIST_DIR/usageBar.dmg                ← DMG 拖拽安装包（给人类，推荐）"
-echo "  $DIST_DIR/usageBar.zip                ← 单独 .app zip（备选）"
-if [ -d "$PROJECT_DIR/../install-usagebar" ]; then
-  echo "  $(cd "$PROJECT_DIR/.." && pwd)/install-usagebar.zip   ← skill 完整包（发同事用）"
-fi
+echo "  $DIST_DIR/usageBar.zip                ← 单独 .app zip（Sparkle 更新包 + 镜像/skill 用）"
 echo ""
 echo "测试本机能跑："
 echo "  open $APP_DIR"
 echo ""
-echo "发同事 skill 包："
-echo "  $(cd "$PROJECT_DIR/.." && pwd)/install-usagebar.zip"
+echo "发版只需上传 release：usageBar.dmg + usageBar.zip（install-usagebar.zip 已停产）。"
+echo "「给 AI 装」走 https://usagebar.cn/skill.md + 镜像 /dl/usageBar.zip（服务器 cron 自动同步）。"
