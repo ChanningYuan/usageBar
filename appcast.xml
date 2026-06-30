@@ -4,20 +4,25 @@
         <title>usageBar</title>
         <item>
             <description><![CDATA[
-<h3>usageBar 0.3.8</h3>
-<p><b>修复</b></p>
+<h3>usageBar 0.3.9</h3>
+<p><b>新增</b></p>
 <ul>
-<li><b>修复 Codex「fork」会话 token 重复计数</b>：用 `codex fork` 从已有会话分叉时，新会话文件会把父会话的整段 token 历史一并 replay 进去；旧版逐文件独立统计会把这段重复计入，导致 Codex 用量虚高（实测可达 2~2.5 倍）。现已按会话的 `forked_from_id` 识别 fork 文件、以父会话最终值作差分基线去重，只统计 fork 后的真实新增。</li>
+<li><b>数字悬浮看精确值 + 点击复制</b>：鼠标停在「合计」或某工具的用量数字上，即时浮出精确值（带千分位）；点一下即把整数复制到剪贴板，方便贴到表格/记账。</li>
+<li><b>空状态引导</b>：某个时间视图下完全没有用量时，显示一句引导（如「今天还没烧 token —— 快去蹬两下 AI 🚀」）。</li>
 </ul>
-<p>  没用过 `codex fork` 的用户数字不变；交互式 / `codex exec resume` 不受影响（它们只追加回原会话文件、本就不会重复计）；子代理（subagent）会话独立计账、不参与去重。</p>
+<p><b>变更</b></p>
+<ul>
+<li><b>各视图只显示「该周期用过」的工具</b>：今日 / 近 7 天 / 近 30 天 / 累计，每个视图只列在该周期有用量的 provider，没用量的自动隐藏，列表更清爽。（Qoder CLI/Work 装了但还没开 token 统计的仍保留并挂「去开启」引导，不会被隐藏。）</li>
+<li><b>provider 按用量从高到低排序</b>：用得多的排在上面。</li>
+</ul>
             ]]></description>
-            <title>0.3.8</title>
-            <pubDate>Fri, 26 Jun 2026 17:17:39 +0800</pubDate>
-            <sparkle:version>0.3.8</sparkle:version>
-            <sparkle:shortVersionString>0.3.8</sparkle:shortVersionString>
+            <title>0.3.9</title>
+            <pubDate>Tue, 30 Jun 2026 15:33:41 +0800</pubDate>
+            <sparkle:version>0.3.9</sparkle:version>
+            <sparkle:shortVersionString>0.3.9</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1622717" type="application/octet-stream" sparkle:edSignature="cAL9op5VErXitGKRbXETfrKkJ70r+8OixMF2alB9JfoATs74b4ihaTpPfkYkyanzrb6tI3oZhD7jEf4PUq+LDw=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1642732" type="application/octet-stream" sparkle:edSignature="NfRoY7gNb1hWGouF9Gwv3H2ztXy3m1ofvm7MFCgcKMrUo7Qh8Ioj7CdcUIHhIpwwBHfExaw6P/4LtDNqLTnwCA=="/>
         </item>
     </channel>
 </rss>
