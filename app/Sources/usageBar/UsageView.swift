@@ -262,7 +262,7 @@ struct UsageRootView: View {
     /// 按行数动态算 popover 内容区高度,空状态(0 行)给个最小占位
     /// 26pt 行高 + 5pt 间距,加 16pt 上下 padding。header/footer 各约 28pt。
     private var contentHeight: CGFloat {
-        let n = max(visibleProviderIds.count, 1)
+        let n = max(displayedProviderIds.count, 1)
         var h = CGFloat(n) * 26 + CGFloat(max(0, n - 1)) * 5 + 16
         h += CGFloat(qoderHintCount) * 23   // 每条未开启提示行(18) + 间距(5)
         return h
@@ -315,24 +315,36 @@ struct UsageRootView: View {
         settings.visibleProviderIds()
     }
 
+    /// 在「可见」基础上，再按当前周期过滤后**真正要展示**的 provider：
+    /// - 一般 provider / Cursor / gate 开的 Qoder：该周期 `token>0` 才显示（没用就隐藏）。
+    /// - gate 关的 Qoder（CLI/Work）：装了就显示（`showsQoderHint` = gate 关 + present，不分周期），
+    ///   token=0 也保留并挂「去开启」——否则用户永远看不到开启引导。
+    private var displayedProviderIds: [String] {
+        func token(_ pid: String) -> Int { viewModel.stats.first { $0.provider == pid }?.token ?? 0 }
+        let filtered = visibleProviderIds.filter { token($0) > 0 || showsQoderHint(for: $0) }
+        // 按当前周期用量降序；token 相同（如多个 Qoder「去开启」0 行）保持原注册顺序（稳定排序）
+        return filtered.enumerated()
+            .sorted { a, b in
+                let ta = token(a.element), tb = token(b.element)
+                return ta != tb ? ta > tb : a.offset < b.offset
+            }
+            .map { $0.element }
+    }
+
     private var content: some View {
-        let max = viewModel.maxToken
-        let ids = visibleProviderIds
+        let maxT = viewModel.maxToken
+        let visible = visibleProviderIds
+        let displayed = displayedProviderIds
         return Group {
-            if ids.isEmpty {
-                VStack {
-                    Spacer()
-                    Text("所有 provider 都已在偏好设置中关闭")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if visible.isEmpty {
+                centeredHint("所有 provider 都已在偏好设置中关闭")
+            } else if displayed.isEmpty {
+                centeredHint(noUsageMessage)
             } else {
                 VStack(spacing: 5) {
-                    ForEach(ids, id: \.self) { pid in
+                    ForEach(displayed, id: \.self) { pid in
                         let stat = viewModel.stats.first { $0.provider == pid } ?? StatRecord(provider: pid, time: viewModel.window.id, token: 0)
-                        ProviderRowView(stat: stat, maxToken: max)
+                        ProviderRowView(stat: stat, maxToken: maxT)
                         if showsQoderHint(for: pid) {
                             qoderHintRow
                         }
@@ -342,6 +354,30 @@ struct UsageRootView: View {
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
+        }
+    }
+
+    /// 居中提示（两种空状态共用）
+    private func centeredHint(_ text: String) -> some View {
+        VStack {
+            Spacer()
+            Text(text)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// 当前周期无任何用量时的空状态文案（按周期措辞，引导用户去用 AI）
+    private var noUsageMessage: String {
+        switch viewModel.window {
+        case .today:      return "今天还没烧 token —— 快去蹬两下 AI 🚀"
+        case .last7Days:  return "近 7 天还没有用量 —— 去用用 AI 吧 🚀"
+        case .last30Days: return "近 30 天还没有用量 —— 去用用 AI 吧 🚀"
+        case .all:        return "还没有任何用量 —— 装好就去用 AI 吧 🚀"
+        case .custom:     return "这段时间还没有用量 🚀"
         }
     }
 
@@ -381,6 +417,7 @@ struct UsageRootView: View {
         HStack(spacing: 8) {
             Text("合计 \(formatTokens(visibleGrandTotal))")
                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .copyableExact(visibleGrandTotal)
 
             Spacer()
 
@@ -492,6 +529,7 @@ struct ProviderRowView: View {
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundStyle(stat.token > 0 ? .primary : .secondary)
                 .frame(width: 56, alignment: .trailing)
+                .copyableExact(stat.token)
         }
         .frame(height: 26)
     }
@@ -517,4 +555,61 @@ struct ProviderRowView: View {
         if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
         return "\(n)"
     }
+}
+
+// MARK: - 数字「点击复制 / 悬浮看精确值」修饰器
+
+/// 把显示缩写数字（74.9M）的 Text 变成：悬浮即显精确值（千分位）+「点击复制」提示行；
+/// 点击复制 **raw 整数**（无千分位、无单位）到剪贴板，并在上方短暂浮「已复制 ✓」。
+/// value <= 0 时无任何附加行为（零用量行不可点 / 不弹 tooltip）。
+private struct CopyableExact: ViewModifier {
+    let value: Int
+    @State private var hovering = false
+    @State private var copied = false
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(Rectangle())
+            .onHover { hovering = $0 && value > 0 }       // 自定义 hover：即时，不走原生 tooltip 的慢延迟
+            .onTapGesture {
+                guard value > 0 else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(String(value), forType: .string)
+                copied = true
+                hovering = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { copied = false }
+            }
+            .overlay(alignment: .top) { floatTip.offset(y: -26).allowsHitTesting(false) }
+    }
+
+    @ViewBuilder private var floatTip: some View {
+        if copied {
+            Text("已复制 ✓")
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Capsule().fill(.green))
+                .fixedSize()
+        } else if hovering {
+            VStack(spacing: 1) {
+                Text(value.formatted())
+                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                Text("点击复制")
+                    .font(.system(size: 8.5))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .shadow(color: .black.opacity(0.18), radius: 5, y: 1)
+            )
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2)))
+            .fixedSize()
+        }
+    }
+}
+
+private extension View {
+    func copyableExact(_ value: Int) -> some View { modifier(CopyableExact(value: value)) }
 }

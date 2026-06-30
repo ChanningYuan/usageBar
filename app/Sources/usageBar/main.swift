@@ -2,6 +2,10 @@ import AppKit
 import usageBarCore
 import usageBarProviders
 
+// 悬浮提示(tooltip)0 延迟——AppKit 默认 ~2-3s 太慢。读 NSInitialToolTipDelay(毫秒)，
+// 必须在任何 tooltip 出现前设置。
+UserDefaults.standard.register(defaults: ["NSInitialToolTipDelay": 0])
+
 // 注册 5 个 provider
 UsageBarProviders.registerAll()
 
