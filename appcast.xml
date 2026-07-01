@@ -4,25 +4,29 @@
         <title>usageBar</title>
         <item>
             <description><![CDATA[
-<h3>usageBar 0.3.9</h3>
+<h3>usageBar 0.3.10</h3>
 <p><b>新增</b></p>
 <ul>
-<li><b>数字悬浮看精确值 + 点击复制</b>：鼠标停在「合计」或某工具的用量数字上，即时浮出精确值（带千分位）；点一下即把整数复制到剪贴板，方便贴到表格/记账。</li>
-<li><b>空状态引导</b>：某个时间视图下完全没有用量时，显示一句引导（如「今天还没烧 token —— 快去蹬两下 AI 🚀」）。</li>
+<li><b>缓存命中率</b>：各工具行显示「xx.x% 缓存命中」，鼠标悬浮可看「缓存 / 非缓存」的绝对值拆分——一眼知道用量里多少是计费打折的缓存命中读取。</li>
+<li><b>用量数字点击复制</b>：数字带虚线下划，悬浮看精确值、点击即复制到剪贴板（「合计」同样支持）。</li>
 </ul>
 <p><b>变更</b></p>
 <ul>
-<li><b>各视图只显示「该周期用过」的工具</b>：今日 / 近 7 天 / 近 30 天 / 累计，每个视图只列在该周期有用量的 provider，没用量的自动隐藏，列表更清爽。（Qoder CLI/Work 装了但还没开 token 统计的仍保留并挂「去开启」引导，不会被隐藏。）</li>
-<li><b>provider 按用量从高到低排序</b>：用得多的排在上面。</li>
+<li><b>界面重构</b>：进度条移到工具名下方、更细，单色纯表用量对比；数字移到右侧整行居中；字号统一、整体更紧凑。</li>
+<li><b>切换周期时菜单栏同步</b>：在弹层切「今日 / 7天 / 30天 / 累计」时，菜单栏标题数字实时跟随，不再和弹层对不上。</li>
+</ul>
+<p><b>修复</b></p>
+<ul>
+<li><b>Cursor 用量少算修正</b>：Cursor 之前只统计输入/输出、漏掉了缓存两桶，用量被低估（约 87%）。现已补回——<b>Cursor 数字会一次性上升，这是补回缓存、非重复计数</b>。</li>
 </ul>
             ]]></description>
-            <title>0.3.9</title>
-            <pubDate>Tue, 30 Jun 2026 15:33:41 +0800</pubDate>
-            <sparkle:version>0.3.9</sparkle:version>
-            <sparkle:shortVersionString>0.3.9</sparkle:shortVersionString>
+            <title>0.3.10</title>
+            <pubDate>Thu, 02 Jul 2026 01:29:58 +0800</pubDate>
+            <sparkle:version>0.3.10</sparkle:version>
+            <sparkle:shortVersionString>0.3.10</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1642732" type="application/octet-stream" sparkle:edSignature="NfRoY7gNb1hWGouF9Gwv3H2ztXy3m1ofvm7MFCgcKMrUo7Qh8Ioj7CdcUIHhIpwwBHfExaw6P/4LtDNqLTnwCA=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1660198" type="application/octet-stream" sparkle:edSignature="86xXpoMn+VUXM5se3PIQlmpvs9OZoxRx2BhyphGXb7lhXFgUhy3AdBemLA6h9SejxOCsgmc9VgFNAan5+7cCDw=="/>
         </item>
     </channel>
 </rss>
