@@ -95,27 +95,37 @@ public struct CodexProvider: UsageProvider {
 
     /// 把已收集的 (ts,total) 事件按 baseline+峰值跟踪差分，归到本地日期桶。
     /// 返回 (按日增量, fileFinal=峰值)。非 fork（baseline=0）+ 单调数据时，结果与旧算法逐天一致。
-    static func computeDaily(events: [(ts: Date, total: Int)], baseline: Int) -> (daily: [String: Int], fileFinal: Int) {
+    static func computeDaily(events: [(ts: Date, total: Int, cached: Int)], baseline: Int, cachedBaseline: Int)
+        -> (daily: [String: Int], cachedDaily: [String: Int], fileFinal: Int, cachedFinal: Int) {
         let sorted = events.sorted { $0.ts < $1.ts }
         var daily: [String: Int] = [:]
+        var cachedDaily: [String: Int] = [:]
         var prev = baseline
+        var prevCached = cachedBaseline
         for ev in sorted {
+            let date = DailyAggregator.dateString(for: ev.ts)
             let delta = max(0, ev.total - prev)
+            // cached 是 total 子集,但逐 event 的 cached 增量可能 > total 增量(上一步缓存占比低时)。
+            // clamp 到 delta,保证 cachedToken ≤ token(浅色段不超过进度条总长)。
+            let cdelta = min(max(0, ev.cached - prevCached), delta)
             prev = max(prev, ev.total)
+            prevCached = max(prevCached, ev.cached)
             if delta > 0 {
-                daily[DailyAggregator.dateString(for: ev.ts), default: 0] += delta
+                daily[date, default: 0] += delta
+                if cdelta > 0 { cachedDaily[date, default: 0] += cdelta }
             }
         }
         let peak = max(baseline, sorted.map { $0.total }.max() ?? 0)
-        return (daily, peak)
+        let cachedPeak = max(cachedBaseline, sorted.map { $0.cached }.max() ?? 0)
+        return (daily, cachedDaily, peak, cachedPeak)
     }
 
     // MARK: - 文件解析
 
     /// 遍历单个 rollout 文件，收集所有有效 token_count 事件的 (ts,total)。
     /// `info==null` 的 token_count 跳过（不变量2）。
-    private func parseRawEvents(url: URL) -> [(ts: Date, total: Int)] {
-        var events: [(ts: Date, total: Int)] = []
+    private func parseRawEvents(url: URL) -> [(ts: Date, total: Int, cached: Int)] {
+        var events: [(ts: Date, total: Int, cached: Int)] = []
         try? JSONLReader.forEachLine(at: url) { obj in
             guard let payload = obj["payload"] as? [String: Any],
                   (payload["type"] as? String) == "token_count",
@@ -125,7 +135,8 @@ public struct CodexProvider: UsageProvider {
                   let ts = ISODateParser.parse(tsStr)
             else { return }
             let total = (usage["total_tokens"] as? Int) ?? 0
-            events.append((ts, total))
+            let cached = (usage["cached_input_tokens"] as? Int) ?? 0   // 命中读取（input 子集）→ 浅色
+            events.append((ts, total, cached))
         }
         return events
     }
@@ -142,7 +153,8 @@ public struct CodexProvider: UsageProvider {
         }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
-        var sessionFinal: [String: Int] = [:]   // session id → 该会话 peak(=final) total
+        var sessionFinal: [String: Int] = [:]        // session id → total peak(=final)
+        var sessionCachedFinal: [String: Int] = [:]  // session id → cached peak(=final)（fork 的 cachedBaseline 用）
         var allRecords: [FileDailyRecord] = []
 
         for url in files {
@@ -150,11 +162,13 @@ public struct CodexProvider: UsageProvider {
 
             // —— baseline 决策（优先级：subagent 短路 > fork 信号1 > 默认0）——
             var baseline = 0
+            var cachedBaseline = 0
             if let meta {
                 if meta.isSubagent {
-                    baseline = 0                                  // subagent 绝不减基线
+                    baseline = 0; cachedBaseline = 0              // subagent 绝不减基线
                 } else if let parent = meta.forkedFromId {        // 信号1：显式 fork 指针
                     baseline = sessionFinal[parent] ?? 0          // 父缺失 → 0 → 按全量算（自愈）
+                    cachedBaseline = sessionCachedFinal[parent] ?? 0
                 }
                 // 信号2（嵌入式父 id 兜底）：TODO，当前 codex 行为下用不到（见类型注释）。
             }
@@ -163,18 +177,21 @@ public struct CodexProvider: UsageProvider {
             let path = url.path
             let records: [FileDailyRecord]
             let fileFinal: Int
+            let cachedFinal: Int
 
             if !isFork,
                let m = FileMetadata.read(at: path),
                let entry = await FileMtimeCache.shared.lookup(filePath: path, mtime: m.mtime, size: m.size) {
-                // 非 fork 文件缓存命中：baseline 恒为 0 且会话单调 → fileFinal = Σrecords
+                // 非 fork 缓存命中：baseline 恒 0 且会话单调 → fileFinal=Σtoken、cachedFinal=Σcached
                 records = entry.records
                 fileFinal = entry.records.reduce(0) { $0 + $1.token }
+                cachedFinal = entry.records.reduce(0) { $0 + $1.cachedToken }
             } else {
                 let events = parseRawEvents(url: url)
-                let (daily, ff) = Self.computeDaily(events: events, baseline: baseline)
-                records = daily.map { FileDailyRecord(provider: id, date: $0.key, token: $0.value) }
+                let (daily, cachedDaily, ff, cf) = Self.computeDaily(events: events, baseline: baseline, cachedBaseline: cachedBaseline)
+                records = daily.map { FileDailyRecord(provider: id, date: $0.key, token: $0.value, cachedToken: cachedDaily[$0.key] ?? 0) }
                 fileFinal = ff
+                cachedFinal = cf
                 // 只缓存非 fork 文件：fork 的 records 依赖跨文件 baseline，父增长会让它失效，故不缓存。
                 if !isFork, let m = FileMetadata.read(at: path) {
                     await FileMtimeCache.shared.store(
@@ -185,6 +202,7 @@ public struct CodexProvider: UsageProvider {
 
             if let meta, !meta.ownId.isEmpty {
                 sessionFinal[meta.ownId] = max(sessionFinal[meta.ownId] ?? 0, fileFinal)
+                sessionCachedFinal[meta.ownId] = max(sessionCachedFinal[meta.ownId] ?? 0, cachedFinal)
             }
             allRecords.append(contentsOf: records)
         }

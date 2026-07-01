@@ -19,6 +19,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     private var rightClickMenu: NSMenu!
     private var titleSubscription: AnyCancellable?
     private var settingsSubscription: AnyCancellable?
+    private var statsSubscription: AnyCancellable?
 
     /// 后台刷新间隔：10 分钟（mtime 增量后单次成本低，但仍避免高频）
     private let refreshInterval: TimeInterval = 600
@@ -51,6 +52,10 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     /// 包括 SwiftUI 弹层里的 🔄 按钮——都会同步菜单栏,不需要每个 caller 自己记得调。
     private func installTitleSubscription() {
         titleSubscription = viewModel.$lastRefreshAt
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.updateMenuBarTitle() }
+        // 切 tab（changeWindow 改 stats）也刷菜单栏 title，保证标题与 popover 当前周期始终一致
+        statsSubscription = viewModel.$stats
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.updateMenuBarTitle() }
     }

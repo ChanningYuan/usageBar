@@ -74,6 +74,7 @@ public struct HermesProvider: UsageProvider {
         defer { sqlite3_finalize(stmt) }
 
         var dailyTotals: [String: Int] = [:]
+        var dailyCached: [String: Int] = [:]
         while sqlite3_step(stmt) == SQLITE_ROW {
             // started_at 是秒（float）；tokscale: >1e12 视为毫秒，否则秒
             let startedAt = sqlite3_column_double(stmt, 0)
@@ -87,10 +88,11 @@ public struct HermesProvider: UsageProvider {
             let seconds = startedAt > 1_000_000_000_000 ? startedAt / 1000.0 : startedAt
             let date = DailyAggregator.dateString(for: Date(timeIntervalSince1970: seconds))
             dailyTotals[date, default: 0] += total
+            dailyCached[date, default: 0] += cacheRead   // 浅色：仅命中读取（cache_write 归深色）
         }
 
         return dailyTotals.map { (date, token) in
-            FileDailyRecord(provider: id, date: date, token: token)
+            FileDailyRecord(provider: id, date: date, token: token, cachedToken: dailyCached[date] ?? 0)
         }
     }
 }

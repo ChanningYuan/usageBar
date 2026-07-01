@@ -237,7 +237,7 @@ struct SettingsView: View {
 /// - `isAnyGatedPresent==false`（CLI / Work 都没用过）→ 整条不出现。
 /// - 未开启 → 橙底警告文案 + [一键开启]。
 /// - 已开启 → 绿底「✓ 已开启」+ 生效说明 + 撤销（开启后唯一样式）。
-/// 详见 docs/qoder-family-token-gate.md。
+/// 详见 docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md。
 private struct QoderUsageBanner: View {
     @ObservedObject var status: QoderUsageStatus
 

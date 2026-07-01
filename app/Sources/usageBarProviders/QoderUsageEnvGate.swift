@@ -7,7 +7,7 @@ import Foundation
 /// export 幂等地写进 shell profile（+ launchctl），可一键撤销。CLI 新开终端生效；QoderWork
 /// 是 GUI app，启动时用 `zsh -ilc` 抓登录 shell env 继承它，改完须重启 app 才生效。
 /// （Qoder IDE 不受此 gate，token 直写 SQLite，无需开关。）
-/// 详见 docs/qoder-family-token-gate.md（CLI 前身见 docs/qoder-cli-usage-gate-fix.md）。
+/// 详见 docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md（CLI 前身见 docs/0625-Qoder全家桶token计量/qoder-cli-usage-gate-fix.md）。
 ///
 /// ⚠️ 只读检测会 spawn `launchctl getenv`（仅当 profile 标记块不存在时），
 /// 调用方应在 UI 出现时（onAppear）触发，不要放进高频循环。

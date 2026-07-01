@@ -140,6 +140,7 @@ public enum ClaudeTranscriptParser {
     ) throws -> [FileDailyRecord] {
         // key = "\(provider)|\(date)", value = total token
         var totals: [String: Int] = [:]
+        var cachedTotals: [String: Int] = [:]   // 同 key 的「缓存命中(cache_read)」分量 → 浅色段
         var seenIds = Set<String>()
 
         try JSONLReader.forEachLine(at: url) { obj in
@@ -166,12 +167,15 @@ public enum ClaudeTranscriptParser {
 
             let providerId = classify(messageId)
             let date = DailyAggregator.dateString(for: ts)
-            totals["\(providerId)|\(date)", default: 0] += total
+            let key = "\(providerId)|\(date)"
+            totals[key, default: 0] += total
+            cachedTotals[key, default: 0] += cacheRead   // 浅色：仅命中读取；cache_creation 归深色
         }
 
         return totals.map { (key, token) in
             let parts = key.split(separator: "|", maxSplits: 1)
-            return FileDailyRecord(provider: String(parts[0]), date: String(parts[1]), token: token)
+            return FileDailyRecord(provider: String(parts[0]), date: String(parts[1]),
+                                   token: token, cachedToken: cachedTotals[key] ?? 0)
         }
     }
 }

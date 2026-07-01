@@ -10,7 +10,7 @@ import usageBarProviders
 /// gate 是 family 级的：**一个 `QODER_EXPOSE_TOKEN_USAGE` 同时覆盖 Qoder CLI 和 QoderWork**
 /// （二者共用同款 agent SDK）。所以 `isEnabled` / `enable` / `disable` 是共享的，只有"用过没用过"
 /// 按产品分（`isCliPresent` / `isWorkPresent`）。Qoder IDE 不受 gate，不在此跟踪。
-/// 详见 docs/qoder-family-token-gate.md。
+/// 详见 docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md。
 @MainActor
 final class QoderUsageStatus: ObservableObject {
     static let shared = QoderUsageStatus()

@@ -13,7 +13,7 @@ import usageBarCore
 /// 之前 family 父级 Toggle + 子级独立可控的双层联动太重,删了。
 ///
 /// 跨设备同步:当前只走 UserDefaults(本机 plist),未来需求详见
-/// docs/cross-device-sync-design.md。
+/// docs/0525-跨设备同步设计/cross-device-sync-design.md。
 @MainActor
 final class ProviderVisibilitySettings: ObservableObject {
     static let shared = ProviderVisibilitySettings()
@@ -67,7 +67,7 @@ final class ProviderVisibilitySettings: ObservableObject {
     ///
     /// 「用过」= 有用量（token>0）∪ 有本地数据。后者为 qodercli 特例：装了但因没开
     /// `QODER_EXPOSE_TOKEN_USAGE` 而 transcript 零 token 时，仍按会话文件判定为用过，
-    /// 否则会被自动隐藏 → 连「去开启」横幅都看不到（见 docs/qoder-cli-usage-gate-fix.md）。
+    /// 否则会被自动隐藏 → 连「去开启」横幅都看不到（见 docs/0625-Qoder全家桶token计量/qoder-cli-usage-gate-fix.md）。
     ///
     /// **只执行一次**（用 `didAutoConfigure` 标记），之后用户手动的开关不会被覆盖。
     /// 调用方在每次 refresh 后调用即可，非首次是 no-op。

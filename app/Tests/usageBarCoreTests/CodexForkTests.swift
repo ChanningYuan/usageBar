@@ -51,10 +51,26 @@ final class CodexForkTests: XCTestCase {
     func testComputeDailySplitsByDayAndSumsToFinal() {
         let tsA = ISODateParser.parse("2026-05-11T01:00:00.000Z")!
         let tsB = ISODateParser.parse("2026-05-12T01:00:00.000Z")!  // 约 +24h，本地日界跨天
-        let (daily, fileFinal) = CodexProvider.computeDaily(
-            events: [(tsA, 100), (tsB, 350)], baseline: 0)
+        // (ts, total, cached)
+        let (daily, cachedDaily, fileFinal, cachedFinal) = CodexProvider.computeDaily(
+            events: [(tsA, 100, 30), (tsB, 350, 80)], baseline: 0, cachedBaseline: 0)
         XCTAssertEqual(fileFinal, 350)
+        XCTAssertEqual(cachedFinal, 80)
         XCTAssertEqual(daily.values.reduce(0, +), 350)
+        XCTAssertEqual(cachedDaily.values.reduce(0, +), 80)  // 30 + 50
         XCTAssertEqual(daily.count, 2, "跨两个本地日应拆成两桶")
+    }
+
+    /// cached 逐 event 增量可能 > total 增量 → 必须 clamp，保证 cachedToken ≤ token（浅色不超总长）。
+    func testCodexCachedClampedToTotal() {
+        let tsA = ISODateParser.parse("2026-05-11T01:00:00.000Z")!
+        let tsB = ISODateParser.parse("2026-05-11T02:00:00.000Z")!  // 同一本地日
+        // 第二步 total 只 +10，cached 却 +50 → clamp 到 10
+        let (daily, cachedDaily, _, _) = CodexProvider.computeDaily(
+            events: [(tsA, 100, 20), (tsB, 110, 70)], baseline: 0, cachedBaseline: 0)
+        let day = daily.keys.first!
+        XCTAssertEqual(daily[day], 110)                          // 100 + 10
+        XCTAssertEqual(cachedDaily[day], 30)                     // 20 + min(50,10)=10（未 clamp 会是 70）
+        XCTAssertLessThanOrEqual(cachedDaily[day]!, daily[day]!) // 浅色 ≤ total
     }
 }

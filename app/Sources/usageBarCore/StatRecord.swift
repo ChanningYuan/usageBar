@@ -12,11 +12,14 @@ public struct StatRecord: Codable, Sendable, Equatable {
     public let time: String
     /// 总 token 数
     public let token: Int
+    /// token 里「缓存命中读取」的分量（双色进度条浅色段 + 悬浮气泡用）；无缓存 provider 为 0
+    public let cachedToken: Int
 
-    public init(provider: String, time: String, token: Int) {
+    public init(provider: String, time: String, token: Int, cachedToken: Int = 0) {
         self.provider = provider
         self.time = time
         self.token = token
+        self.cachedToken = cachedToken
     }
 }
 

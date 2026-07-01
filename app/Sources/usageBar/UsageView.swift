@@ -263,7 +263,7 @@ struct UsageRootView: View {
     /// 26pt 行高 + 5pt 间距,加 16pt 上下 padding。header/footer 各约 28pt。
     private var contentHeight: CGFloat {
         let n = max(displayedProviderIds.count, 1)
-        var h = CGFloat(n) * 26 + CGFloat(max(0, n - 1)) * 5 + 16
+        var h = CGFloat(n) * 32 + CGFloat(max(0, n - 1)) * 5 + 16   // 两行行高（名称+细进度条）
         h += CGFloat(qoderHintCount) * 23   // 每条未开启提示行(18) + 间距(5)
         return h
     }
@@ -280,7 +280,7 @@ struct UsageRootView: View {
             Divider()
             footer
         }
-        .frame(width: 440, height: totalHeight)
+        .frame(width: 400, height: totalHeight)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { qoderStatus.refresh() }
     }
@@ -288,9 +288,9 @@ struct UsageRootView: View {
     private var header: some View {
         HStack(spacing: 6) {
             Image(systemName: "chart.bar.xaxis")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 11, weight: .medium))
             Text("usageBar")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 11, weight: .medium))
             Spacer()
             Picker("", selection: Binding(
                 get: { viewModel.window },
@@ -416,14 +416,14 @@ struct UsageRootView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             Text("合计 \(formatTokens(visibleGrandTotal))")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))   // 统一 11pt medium
                 .copyableExact(visibleGrandTotal)
 
             Spacer()
 
             statusLabel
                 .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)   // 刷新状态属次要信息，与缓存% 同层次调淡
 
             Spacer()
 
@@ -506,47 +506,83 @@ struct UsageRootView: View {
 struct ProviderRowView: View {
     let stat: StatRecord
     let maxToken: Int
+    @State private var hoveringCache = false
 
-    private var meta: ProviderMeta {
-        ProviderMetaLookup.meta(for: stat.provider)
-    }
+    private var meta: ProviderMeta { ProviderMetaLookup.meta(for: stat.provider) }
+    private var cached: Int { max(0, min(stat.cachedToken, stat.token)) }
+    private var nonCached: Int { max(0, stat.token - cached) }
 
     var body: some View {
         HStack(spacing: 10) {
             ProviderIcon(providerId: stat.provider)
                 .frame(width: 22, height: 22)
 
-            Text(meta.displayName)
-                .font(.system(size: 11, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(width: 110, alignment: .leading)
+            // 中间：名称(+缓存命中率) + 名称下方的细进度条（占满中间宽度）
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(meta.displayName)
+                        .font(.system(size: 11, weight: .medium))   // 统一 11pt medium（偏细）
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 8)
+                    if cached > 0 {
+                        // 缓存命中率（次要）；hover 它 → 弹绝对值拆分气泡（缓存信息聚在一处）
+                        Text(String(format: "%.1f%% 缓存命中", Double(cached) / Double(stat.token) * 100))
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                            .contentShape(Rectangle())
+                            .onHover { hoveringCache = $0 }
+                            .overlay(alignment: .top) {
+                                if hoveringCache { cacheBubble.offset(y: -28).allowsHitTesting(false) }
+                            }
+                    }
+                }
+                TokenBar(token: stat.token, maxToken: maxToken, brandColor: meta.brandColor)
+                    .frame(height: 4)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-            tokenBar
-                .frame(height: 7)
-
+            // 右侧：数字（统一 11pt medium；用整行高 frame 让它按「整个 provider 容器」垂直居中；虚线贴紧）
             Text(formatTokens(stat.token))
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
                 .foregroundStyle(stat.token > 0 ? .primary : .secondary)
-                .frame(width: 56, alignment: .trailing)
+                .overlay(alignment: .bottom) {
+                    if stat.token > 0 { DashedUnderline().frame(height: 1).offset(y: 1) }
+                }
+                .frame(width: 66, height: 32, alignment: .trailing)
                 .copyableExact(stat.token)
         }
-        .frame(height: 26)
+        .frame(height: 32)
     }
 
-    private var tokenBar: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.secondary.opacity(0.15))
-
-                if stat.token > 0 && maxToken > 0 {
-                    Capsule()
-                        .fill(Color(hex: meta.brandColor))
-                        .frame(width: max(2, geo.size.width * CGFloat(stat.token) / CGFloat(maxToken)))
-                }
-            }
+    // 悬浮气泡：缓存/非缓存绝对值（白卡片样式，与数字/合计的复制浮层一致）
+    private var cacheBubble: some View {
+        HStack(spacing: 10) {
+            bubbleSeg(label: "缓存", value: cached)
+            Divider().frame(height: 12)
+            bubbleSeg(label: "非缓存", value: nonCached)
         }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .shadow(color: .black.opacity(0.18), radius: 5, y: 1)
+        )
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2)))
+        .fixedSize()
+    }
+
+    private func bubbleSeg(label: String, value: Int) -> some View {
+        HStack(spacing: 5) {
+            Text(label).font(.system(size: 9.5)).foregroundStyle(.secondary)
+            Text(fmtExact(value)).font(.system(size: 9.5, design: .monospaced)).foregroundStyle(.secondary)
+        }
+    }
+
+    private func fmtExact(_ n: Int) -> String {
+        if n >= 1_000_000 { return String(format: "%.2fM", Double(n) / 1_000_000) }
+        if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
+        return "\(n)"
     }
 
     private func formatTokens(_ n: Int) -> String {
@@ -557,11 +593,47 @@ struct ProviderRowView: View {
     }
 }
 
+// MARK: - 双色 token 进度条（浅=缓存命中在左，深=非缓存在右）+ 悬浮拆分气泡
+
+private struct TokenBar: View {
+    let token: Int
+    let maxToken: Int
+    let brandColor: String
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let hasData = token > 0 && maxToken > 0
+            let totalW = hasData ? max(2, w * CGFloat(token) / CGFloat(maxToken)) : 0
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.secondary.opacity(0.15))
+                if hasData {
+                    Capsule().fill(Color(hex: brandColor))   // 单色：纯表用量对比
+                        .frame(width: totalW)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - 数字「点击复制 / 悬浮看精确值」修饰器
 
 /// 把显示缩写数字（74.9M）的 Text 变成：悬浮即显精确值（千分位）+「点击复制」提示行；
 /// 点击复制 **raw 整数**（无千分位、无单位）到剪贴板，并在上方短暂浮「已复制 ✓」。
 /// value <= 0 时无任何附加行为（零用量行不可点 / 不弹 tooltip）。
+/// 虚线下划线 —— 行尾数字「可点击复制」的视觉提示（配合 CopyableExact 的 hover+点击）
+private struct DashedUnderline: View {
+    var body: some View {
+        GeometryReader { g in
+            Path { p in
+                p.move(to: CGPoint(x: 0, y: 0.5))
+                p.addLine(to: CGPoint(x: g.size.width, y: 0.5))
+            }
+            .stroke(Color.secondary.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+        }
+    }
+}
+
 private struct CopyableExact: ViewModifier {
     let value: Int
     @State private var hovering = false
@@ -594,9 +666,10 @@ private struct CopyableExact: ViewModifier {
             VStack(spacing: 1) {
                 Text(value.formatted())
                     .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
                 Text("点击复制")
                     .font(.system(size: 8.5))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(

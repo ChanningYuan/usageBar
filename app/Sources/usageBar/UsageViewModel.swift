@@ -88,7 +88,7 @@ final class UsageViewModel: ObservableObject {
         await commitAggregation(providerIds: providerIds, log: log)
         // 首次运行智能默认：只保留「用过」的 provider（有用量 ∪ 有本地数据），其余自动隐藏（仅一次）。
         // Qoder CLI / Work 特例：装了但没开 QODER_EXPOSE_TOKEN_USAGE 时 transcript 零 token，仍按会话文件算
-        // 「用过」，否则会被自动隐藏 → 连「去开启」横幅都看不到（见 docs/qoder-family-token-gate.md）。
+        // 「用过」，否则会被自动隐藏 → 连「去开启」横幅都看不到（见 docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md）。
         // （IDE 不受 gate，用过必有 token>0，本就进 keep，无需特判。）
         var keep = Set(allStats.filter { $0.token > 0 }.map { $0.provider })
         if QoderUsageEnvGate.isQoderCliPresent() { keep.insert("qoder-cli") }
@@ -103,7 +103,7 @@ final class UsageViewModel: ObservableObject {
 
         // 3) 第二阶段:Cursor 联网拉取(慢,~1.5s),不阻塞上面的 UI commit。
         //    拉到新数据 → 让 Cursor 重新进 FileMtimeCache(mirror mtime 变了触发 cache miss)→ 二次聚合刷新那一行。
-        //    见 docs/cursor-refresh-latency.md 方案 B(渐进式刷新)。
+        //    见 docs/0510-Cursor接入/cursor-refresh-latency.md 方案 B(渐进式刷新)。
         await refreshCursorInBackground(myGen: myGen, providerIds: providerIds, log: log)
     }
 

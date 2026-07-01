@@ -47,7 +47,7 @@ public struct CursorProvider: UsageProvider {
 
     /// 主刷新调用：**只读本地 mirror**（快，~ms），不联网。
     /// 数据经 FileMtimeCache 进入持久账本（与其它 provider 一致，否则聚合读不到 Cursor）。
-    /// 联网拉取由 `refreshFromNetwork()` 单独触发（见 docs/cursor-refresh-latency.md 方案 B）。
+    /// 联网拉取由 `refreshFromNetwork()` 单独触发（见 docs/0510-Cursor接入/cursor-refresh-latency.md 方案 B）。
     public func fetchDailyRecords() async throws -> [FileDailyRecord] {
         let path = mirrorPath
         guard let meta = FileMetadata.read(at: path) else { return [] }
@@ -152,19 +152,24 @@ public struct CursorProvider: UsageProvider {
         let url = URL(fileURLWithPath: mirrorPath)
 
         var dailyTotals: [String: Int] = [:]
+        var dailyCached: [String: Int] = [:]
         try? JSONLReader.forEachLine(at: url) { obj in
             guard let tsStr = obj["timestamp"] as? String,
                   let ts = ISODateParser.parse(tsStr) else { return }
             let prompt = (obj["prompt_tokens"] as? Int) ?? 0
             let completion = (obj["completion_tokens"] as? Int) ?? 0
-            let total = prompt + completion
+            let cacheRead = (obj["cache_read_input_tokens"] as? Int) ?? 0
+            let cacheCreation = (obj["cache_creation_input_tokens"] as? Int) ?? 0
+            // v0.3.10(2b)：total 补回 cache 两桶（此前只算 prompt+completion，漏缓存 → 少算约 87%）
+            let total = prompt + completion + cacheRead + cacheCreation
             if total == 0 { return }
             let date = DailyAggregator.dateString(for: ts)
             dailyTotals[date, default: 0] += total
+            dailyCached[date, default: 0] += cacheRead   // 浅色：仅命中读取；cache_creation 归深色
         }
 
         return dailyTotals.map { (date, token) in
-            FileDailyRecord(provider: id, date: date, token: token)
+            FileDailyRecord(provider: id, date: date, token: token, cachedToken: dailyCached[date] ?? 0)
         }
     }
 }

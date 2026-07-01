@@ -101,38 +101,41 @@ public struct QoderIdeProvider: UsageProvider {
         defer { sqlite3_finalize(stmt) }
 
         var dailyTotals: [String: Int] = [:]
+        var dailyCached: [String: Int] = [:]
         while sqlite3_step(stmt) == SQLITE_ROW {
             let gmtMs = sqlite3_column_int64(stmt, 0)
             guard let cStr = sqlite3_column_text(stmt, 1) else { continue }
             let tokenInfoStr = String(cString: cStr)
 
-            guard let total = parseTokenInfoTotal(tokenInfoStr) else { continue }
-            if total == 0 { continue }
+            guard let parsed = parseTokenInfoTotal(tokenInfoStr) else { continue }
+            if parsed.total == 0 { continue }
 
             // gmt_create 是 unix ms
             let date = DailyAggregator.dateString(for: Date(timeIntervalSince1970: TimeInterval(gmtMs) / 1000.0))
-            dailyTotals[date, default: 0] += total
+            dailyTotals[date, default: 0] += parsed.total
+            dailyCached[date, default: 0] += parsed.cached   // 浅色：cached_tokens（prompt 子集）
         }
 
         return dailyTotals.map { (date, token) in
-            FileDailyRecord(provider: id, date: date, token: token)
+            FileDailyRecord(provider: id, date: date, token: token, cachedToken: dailyCached[date] ?? 0)
         }
     }
 
     /// 解析 token_info JSON,返回 Anthropic 4 列等价总和(= prompt + completion,因为 cached 已含在 prompt 里)。
     /// 容错:个别行 model_info JSON malformed,但 token_info 实测都规范;仍做防御。
-    private func parseTokenInfoTotal(_ jsonStr: String) -> Int? {
+    private func parseTokenInfoTotal(_ jsonStr: String) -> (total: Int, cached: Int)? {
         guard let data = jsonStr.data(using: .utf8) else { return nil }
         guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
         let prompt = (obj["prompt_tokens"] as? Int) ?? 0
         let completion = (obj["completion_tokens"] as? Int) ?? 0
+        let cached = (obj["cached_tokens"] as? Int) ?? 0
 
         // Anthropic 4 列等价(cached 已含在 prompt 里,聚合 total 时抵消):
         //   input            = prompt - cached
         //   cache_creation   = 0
-        //   cache_read       = cached
+        //   cache_read       = cached          ← 浅色（命中读取，prompt 子集）
         //   output           = completion
         //   total            = (prompt - cached) + 0 + cached + completion = prompt + completion
-        return prompt + completion
+        return (prompt + completion, cached)
     }
 }

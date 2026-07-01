@@ -60,6 +60,7 @@ public struct OpenClawProvider: UsageProvider {
     /// 解析单个 session jsonl，按日聚合 assistant message 的 usage。
     private func parseFile(url: URL) throws -> [FileDailyRecord] {
         var dailyTotals: [String: Int] = [:]
+        var dailyCached: [String: Int] = [:]
 
         try JSONLReader.forEachLine(at: url) { obj in
             guard (obj["type"] as? String) == "message",
@@ -81,10 +82,11 @@ public struct OpenClawProvider: UsageProvider {
 
             let date = DailyAggregator.dateString(for: ts)
             dailyTotals[date, default: 0] += total
+            dailyCached[date, default: 0] += cacheRead   // 浅色：仅命中读取（cacheWrite 归深色）
         }
 
         return dailyTotals.map { (date, token) in
-            FileDailyRecord(provider: id, date: date, token: token)
+            FileDailyRecord(provider: id, date: date, token: token, cachedToken: dailyCached[date] ?? 0)
         }
     }
 

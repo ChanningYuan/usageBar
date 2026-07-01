@@ -25,7 +25,7 @@ import usageBarCore
 ///    没设该变量时 transcript 的 `message.usage` 缺失/全 0(2026-06-25 双机实测证实,推翻早前"Work 与
 ///    env 无关"的判断 —— 当初那台其实 .zshrc 里有该 export,Work 靠 zsh -ilc 抓登录 shell env 继承了它)。
 ///    开关由 `QoderUsageEnvGate` + UI 层管(写 .zshrc;QoderWork 是 GUI app,改完需重启才生效)。
-///    本 provider 只管解析 transcript,不在此引入 env 检测。详见 `docs/qoder-family-token-gate.md`。
+///    本 provider 只管解析 transcript,不在此引入 env 检测。详见 `docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md`。
 public struct QoderWorkProvider: UsageProvider {
     public let id = "qoder-work"
     public let displayName = "Qoder (Work)"
@@ -68,6 +68,7 @@ public struct QoderWorkProvider: UsageProvider {
 
     private func parseMirrorFile(url: URL) throws -> [FileDailyRecord] {
         var dailyTotals: [String: Int] = [:]
+        var dailyCached: [String: Int] = [:]
 
         try JSONLReader.forEachLine(at: url) { obj in
             guard (obj["source"] as? String) == "qoderwork",
@@ -84,10 +85,11 @@ public struct QoderWorkProvider: UsageProvider {
 
             let date = DailyAggregator.dateString(for: ts)
             dailyTotals[date, default: 0] += total
+            dailyCached[date, default: 0] += cacheRead   // 源A历史 mirror cache 恒0，一致起见仍累加
         }
 
         return dailyTotals.map { (date, token) in
-            FileDailyRecord(provider: id, date: date, token: token)
+            FileDailyRecord(provider: id, date: date, token: token, cachedToken: dailyCached[date] ?? 0)
         }
     }
 
@@ -121,6 +123,7 @@ public struct QoderWorkProvider: UsageProvider {
 
     private func parseTranscriptFile(url: URL) throws -> [FileDailyRecord] {
         var dailyTotals: [String: Int] = [:]
+        var dailyCached: [String: Int] = [:]
 
         try JSONLReader.forEachLine(at: url) { obj in
             guard (obj["type"] as? String) == "assistant",
@@ -139,10 +142,11 @@ public struct QoderWorkProvider: UsageProvider {
 
             let date = DailyAggregator.dateString(for: ts)
             dailyTotals[date, default: 0] += total
+            dailyCached[date, default: 0] += cacheRead   // 浅色：仅命中读取
         }
 
         return dailyTotals.map { (date, token) in
-            FileDailyRecord(provider: id, date: date, token: token)
+            FileDailyRecord(provider: id, date: date, token: token, cachedToken: dailyCached[date] ?? 0)
         }
     }
 }

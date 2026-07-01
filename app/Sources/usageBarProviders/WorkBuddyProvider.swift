@@ -13,7 +13,7 @@ import usageBarCore
 ///      不是 `message.usage`（Anthropic 命名：input_tokens / output_tokens）
 ///   3. `timestamp` 是 **epoch 毫秒整数**，不是 ISO 字符串
 ///
-/// 调研依据见 docs/workbuddy-token-research.md（本机 WorkBuddy 4.24.3 实测）。
+/// 调研依据见 docs/0601-WorkBuddy计量/workbuddy-token-research.md（本机 WorkBuddy 4.24.3 实测）。
 public struct WorkBuddyProvider: UsageProvider {
     public let id = "workbuddy"
     public let displayName = "WorkBuddy"
@@ -56,6 +56,7 @@ public struct WorkBuddyProvider: UsageProvider {
     /// 解析单个 session jsonl，按日聚合 assistant message 的 rawUsage。
     private func parseFile(url: URL) throws -> [FileDailyRecord] {
         var dailyTotals: [String: Int] = [:]
+        var dailyCached: [String: Int] = [:]
 
         try JSONLReader.forEachLine(at: url) { obj in
             guard (obj["type"] as? String) == "message",
@@ -67,19 +68,23 @@ public struct WorkBuddyProvider: UsageProvider {
             // timestamp 是 epoch 毫秒（Int），转 Date
             guard let ts = Self.parseEpochMillis(obj["timestamp"]) else { return }
 
-            // OpenAI 兼容命名；rawUsage.prompt_tokens 已含 cache（与 Codex/QoderWork 同档：
-            // 主显示数字取 prompt+completion 加总，cache 拆分另有字段但不重复计）
+            // OpenAI 兼容命名；rawUsage.prompt_tokens 已含 cache（子集内含，同 Codex/QoderIde）
             let prompt = (usage["prompt_tokens"] as? Int) ?? 0
             let completion = (usage["completion_tokens"] as? Int) ?? 0
             let total = prompt + completion
             if total == 0 { return }
 
+            // ★命中读取权威字段 = prompt_cache_hit_tokens（同事机实测钉死；prompt 子集）。
+            // ⚠️ 勿用顶层 cached_tokens（=0 是坑）、勿用 cache_read_input_tokens（该 provider 恒0）。
+            let cachedHit = (usage["prompt_cache_hit_tokens"] as? Int) ?? 0
+
             let date = DailyAggregator.dateString(for: ts)
             dailyTotals[date, default: 0] += total
+            dailyCached[date, default: 0] += min(cachedHit, total)   // 子集，防御性 clamp
         }
 
         return dailyTotals.map { (date, token) in
-            FileDailyRecord(provider: id, date: date, token: token)
+            FileDailyRecord(provider: id, date: date, token: token, cachedToken: dailyCached[date] ?? 0)
         }
     }
 

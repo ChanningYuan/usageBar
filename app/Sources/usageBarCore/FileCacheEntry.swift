@@ -29,11 +29,14 @@ public struct FileDailyRecord: Codable, Sendable, Equatable {
     /// "2026-05-20" 本地日期（按 Asia/Shanghai）
     public let date: String
     public let token: Int
+    /// token 里「缓存命中读取」的分量（双色进度条浅色段用）；无缓存 provider 为 0
+    public let cachedToken: Int
 
-    public init(provider: String, date: String, token: Int) {
+    public init(provider: String, date: String, token: Int, cachedToken: Int = 0) {
         self.provider = provider
         self.date = date
         self.token = token
+        self.cachedToken = cachedToken
     }
 }
 
@@ -49,7 +52,9 @@ public struct PersistedCache: Codable, Sendable {
     ///                        bump 让所有旧 cache 自动失效,避免新代码 filter 不到旧 records 全显 0。
     ///   2 → 3 (2026-06-15): Claude transcript 解析改为按 message.id 去重(流式重复落盘的同一响应
     ///                        只计一次)。旧 cache 是逐行累加的放大值(约 2-3x),必须失效重算。
-    public static let currentSchemaVersion = 3
+    ///   3 → 4 (2026-07-01): FileDailyRecord 加 cachedToken(缓存命中分量,双色进度条用)。旧 cache
+    ///                        无此字段,失效重扫一次。
+    public static let currentSchemaVersion = 4
 
     public init(entries: [FileCacheEntry]) {
         self.schemaVersion = Self.currentSchemaVersion

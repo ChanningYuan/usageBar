@@ -44,35 +44,31 @@ public enum DailyAggregator {
         let day7 = dayStringDaysAgo(6, from: now)   // 含今天 = 最近 7 天（6 天前到今天）
         let day30 = dayStringDaysAgo(29, from: now) // 含今天 = 最近 30 天
 
-        // 按 (provider, date) 求和
+        // 按 (provider, date) 求和（token 与其中的缓存命中分量并行累加）
         var sumByProviderDate: [String: [String: Int]] = [:]
+        var cachedByProviderDate: [String: [String: Int]] = [:]
         for r in allDailyRecords {
             sumByProviderDate[r.provider, default: [:]][r.date, default: 0] += r.token
+            cachedByProviderDate[r.provider, default: [:]][r.date, default: 0] += r.cachedToken
         }
 
         var out: [StatRecord] = []
         for pid in providerIds {
             let dailyMap = sumByProviderDate[pid] ?? [:]
-            var todayTotal = 0
-            var last7Total = 0
-            var last30Total = 0
-            var allTotal = 0
+            let cachedMap = cachedByProviderDate[pid] ?? [:]
+            var todayTotal = 0, last7Total = 0, last30Total = 0, allTotal = 0
+            var todayCached = 0, last7Cached = 0, last30Cached = 0, allCached = 0
             for (date, token) in dailyMap {
-                allTotal += token
-                if date == today {
-                    todayTotal += token
-                }
-                if date >= day7 {
-                    last7Total += token
-                }
-                if date >= day30 {
-                    last30Total += token
-                }
+                let c = cachedMap[date] ?? 0
+                allTotal += token; allCached += c
+                if date == today { todayTotal += token; todayCached += c }
+                if date >= day7 { last7Total += token; last7Cached += c }
+                if date >= day30 { last30Total += token; last30Cached += c }
             }
-            out.append(StatRecord(provider: pid, time: "today", token: todayTotal))
-            out.append(StatRecord(provider: pid, time: "last7Days", token: last7Total))
-            out.append(StatRecord(provider: pid, time: "last30Days", token: last30Total))
-            out.append(StatRecord(provider: pid, time: "all", token: allTotal))
+            out.append(StatRecord(provider: pid, time: "today", token: todayTotal, cachedToken: todayCached))
+            out.append(StatRecord(provider: pid, time: "last7Days", token: last7Total, cachedToken: last7Cached))
+            out.append(StatRecord(provider: pid, time: "last30Days", token: last30Total, cachedToken: last30Cached))
+            out.append(StatRecord(provider: pid, time: "all", token: allTotal, cachedToken: allCached))
         }
         return out
     }

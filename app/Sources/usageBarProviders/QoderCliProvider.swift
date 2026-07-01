@@ -12,7 +12,7 @@ import usageBarCore
 ///
 /// ⚠️ 2026-06 起 CLI 也换成 Bun 编译 binary,默认不写 usage(内部 EMPTY_USAGE gate),transcript 四列全 0。
 /// 须设环境变量 `QODER_EXPOSE_TOKEN_USAGE=1` 才恢复写真值(本 provider 解析逻辑无需改)。
-/// usageBar 通过 `QoderUsageEnvGate` + 设置页横幅引导用户开启,详见 docs/qoder-cli-usage-gate-fix.md。
+/// usageBar 通过 `QoderUsageEnvGate` + 设置页横幅引导用户开启,详见 docs/0625-Qoder全家桶token计量/qoder-cli-usage-gate-fix.md。
 /// 没开 env 时这里 total==0 的行会被下面自动过滤掉。
 public struct QoderCliProvider: UsageProvider {
     public let id = "qoder-cli"
@@ -56,6 +56,7 @@ public struct QoderCliProvider: UsageProvider {
 
     private func parseFile(url: URL) throws -> [FileDailyRecord] {
         var dailyTotals: [String: Int] = [:]
+        var dailyCached: [String: Int] = [:]
 
         try JSONLReader.forEachLine(at: url) { obj in
             guard (obj["type"] as? String) == "assistant",
@@ -74,10 +75,11 @@ public struct QoderCliProvider: UsageProvider {
 
             let date = DailyAggregator.dateString(for: ts)
             dailyTotals[date, default: 0] += total
+            dailyCached[date, default: 0] += cacheRead   // 浅色：仅命中读取
         }
 
         return dailyTotals.map { (date, token) in
-            FileDailyRecord(provider: id, date: date, token: token)
+            FileDailyRecord(provider: id, date: date, token: token, cachedToken: dailyCached[date] ?? 0)
         }
     }
 }
