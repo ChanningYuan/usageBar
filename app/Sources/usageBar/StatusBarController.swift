@@ -106,11 +106,15 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
 
     private func configurePopover() {
         let root = UsageRootView(viewModel: viewModel)
-        popover.contentSize = NSSize(width: 440, height: 260)
+        popover.contentSize = NSSize(width: 400, height: 300)
         popover.behavior = .transient
         popover.animates = true
         popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView: root)
+        let hosting = NSHostingController(rootView: root)
+        // 让 popover 尺寸始终跟 SwiftUI 内容（400×totalHeight）走：修首开时用默认 contentSize
+        // 导致弹层与菜单栏间出现间隔的 bug（首开尺寸不对、之后布局过一次才正常）。
+        hosting.sizingOptions = [.preferredContentSize]
+        popover.contentViewController = hosting
     }
 
     @objc private func togglePopover(_ sender: Any?) {

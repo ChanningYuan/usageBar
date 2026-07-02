@@ -293,18 +293,39 @@ struct UsageRootView: View {
             Text("usageBar")
                 .font(.system(size: 11, weight: .medium))
             Spacer()
-            Picker("", selection: Binding(
-                get: { tabWindows.contains(viewModel.window) ? viewModel.window : .today },
-                set: { viewModel.changeWindow($0) }
-            )) {
-                ForEach(tabWindows, id: \.self) { win in
-                    Text(windowLabel(win)).tag(win)
+            if tabWindows.count <= 1 {
+                // 只剩「今日」一个标签：不用 segmented（单段光杆按钮丑）→ 标题 + 幽灵「＋自定义」入口
+                Text(windowLabel(tabWindows.first ?? .today))
+                    .font(.system(size: 11, weight: .semibold))
+                Button(action: {
+                    SettingsNavigation.shared.requestFocusTimeTabs()
+                    SettingsWindowController.shared.showWindow()
+                }) {
+                    HStack(spacing: 2) {
+                        Image(systemName: "plus").font(.system(size: 8))
+                        Text("自定义").font(.system(size: 10))
+                    }
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.secondary.opacity(0.35)))
                 }
+                .buttonStyle(.plain)
+                .help("添加时间标签")
+            } else {
+                Picker("", selection: Binding(
+                    get: { tabWindows.contains(viewModel.window) ? viewModel.window : .today },
+                    set: { viewModel.changeWindow($0) }
+                )) {
+                    ForEach(tabWindows, id: \.self) { win in
+                        Text(windowLabel(win)).tag(win)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+                .controlSize(.small)
+                .labelsHidden()
             }
-            .pickerStyle(.segmented)
-            .frame(width: 220)
-            .controlSize(.small)
-            .labelsHidden()
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)

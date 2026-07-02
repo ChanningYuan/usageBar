@@ -1,7 +1,17 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import usageBarCore
 import usageBarProviders
+
+/// popover「＋自定义」入口 → 打开设置并聚焦「时间周期标签」段的导航信号。
+@MainActor
+final class SettingsNavigation: ObservableObject {
+    static let shared = SettingsNavigation()
+    /// 置 true 表示"打开设置后应展开并滚到时间周期标签段"；SettingsView 消费后复位。
+    @Published var pendingFocusTimeTabs = false
+    func requestFocusTimeTabs() { pendingFocusTimeTabs = true }
+}
 
 /// Settings 面板(右键菜单 → 偏好设置...)
 ///
@@ -12,10 +22,10 @@ struct SettingsView: View {
     @ObservedObject var settings: ProviderVisibilitySettings
     @ObservedObject private var qoderStatus: QoderUsageStatus = .shared
     @ObservedObject private var tabSettings: TabSettings = .shared
-
-    private let familyDisplayName: [String: String] = [
-        "claude": "Claude",  // 含 Claude Code(订阅/API) + Cowork,故组名用 "Claude"
-    ]
+    @ObservedObject private var nav = SettingsNavigation.shared
+    @State private var draggingTab: String?
+    @State private var dataSourceExpanded = true
+    @State private var tabsExpanded = true
 
     /// GitHub mark(模板图,跟随主题/链接色)
     private static let githubIcon: NSImage? = {
@@ -28,17 +38,25 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    timeTabsSection
-                    ForEach(groupedSections, id: \.id) { section in
-                        sectionView(section)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        dataSourceSection
+                        Divider()
+                        timeTabsSection.id("timeTabs")
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 18)
-                .padding(.bottom, 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .onChange(of: nav.pendingFocusTimeTabs) { _, focus in
+                    if focus { focusTimeTabs(proxy) }
+                }
+                .onAppear {
+                    // 窗口首次创建：SettingsView 才 appear，此时消费待聚焦请求
+                    if nav.pendingFocusTimeTabs { focusTimeTabs(proxy) }
+                }
             }
             Divider()
             footer
@@ -99,54 +117,139 @@ struct SettingsView: View {
         .padding(.vertical, 8)
     }
 
-    // MARK: - 时间标签（popover tab 栏配置）
-
-    /// 虚线 fieldset 风格分组：勾选哪些周期作为 popover tab + 拖拽排序 + 本周周起始 + 自定义区间
-    private var timeTabsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("勾选显示在弹层顶部的时间标签 · 拖动排序 · 最多 \(TabSettings.maxTabs) 个")
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            List {
-                ForEach(tabSettings.order, id: \.self) { id in
-                    timeTabRow(id)
-                }
-                .onMove { tabSettings.move(from: $0, to: $1) }
-            }
-            .listStyle(.plain)
-            .scrollDisabled(true)
-            .scrollContentBackground(.hidden)
-            .frame(height: CGFloat(tabSettings.order.count) * 28)
-
-            let cnt = tabSettings.checked.count
-            Text("已选 \(cnt)/\(TabSettings.maxTabs)" + (cnt >= TabSettings.maxTabs ? " · 已满，取消一个再加" : ""))
-                .font(.system(size: 9))
-                .foregroundStyle(cnt >= TabSettings.maxTabs ? .orange : .secondary)
+    /// 「＋自定义」入口触发：展开时间周期标签段并滚动到它，然后复位信号。
+    private func focusTimeTabs(_ proxy: ScrollViewProxy) {
+        tabsExpanded = true
+        // 等展开 + 布局完成后再滚，确保目标已进布局树
+        DispatchQueue.main.async {
+            withAnimation { proxy.scrollTo("timeTabs", anchor: .top) }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-        )
-        .overlay(alignment: .topLeading) {
-            Text("时间标签")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .background(Color(nsColor: .windowBackgroundColor))
-                .offset(x: 12, y: -7)
+        nav.pendingFocusTimeTabs = false
+    }
+
+    // MARK: - 折叠段通用
+
+    private var visibleProviderCount: Int {
+        ProviderRegistry.all.filter { settings.isProviderToggleOn($0.id) }.count
+    }
+    private var lastQoderId: String? {
+        ProviderRegistry.all.last { $0.family == "qoder" }?.id
+    }
+
+    /// 折叠段标题行：chevron（收起▸ / 展开▾）+ 标题 + 右侧计数；整行可点击折叠。
+    private func sectionHeader(_ title: String, count: String, expanded: Bool, toggle: @escaping () -> Void) -> some View {
+        Button(action: toggle) {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Text(count)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 数据源（provider 折叠段）
+
+    /// 数据源折叠段：展开后内联各 provider（icon + 名称 + 开关）。Qoder 组前挂 token gate banner、
+    /// Cursor 行下挂联网说明——与旧 family 框逻辑一致，只是从虚线框改成平铺 + 折叠。
+    private var dataSourceSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionHeader("数据源", count: "已启用 \(visibleProviderCount) 个", expanded: dataSourceExpanded) {
+                dataSourceExpanded.toggle()
+            }
+            if dataSourceExpanded {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(ProviderRegistry.all, id: \.id) { p in
+                        providerRow(p)
+                        // Qoder gate banner 挂在 Qoder 系列**最后一行之后**（挂在最前会紧贴 Claude、被误认成 Claude 的）
+                        if p.id == lastQoderId {
+                            QoderUsageBanner(status: qoderStatus)
+                        }
+                        if p.id == "cursor" {
+                            Text("Cursor 真实用量只在服务端，需联网获取：勾选后每次刷新会读取本机 Cursor 登录凭证并请求 cursor.com。不想联网就取消勾选。")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.leading, 32)
+                        }
+                    }
+                }
+                .padding(.leading, 2)
+            }
         }
     }
 
-    /// 一行候选：勾选框 + 名称 +（本周周起始 / 自定义区间编辑）；today 锁定。
+    /// 单个 provider 行：icon + 名称 + 开关（switch）。
+    private func providerRow(_ p: any UsageProvider) -> some View {
+        HStack(spacing: 10) {
+            ProviderIcon(providerId: p.id)
+                .frame(width: 22, height: 22)
+            Text(p.displayName)
+                .font(.system(size: 11, weight: .medium))
+            Spacer()
+            Toggle("", isOn: Binding(
+                get: { settings.isProviderToggleOn(p.id) },
+                set: { settings.setProvider(p.id, enabled: $0) }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .tint(Color(hex: "#007AFF"))  // 开启态用系统蓝
+        }
+        .frame(height: 30)
+    }
+
+    // MARK: - 时间标签（popover tab 栏配置，折叠段）
+
+    /// 时间标签折叠段：展开后勾选哪些周期作为 popover tab + 拖拽排序 + 本周周起始 + 自定义区间。
+    private var timeTabsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionHeader("时间周期标签", count: tabSettings.tabOrder.map { tabLabel($0) }.joined(separator: " | "), expanded: tabsExpanded) {
+                tabsExpanded.toggle()
+            }
+            if tabsExpanded {
+                Text("勾选显示在弹层顶部的时间周期标签 · 拖动排序 · 最多 \(TabSettings.maxTabs) 个")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 2)
+
+                VStack(spacing: 0) {
+                    ForEach(Array(tabSettings.order.enumerated()), id: \.element) { idx, id in
+                        timeTabRow(id)
+                        if idx < tabSettings.order.count - 1 { Divider() }
+                    }
+                }
+                .padding(.leading, 2)
+
+                let cnt = tabSettings.checked.count
+                Text("已选 \(cnt)/\(TabSettings.maxTabs)" + (cnt >= TabSettings.maxTabs ? " · 已满，取消一个再加" : ""))
+                    .font(.system(size: 9))
+                    .foregroundStyle(cnt >= TabSettings.maxTabs ? .orange : .secondary)
+                    .padding(.leading, 2)
+            }
+        }
+    }
+
+    /// 一行候选：拖拽手柄 + 勾选框 + 名称 +（本周周起始 / 自定义区间编辑）；today 锁定不可拖/不可取消。
     @ViewBuilder
     private func timeTabRow(_ id: String) -> some View {
         HStack(spacing: 8) {
+            // 拖拽手柄槽：today 隐藏（占位保持对齐），其余显示 grip 提示可拖
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+                .frame(width: 12)
+                .opacity(id == "today" ? 0 : 1)
+
             Toggle(isOn: Binding(
                 get: { tabSettings.isChecked(id) },
                 set: { on in
@@ -187,7 +290,13 @@ struct SettingsView: View {
                 customRangeControl
             }
         }
-        .frame(height: 24)
+        .frame(height: 28)
+        .contentShape(Rectangle())
+        .opacity(draggingTab == id ? 0.4 : 1)
+        .draggableTab(id != "today", id: id, dragging: $draggingTab)
+        .onDrop(of: [.text], delegate: TabDropDelegate(item: id, dragging: $draggingTab) { drag, target in
+            tabSettings.reorder(drag, onto: target)
+        })
     }
 
     /// 自定义区间的起止日期选择（设置弹窗内 = 真 NSWindow，DatePicker 稳，无 popover 失焦坑）
@@ -222,136 +331,39 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - 数据分组
+}
 
-    /// 一个"区块":要么是 family(虚线框 + 多子项),要么是 standalone(单 toggle 平铺)
-    private struct SettingsSection: Identifiable {
-        let id: String
-        let title: String
-        let family: String?
-        let providers: [any UsageProvider]
+// MARK: - 时间标签拖拽重排（onDrag/onDrop）
+
+/// 悬停到某行时把正在拖的项重排到该行位置；松手清空拖拽态。today 的重排在 TabSettings.reorder 里被拦。
+private struct TabDropDelegate: DropDelegate {
+    let item: String
+    @Binding var dragging: String?
+    let reorder: (String, String) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let d = dragging, d != item else { return }
+        reorder(d, item)
     }
-
-    private var groupedSections: [SettingsSection] {
-        let all = ProviderRegistry.all
-        var result: [SettingsSection] = []
-        var seenFamilies: Set<String> = []
-
-        for p in all {
-            if let fam = p.family {
-                if seenFamilies.contains(fam) { continue }
-                seenFamilies.insert(fam)
-                let famProviders = all.filter { $0.family == fam }
-                result.append(SettingsSection(
-                    id: "fam:\(fam)",
-                    title: familyDisplayName[fam] ?? fam,
-                    family: fam,
-                    providers: famProviders
-                ))
-            } else {
-                result.append(SettingsSection(
-                    id: "prov:\(p.id)",
-                    title: p.displayName,
-                    family: nil,
-                    providers: [p]
-                ))
-            }
-        }
-        return result
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+    func performDrop(info: DropInfo) -> Bool {
+        dragging = nil
+        return true
     }
+}
 
-    // MARK: - Section View
-
+private extension View {
+    /// 仅当 `enabled` 时给行加 onDrag（today 不可拖）。
     @ViewBuilder
-    private func sectionView(_ section: SettingsSection) -> some View {
-        if section.family != nil {
-            familyBox(title: section.title, family: section.family, providers: section.providers)
-        } else if let provider = section.providers.first {
-            standaloneRow(provider: provider)
-        }
-    }
-
-    /// family 块:虚线圆角框 + 压边标题
-    private func familyBox(title: String, family: String?, providers: [any UsageProvider]) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // qoder 框顶挂一条共享 token 统计开关横幅（CLI/Work 共用一个 env gate）。
-            // 按 presence 判定（有会话即出现），不挂在"行可见"上 —— 存量用户即使 Work 行被关着，
-            // 打开设置页照样能看到"去开启"。IDE 不受 gate，不在此横幅范围。
-            if family == "qoder" {
-                QoderUsageBanner(status: qoderStatus)
+    func draggableTab(_ enabled: Bool, id: String, dragging: Binding<String?>) -> some View {
+        if enabled {
+            onDrag {
+                dragging.wrappedValue = id
+                return NSItemProvider(object: id as NSString)
             }
-            ForEach(providers, id: \.id) { p in
-                providerToggleRow(p)
-            }
+        } else {
+            self
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 14)
-        .padding(.bottom, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(
-                    Color.secondary.opacity(0.45),
-                    style: StrokeStyle(lineWidth: 1, dash: [4, 3])
-                )
-        )
-        .overlay(alignment: .topLeading) {
-            // 压在虚线边上的组名标题(背景色覆盖虚线达到 fieldset 视觉)
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .background(Color(nsColor: .windowBackgroundColor))
-                .offset(x: 12, y: -7)
-        }
-    }
-
-    /// 单个 provider 的 Toggle 行(虚线框内 / 独立平铺通用)
-    private func providerToggleRow(_ p: any UsageProvider) -> some View {
-        HStack(spacing: 8) {
-            Toggle(isOn: Binding(
-                get: { settings.isProviderToggleOn(p.id) },
-                set: { settings.setProvider(p.id, enabled: $0) }
-            )) {
-                Text(p.displayName)
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .tint(Color(hex: "#007AFF"))  // 开启态用系统蓝,明暗主题都清晰
-            Spacer()
-        }
-    }
-
-    /// 独立 provider:单行 Toggle(Codex / 悟空 / WorkBuddy / Cursor)
-    /// 字号/weight 跟虚线框内子项完全一致(size 12 regular),只是水平 padding 跟框内对齐
-    private func standaloneRow(provider: any UsageProvider) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Toggle(isOn: Binding(
-                    get: { settings.isProviderToggleOn(provider.id) },
-                    set: { settings.setProvider(provider.id, enabled: $0) }
-                )) {
-                    Text(provider.displayName)
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .tint(Color(hex: "#007AFF"))  // 开启态用系统蓝,明暗主题都清晰
-                Spacer()
-            }
-
-            // Cursor 专属:隐私提示(它是唯一联网的 provider)
-            if provider.id == "cursor" {
-                Text("Cursor 真实用量只在服务端，需联网获取：勾选后每次刷新会读取本机 Cursor 登录凭证并请求 cursor.com。不想联网就取消勾选。")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 18)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
     }
 }
 
