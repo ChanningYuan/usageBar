@@ -4,7 +4,13 @@ import usageBarCore
 /// 悟空 provider（mtime 增量版）
 ///
 /// 数据源：`~/Library/Application Support/dingtalk-rewind-server/users/*/storage/llm_proxy/requests.jsonl`
-/// 字段驼峰：`createdAtMs` ms 时间戳 / `promptTokens` / `completionTokens`
+/// 字段驼峰：`createdAtMs` ms 时间戳 / `promptTokens` / `completionTokens` / `cacheTokens`
+///
+/// token 账本平铺在顶层（OpenAI 口径，无嵌套 usage）：
+///   - `total`      = `promptTokens + completionTokens`（实测恒等顶层 `totalTokens`）
+///   - `cacheTokens` = 命中读取 = `promptTokens` 子集（内含，同 Codex/qoder-ide）→ 双色浅色段
+/// ⚠️ `cacheTokens` 是 2026-05-18 才加的字段，之前的记录整个 key 缺失 → 解析必须 `?? 0` 兜底
+/// （本机 8262 条里 6770 条无此字段）。老记录 cachedToken=0，双色自然退化成单色。
 public struct WukongProvider: UsageProvider {
     public let id = "wukong"
     public let displayName = "悟空"
@@ -47,6 +53,7 @@ public struct WukongProvider: UsageProvider {
 
     private func parseFile(url: URL) throws -> [FileDailyRecord] {
         var dailyTotals: [String: Int] = [:]
+        var dailyCached: [String: Int] = [:]
         try JSONLReader.forEachLine(at: url) { obj in
             // 时间戳：ms unix
             let tsMs: Int? = {
@@ -61,12 +68,15 @@ public struct WukongProvider: UsageProvider {
             let completion = (obj["completionTokens"] as? Int) ?? 0
             let total = prompt + completion
             if total == 0 { return }
+            // 命中读取 = prompt 子集（内含）；2026-05-18 前无此字段 → ?? 0 兜底
+            let cached = (obj["cacheTokens"] as? Int) ?? 0
 
             let date = DailyAggregator.dateString(for: ts)
             dailyTotals[date, default: 0] += total
+            dailyCached[date, default: 0] += cached
         }
         return dailyTotals.map { (date, token) in
-            FileDailyRecord(provider: id, date: date, token: token)
+            FileDailyRecord(provider: id, date: date, token: token, cachedToken: dailyCached[date] ?? 0)
         }
     }
 }
