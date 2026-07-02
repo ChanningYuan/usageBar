@@ -4,29 +4,19 @@
         <title>usageBar</title>
         <item>
             <description><![CDATA[
-<h3>usageBar 0.3.10</h3>
-<p><b>新增</b></p>
-<ul>
-<li><b>缓存命中率</b>：各工具行显示「xx.x% 缓存命中」，鼠标悬浮可看「缓存 / 非缓存」的绝对值拆分——一眼知道用量里多少是计费打折的缓存命中读取。</li>
-<li><b>用量数字点击复制</b>：数字带虚线下划，悬浮看精确值、点击即复制到剪贴板（「合计」同样支持）。</li>
-</ul>
-<p><b>变更</b></p>
-<ul>
-<li><b>界面重构</b>：进度条移到工具名下方、更细，单色纯表用量对比；数字移到右侧整行居中；字号统一、整体更紧凑。</li>
-<li><b>切换周期时菜单栏同步</b>：在弹层切「今日 / 7天 / 30天 / 累计」时，菜单栏标题数字实时跟随，不再和弹层对不上。</li>
-</ul>
+<h3>usageBar 0.3.11</h3>
 <p><b>修复</b></p>
 <ul>
-<li><b>Cursor 用量少算修正</b>：Cursor 之前只统计输入/输出、漏掉了缓存两桶，用量被低估（约 87%）。现已补回——<b>Cursor 数字会一次性上升，这是补回缓存、非重复计数</b>。</li>
+<li><b>悟空缓存命中补显</b>：悟空（钉钉）在 v0.3.10 的「缓存命中率」里一直显示 0%——它的 `cacheTokens` 字段是数据源 2026-05-18 才新增的，之前的解析没读它。现已补上：悟空行也能看到缓存命中占比与「缓存 / 非缓存」悬浮拆分了。<b>总用量数字不变</b>（缓存命中本就含在输入里，只是把其中的命中部分标出来），2026-05-18 之前的老记录无此字段、按无缓存显示。</li>
 </ul>
             ]]></description>
-            <title>0.3.10</title>
-            <pubDate>Thu, 02 Jul 2026 01:29:58 +0800</pubDate>
-            <sparkle:version>0.3.10</sparkle:version>
-            <sparkle:shortVersionString>0.3.10</sparkle:shortVersionString>
+            <title>0.3.11</title>
+            <pubDate>Thu, 02 Jul 2026 10:47:05 +0800</pubDate>
+            <sparkle:version>0.3.11</sparkle:version>
+            <sparkle:shortVersionString>0.3.11</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1660198" type="application/octet-stream" sparkle:edSignature="86xXpoMn+VUXM5se3PIQlmpvs9OZoxRx2BhyphGXb7lhXFgUhy3AdBemLA6h9SejxOCsgmc9VgFNAan5+7cCDw=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1660010" type="application/octet-stream" sparkle:edSignature="SOdOqZqc1m6E/NDPdxqainohXmDlDYiC8A1L9Xz+L/ko6z1a+z7Sss8UXbMfdn24grrZZrmCzeYJc0Q8KAKPAw=="/>
         </item>
     </channel>
 </rss>
