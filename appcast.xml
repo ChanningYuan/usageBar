@@ -5,21 +5,32 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.12</h3>
+<h3>usageBar 0.3.13</h3>
+<p><b>新增</b></p>
+<ul>
+<li><b>时间周期标签可配置</b>：弹层顶部的时间标签现在能在偏好设置里自由勾选、拖拽排序（最多 4 个）。新增 <b>本周 / 本月</b> 日历对齐周期（本周可选 周一 / 周日 起始），还能加一个 <b>自定义日期区间</b>。默认标签改为 <b>今日 / 本周 / 本月 / 累计</b>。</li>
+<li><b>数据源带图标</b>：偏好设置的数据源列表每行加上了对应工具的图标，更好认。</li>
+</ul>
+<p><b>变化</b></p>
+<ul>
+<li><b>偏好设置改版</b>：数据源、时间周期标签拆成两个可折叠区块，更清爽（全内联、无弹层焦点问题）。</li>
+<li><b>菜单栏固定「今日」</b>：菜单栏数字始终显示今日用量，切换弹层里的标签不再影响它；下次打开弹层默认回今日。</li>
+<li>弹层只剩「今日」一个标签时，顶部改为标题 + 「＋自定义」入口（点击直达偏好设置的时间周期标签，自动展开定位）。</li>
+</ul>
 <p><b>修复</b></p>
 <ul>
-<li><b>悟空缓存命中真正生效</b>：v0.3.11 号称补了悟空缓存命中，但那次构建没把改动编进发布包，升级后悟空命中率仍是空的。本版重新干净构建、并强制缓存重扫，悟空的「xx.x% 缓存命中」+ 悬浮拆分现在真的会显示了。总用量数字不变。</li>
+<li>修复<b>首次打开弹层时与菜单栏之间出现间隔</b>的问题（弹层尺寸首开未按内容自适应）。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.12</title>
-            <pubDate>Thu, 02 Jul 2026 11:21:14 +0800</pubDate>
-            <sparkle:version>0.3.12</sparkle:version>
-            <sparkle:shortVersionString>0.3.12</sparkle:shortVersionString>
+            <title>0.3.13</title>
+            <pubDate>Thu, 02 Jul 2026 18:10:09 +0800</pubDate>
+            <sparkle:version>0.3.13</sparkle:version>
+            <sparkle:shortVersionString>0.3.13</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1660005" type="application/octet-stream" sparkle:edSignature="19sAkp5poY9IQ33VPdrhClsnvm/sDUUtE+a3V2lbYKUbIU5Sbl4N12Ft1Zj/qSfRrr/5ukcYM/eVGsIFulpBDA=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1723929" type="application/octet-stream" sparkle:edSignature="Y9Tuw8MwFQ7oEFtVKUQXb6W07NWBL1M4W2mKea2ezARRdeMX/M4vRM1J0TH2831H9r90K9UkkLxSIjVQ5r//DQ=="/>
         </item>
     </channel>
 </rss>
