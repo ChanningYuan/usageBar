@@ -32,6 +32,14 @@ final class UsageViewModel: ObservableObject {
             .reduce(0) { $0 + $1.token }
     }
 
+    /// 指定周期的可见合计（不看当前 window）。菜单栏 title 用它固定读「今日」。
+    func visibleTotal(for window: TimeWindow) -> Int {
+        let visible = Set(ProviderVisibilitySettings.shared.visibleProviderIds())
+        return allStats
+            .filter { $0.time == window.id && visible.contains($0.provider) }
+            .reduce(0) { $0 + $1.token }
+    }
+
     /// 当前窗口内最大 token 数（条形归一化）
     var maxToken: Int {
         stats.map { $0.token }.max() ?? 0
@@ -112,10 +120,17 @@ final class UsageViewModel: ObservableObject {
         let allDaily = await FileMtimeCache.shared.allEntries().flatMap { $0.records }
         let computed = DailyAggregator.aggregate(
             allDailyRecords: allDaily,
-            providerIds: providerIds
+            providerIds: providerIds,
+            weekStartMonday: TabSettings.shared.weekStartMonday,
+            customRange: TabSettings.shared.customRange
         )
         self.allStats = computed
         self.stats = computed.filter { $0.time == window.id }
+    }
+
+    /// 仅从内存缓存重新聚合（不扫盘）。用于 tab 配置变化（周起始/自定义区间）后即时刷新，秒回。
+    func recomputeFromCache() async {
+        await commitAggregation(providerIds: ProviderRegistry.all.map { $0.id }, log: { _ in })
     }
 
     /// 方案 B 第二阶段:Cursor 后台联网拉取,完成后二次聚合(仅当本次刷新仍是最新 generation)。

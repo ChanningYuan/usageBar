@@ -235,6 +235,7 @@ struct UsageRootView: View {
     @ObservedObject var viewModel: UsageViewModel
     @ObservedObject var settings: ProviderVisibilitySettings = .shared
     @ObservedObject var qoderStatus: QoderUsageStatus = .shared
+    @ObservedObject var tabSettings: TabSettings = .shared
 
     /// GitHub mark(模板图,跟随明暗主题色),给 footer 的"去 GitHub"入口用
     private static let githubIcon: NSImage? = {
@@ -293,13 +294,12 @@ struct UsageRootView: View {
                 .font(.system(size: 11, weight: .medium))
             Spacer()
             Picker("", selection: Binding(
-                get: { viewModel.window },
+                get: { tabWindows.contains(viewModel.window) ? viewModel.window : .today },
                 set: { viewModel.changeWindow($0) }
             )) {
-                Text("今日").tag(TimeWindow.today)
-                Text("7天").tag(TimeWindow.last7Days)
-                Text("30天").tag(TimeWindow.last30Days)
-                Text("累计").tag(TimeWindow.all)
+                ForEach(tabWindows, id: \.self) { win in
+                    Text(windowLabel(win)).tag(win)
+                }
             }
             .pickerStyle(.segmented)
             .frame(width: 220)
@@ -308,6 +308,49 @@ struct UsageRootView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    // MARK: - 时间标签栏（按 TabSettings 动态渲染）
+
+    /// 当前要渲染的 tab 窗口序列（勾选 ∩ 顺序；custom 需区间有效）
+    private var tabWindows: [TimeWindow] {
+        tabSettings.tabOrder.compactMap { windowFor(id: $0) }
+    }
+
+    private func windowFor(id: String) -> TimeWindow? {
+        switch id {
+        case "today": return .today
+        case "thisWeek": return .thisWeek
+        case "last7Days": return .last7Days
+        case "thisMonth": return .thisMonth
+        case "last30Days": return .last30Days
+        case "all": return .all
+        case "custom": return tabSettings.customRange.map { TimeWindow.custom($0) }
+        default: return nil
+        }
+    }
+
+    private func windowLabel(_ w: TimeWindow) -> String {
+        switch w {
+        case .today: return "今日"
+        case .thisWeek: return "本周"
+        case .last7Days: return "7天"
+        case .thisMonth: return "本月"
+        case .last30Days: return "30天"
+        case .all: return "累计"
+        case .custom(let r): return shortRangeLabel(r)
+        }
+    }
+
+    /// 自定义区间短标签：同月 `6/1–15`、跨月 `6/28–7/3`
+    private func shortRangeLabel(_ r: ClosedRange<Date>) -> String {
+        let cal = Calendar.current
+        let lo = cal.dateComponents([.month, .day], from: r.lowerBound)
+        let hi = cal.dateComponents([.month, .day], from: r.upperBound)
+        if lo.month == hi.month {
+            return "\(lo.month ?? 0)/\(lo.day ?? 0)–\(hi.day ?? 0)"
+        }
+        return "\(lo.month ?? 0)/\(lo.day ?? 0)–\(hi.month ?? 0)/\(hi.day ?? 0)"
     }
 
     /// 当前可见 provider id 列表(按 ProviderRegistry 注册顺序 + Settings 过滤)
@@ -374,7 +417,9 @@ struct UsageRootView: View {
     private var noUsageMessage: String {
         switch viewModel.window {
         case .today:      return "今天还没烧 token —— 快去蹬两下 AI 🚀"
+        case .thisWeek:   return "本周还没有用量 —— 去用用 AI 吧 🚀"
         case .last7Days:  return "近 7 天还没有用量 —— 去用用 AI 吧 🚀"
+        case .thisMonth:  return "本月还没有用量 —— 去用用 AI 吧 🚀"
         case .last30Days: return "近 30 天还没有用量 —— 去用用 AI 吧 🚀"
         case .all:        return "还没有任何用量 —— 装好就去用 AI 吧 🚀"
         case .custom:     return "这段时间还没有用量 🚀"

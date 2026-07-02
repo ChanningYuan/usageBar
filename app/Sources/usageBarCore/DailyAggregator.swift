@@ -38,11 +38,18 @@ public enum DailyAggregator {
     public static func aggregate(
         allDailyRecords: [FileDailyRecord],
         providerIds: [String],
+        weekStartMonday: Bool = true,
+        customRange: ClosedRange<Date>? = nil,
         now: Date = Date()
     ) -> [StatRecord] {
         let today = dayFmt.string(from: now)
         let day7 = dayStringDaysAgo(6, from: now)   // 含今天 = 最近 7 天（6 天前到今天）
         let day30 = dayStringDaysAgo(29, from: now) // 含今天 = 最近 30 天
+        let weekStart = weekStartDayString(weekStartMonday: weekStartMonday, from: now)
+        let monthStart = monthStartDayString(from: now)
+        // 自定义区间的日界串（含端点），未定义则 nil
+        let customLoStr = customRange.map { dayFmt.string(from: $0.lowerBound) }
+        let customHiStr = customRange.map { dayFmt.string(from: $0.upperBound) }
 
         // 按 (provider, date) 求和（token 与其中的缓存命中分量并行累加）
         var sumByProviderDate: [String: [String: Int]] = [:]
@@ -56,21 +63,50 @@ public enum DailyAggregator {
         for pid in providerIds {
             let dailyMap = sumByProviderDate[pid] ?? [:]
             let cachedMap = cachedByProviderDate[pid] ?? [:]
-            var todayTotal = 0, last7Total = 0, last30Total = 0, allTotal = 0
-            var todayCached = 0, last7Cached = 0, last30Cached = 0, allCached = 0
+            var todayTotal = 0, weekTotal = 0, last7Total = 0, monthTotal = 0, last30Total = 0, allTotal = 0, customTotal = 0
+            var todayCached = 0, weekCached = 0, last7Cached = 0, monthCached = 0, last30Cached = 0, allCached = 0, customCached = 0
             for (date, token) in dailyMap {
                 let c = cachedMap[date] ?? 0
                 allTotal += token; allCached += c
                 if date == today { todayTotal += token; todayCached += c }
+                if date >= weekStart { weekTotal += token; weekCached += c }
                 if date >= day7 { last7Total += token; last7Cached += c }
+                if date >= monthStart { monthTotal += token; monthCached += c }
                 if date >= day30 { last30Total += token; last30Cached += c }
+                if let lo = customLoStr, let hi = customHiStr, date >= lo, date <= hi {
+                    customTotal += token; customCached += c
+                }
             }
             out.append(StatRecord(provider: pid, time: "today", token: todayTotal, cachedToken: todayCached))
+            out.append(StatRecord(provider: pid, time: "thisWeek", token: weekTotal, cachedToken: weekCached))
             out.append(StatRecord(provider: pid, time: "last7Days", token: last7Total, cachedToken: last7Cached))
+            out.append(StatRecord(provider: pid, time: "thisMonth", token: monthTotal, cachedToken: monthCached))
             out.append(StatRecord(provider: pid, time: "last30Days", token: last30Total, cachedToken: last30Cached))
             out.append(StatRecord(provider: pid, time: "all", token: allTotal, cachedToken: allCached))
+            if customRange != nil {
+                out.append(StatRecord(provider: pid, time: "custom", token: customTotal, cachedToken: customCached))
+            }
         }
         return out
+    }
+
+    /// 本周起始日的日界串。`weekStartMonday` = true → 周一归零（firstWeekday=2），false → 周日（=1）。
+    static func weekStartDayString(weekStartMonday: Bool, from now: Date = Date()) -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        cal.firstWeekday = weekStartMonday ? 2 : 1
+        let comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)
+        let start = cal.date(from: comps) ?? now
+        return dayFmt.string(from: start)
+    }
+
+    /// 本月 1 号的日界串。
+    static func monthStartDayString(from now: Date = Date()) -> String {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .current
+        let comps = cal.dateComponents([.year, .month], from: now)
+        let start = cal.date(from: comps) ?? now
+        return dayFmt.string(from: start)
     }
 }
 

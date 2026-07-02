@@ -19,7 +19,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     private var rightClickMenu: NSMenu!
     private var titleSubscription: AnyCancellable?
     private var settingsSubscription: AnyCancellable?
-    private var statsSubscription: AnyCancellable?
+    private var tabSettingsSubscription: AnyCancellable?
 
     /// 后台刷新间隔：10 分钟（mtime 增量后单次成本低，但仍避免高频）
     private let refreshInterval: TimeInterval = 600
@@ -38,6 +38,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         installRightClickMonitor()
         installTitleSubscription()
         installSettingsSubscription()
+        installTabSettingsSubscription()
 
         Task {
             // 1. 先从磁盘读 mtime 缓存（< 100ms）
@@ -51,13 +52,20 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     /// 把菜单栏 title 的更新接到 viewModel.lastRefreshAt 上,这样所有 refresh 路径——
     /// 包括 SwiftUI 弹层里的 🔄 按钮——都会同步菜单栏,不需要每个 caller 自己记得调。
     private func installTitleSubscription() {
+        // 菜单栏 title 只在数据刷新时更新（读的是「今日」合计，与 popover 切 tab 无关）。
+        // v0.3.13 撤掉了 v0.3.10 的 $stats 跟随订阅——切 tab 不再改菜单栏（B1 固定今日）。
         titleSubscription = viewModel.$lastRefreshAt
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.updateMenuBarTitle() }
-        // 切 tab（changeWindow 改 stats）也刷菜单栏 title，保证标题与 popover 当前周期始终一致
-        statsSubscription = viewModel.$stats
+    }
+
+    /// tab 配置变化（周起始 / 自定义区间 / 勾选排序）→ 从内存缓存重算，即时刷新 popover。
+    private func installTabSettingsSubscription() {
+        tabSettingsSubscription = TabSettings.shared.objectWillChange
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.updateMenuBarTitle() }
+            .sink { [weak self] _ in
+                Task { @MainActor [weak self] in await self?.viewModel.recomputeFromCache() }
+            }
     }
 
     /// 监听偏好设置变化(provider/family 勾选状态),立即刷新菜单栏 title
@@ -83,7 +91,8 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
 
     func updateMenuBarTitle() {
         guard let button = statusItem.button else { return }
-        let total = viewModel.visibleGrandTotalToken
+        // 菜单栏固定显示「今日」，不随 popover 切 tab 漂移（v0.3.13 B1）
+        let total = viewModel.visibleTotal(for: .today)
         button.title = " " + formatTokens(total) + " token"
     }
 
@@ -186,6 +195,8 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     nonisolated func popoverDidClose(_ notification: Notification) {
         Task { @MainActor [weak self] in
             self?.stopOutsideClickMonitor()
+            // 关闭时复位到「今日」tab → 下次打开默认停在今日（B1）
+            self?.viewModel.changeWindow(.today)
         }
     }
 

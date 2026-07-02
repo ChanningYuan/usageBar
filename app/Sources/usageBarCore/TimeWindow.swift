@@ -4,8 +4,12 @@ import Foundation
 public enum TimeWindow: Hashable, Sendable {
     /// 本机时区 00:00 到现在
     case today
+    /// 本周（日历对齐，起始日可配 周一/周日）
+    case thisWeek
     /// 滚动 7 天
     case last7Days
+    /// 本月（日历对齐，1 号 00:00 起）
+    case thisMonth
     /// 滚动 30 天
     case last30Days
     /// 全量
@@ -21,7 +25,9 @@ public enum TimeWindow: Hashable, Sendable {
     public var displayName: String {
         switch self {
         case .today: return "今日"
+        case .thisWeek: return "本周"
         case .last7Days: return "近 7 天"
+        case .thisMonth: return "本月"
         case .last30Days: return "近 30 天"
         case .all: return "全量"
         case .custom(let r):

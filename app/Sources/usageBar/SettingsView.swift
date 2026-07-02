@@ -11,6 +11,7 @@ import usageBarProviders
 struct SettingsView: View {
     @ObservedObject var settings: ProviderVisibilitySettings
     @ObservedObject private var qoderStatus: QoderUsageStatus = .shared
+    @ObservedObject private var tabSettings: TabSettings = .shared
 
     private let familyDisplayName: [String: String] = [
         "claude": "Claude",  // 含 Claude Code(订阅/API) + Cowork,故组名用 "Claude"
@@ -29,6 +30,7 @@ struct SettingsView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    timeTabsSection
                     ForEach(groupedSections, id: \.id) { section in
                         sectionView(section)
                     }
@@ -70,7 +72,7 @@ struct SettingsView: View {
     private var footer: some View {
         HStack {
             Text("提示:勾选状态实时生效,弹层会自动刷新。")
-                .font(.system(size: 10))
+                .font(.system(size: 9))
                 .foregroundStyle(.secondary)
             Spacer()
             Button(action: {
@@ -95,6 +97,129 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    // MARK: - 时间标签（popover tab 栏配置）
+
+    /// 虚线 fieldset 风格分组：勾选哪些周期作为 popover tab + 拖拽排序 + 本周周起始 + 自定义区间
+    private var timeTabsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("勾选显示在弹层顶部的时间标签 · 拖动排序 · 最多 \(TabSettings.maxTabs) 个")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            List {
+                ForEach(tabSettings.order, id: \.self) { id in
+                    timeTabRow(id)
+                }
+                .onMove { tabSettings.move(from: $0, to: $1) }
+            }
+            .listStyle(.plain)
+            .scrollDisabled(true)
+            .scrollContentBackground(.hidden)
+            .frame(height: CGFloat(tabSettings.order.count) * 28)
+
+            let cnt = tabSettings.checked.count
+            Text("已选 \(cnt)/\(TabSettings.maxTabs)" + (cnt >= TabSettings.maxTabs ? " · 已满，取消一个再加" : ""))
+                .font(.system(size: 9))
+                .foregroundStyle(cnt >= TabSettings.maxTabs ? .orange : .secondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.secondary.opacity(0.45), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+        )
+        .overlay(alignment: .topLeading) {
+            Text("时间标签")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .background(Color(nsColor: .windowBackgroundColor))
+                .offset(x: 12, y: -7)
+        }
+    }
+
+    /// 一行候选：勾选框 + 名称 +（本周周起始 / 自定义区间编辑）；today 锁定。
+    @ViewBuilder
+    private func timeTabRow(_ id: String) -> some View {
+        HStack(spacing: 8) {
+            Toggle(isOn: Binding(
+                get: { tabSettings.isChecked(id) },
+                set: { on in
+                    // 勾「自定义区间」且尚无区间时，播种默认区间（近 7 天）让 tab 立即可见
+                    if id == "custom", on, tabSettings.customRange == nil {
+                        if tabSettings.customLo == nil {
+                            tabSettings.customLo = Calendar.current.date(byAdding: .day, value: -6, to: Date())
+                        }
+                        if tabSettings.customHi == nil { tabSettings.customHi = Date() }
+                    }
+                    tabSettings.toggle(id, on: on)
+                }
+            )) { EmptyView() }
+            .toggleStyle(.checkbox)
+            .labelsHidden()
+            .disabled(id == "today")
+
+            Text(tabLabel(id))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(id == "today" ? .secondary : .primary)
+
+            if id == "today" {
+                Text("固定").font(.system(size: 9)).foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            if id == "thisWeek" {
+                Picker("", selection: $tabSettings.weekStartMonday) {
+                    Text("周一").tag(true)
+                    Text("周日").tag(false)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 84)
+                .controlSize(.mini)
+                .labelsHidden()
+            } else if id == "custom" {
+                customRangeControl
+            }
+        }
+        .frame(height: 24)
+    }
+
+    /// 自定义区间的起止日期选择（设置弹窗内 = 真 NSWindow，DatePicker 稳，无 popover 失焦坑）
+    private var customRangeControl: some View {
+        HStack(spacing: 4) {
+            DatePicker("", selection: Binding(
+                get: { tabSettings.customLo ?? Calendar.current.date(byAdding: .day, value: -6, to: Date()) ?? Date() },
+                set: { tabSettings.customLo = $0 }
+            ), displayedComponents: .date)
+            .labelsHidden().datePickerStyle(.field).controlSize(.mini)
+
+            Text("–").font(.system(size: 9)).foregroundStyle(.secondary)
+
+            DatePicker("", selection: Binding(
+                get: { tabSettings.customHi ?? Date() },
+                set: { tabSettings.customHi = $0 }
+            ), displayedComponents: .date)
+            .labelsHidden().datePickerStyle(.field).controlSize(.mini)
+        }
+    }
+
+    private func tabLabel(_ id: String) -> String {
+        switch id {
+        case "today": return "今日"
+        case "thisWeek": return "本周"
+        case "last7Days": return "近 7 天"
+        case "thisMonth": return "本月"
+        case "last30Days": return "近 30 天"
+        case "all": return "累计"
+        case "custom": return "自定义区间"
+        default: return id
+        }
     }
 
     // MARK: - 数据分组
@@ -189,7 +314,7 @@ struct SettingsView: View {
                 set: { settings.setProvider(p.id, enabled: $0) }
             )) {
                 Text(p.displayName)
-                    .font(.system(size: 12))
+                    .font(.system(size: 11, weight: .medium))
             }
             .toggleStyle(.switch)
             .controlSize(.small)
@@ -208,7 +333,7 @@ struct SettingsView: View {
                     set: { settings.setProvider(provider.id, enabled: $0) }
                 )) {
                     Text(provider.displayName)
-                        .font(.system(size: 12))
+                        .font(.system(size: 11, weight: .medium))
                 }
                 .toggleStyle(.switch)
                 .controlSize(.small)

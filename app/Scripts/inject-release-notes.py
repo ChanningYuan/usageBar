@@ -20,7 +20,18 @@ m = re.search(
 )
 body = m.group(1).strip() if m else ""
 
-out = ['<h3>usageBar ' + html.escape(version) + "</h3>"]
+# 顶部内联一小段样式：把「完整更新历史」链接调成浅灰（默认蓝太抢眼）、分割线调成细淡的
+# hairline。用中性灰 + 半透明分割线，浅色/深色系统外观下都成立，无需 media query。
+# Sparkle 用 WKWebView 渲染 <description>，会认这段 <style>。只作用于 a/hr/.full-log，不动正文。
+out = [
+    "<style>"
+    "a{color:#8a8a8e;text-decoration:none}"
+    "a:hover{text-decoration:underline}"
+    "hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}"
+    ".full-log{font-size:.92em}"
+    "</style>",
+    "<h3>usageBar " + html.escape(version) + "</h3>",
+]
 in_ul = False
 for raw in body.splitlines():
     line = raw.rstrip()
@@ -46,7 +57,7 @@ if in_ul:
 # （Sparkle 的 release-notes WebView 会用系统浏览器打开外链）。页面由 usagebar-site/gen-changelog.py
 # 从本 CHANGELOG.md 生成、发版后 scp 部署到 usagebar.cn/changelog.html。
 out.append('<hr>')
-out.append('<p><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>')
+out.append('<p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>')
 notes_html = "\n".join(out)
 
 # 2. 改写 appcast：删掉 releaseNotesLink，在 <item> 里插入内联 <description>
