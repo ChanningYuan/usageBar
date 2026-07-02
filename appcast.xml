@@ -4,19 +4,19 @@
         <title>usageBar</title>
         <item>
             <description><![CDATA[
-<h3>usageBar 0.3.11</h3>
+<h3>usageBar 0.3.12</h3>
 <p><b>修复</b></p>
 <ul>
-<li><b>悟空缓存命中补显</b>：悟空（钉钉）在 v0.3.10 的「缓存命中率」里一直显示 0%——它的 `cacheTokens` 字段是数据源 2026-05-18 才新增的，之前的解析没读它。现已补上：悟空行也能看到缓存命中占比与「缓存 / 非缓存」悬浮拆分了。<b>总用量数字不变</b>（缓存命中本就含在输入里，只是把其中的命中部分标出来），2026-05-18 之前的老记录无此字段、按无缓存显示。</li>
+<li><b>悟空缓存命中真正生效</b>：v0.3.11 号称补了悟空缓存命中，但那次构建没把改动编进发布包，升级后悟空命中率仍是空的。本版重新干净构建、并强制缓存重扫，悟空的「xx.x% 缓存命中」+ 悬浮拆分现在真的会显示了。总用量数字不变。</li>
 </ul>
             ]]></description>
-            <title>0.3.11</title>
-            <pubDate>Thu, 02 Jul 2026 10:47:05 +0800</pubDate>
-            <sparkle:version>0.3.11</sparkle:version>
-            <sparkle:shortVersionString>0.3.11</sparkle:shortVersionString>
+            <title>0.3.12</title>
+            <pubDate>Thu, 02 Jul 2026 11:21:14 +0800</pubDate>
+            <sparkle:version>0.3.12</sparkle:version>
+            <sparkle:shortVersionString>0.3.12</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1660010" type="application/octet-stream" sparkle:edSignature="SOdOqZqc1m6E/NDPdxqainohXmDlDYiC8A1L9Xz+L/ko6z1a+z7Sss8UXbMfdn24grrZZrmCzeYJc0Q8KAKPAw=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1660005" type="application/octet-stream" sparkle:edSignature="19sAkp5poY9IQ33VPdrhClsnvm/sDUUtE+a3V2lbYKUbIU5Sbl4N12Ft1Zj/qSfRrr/5ukcYM/eVGsIFulpBDA=="/>
         </item>
     </channel>
 </rss>
