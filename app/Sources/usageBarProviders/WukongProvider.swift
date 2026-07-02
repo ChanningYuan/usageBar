@@ -51,7 +51,7 @@ public struct WukongProvider: UsageProvider {
         return allRecords
     }
 
-    private func parseFile(url: URL) throws -> [FileDailyRecord] {
+    func parseFile(url: URL) throws -> [FileDailyRecord] {   // internal：供回归单测 @testable 调用
         var dailyTotals: [String: Int] = [:]
         var dailyCached: [String: Int] = [:]
         try JSONLReader.forEachLine(at: url) { obj in
