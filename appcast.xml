@@ -9,6 +9,8 @@
 <ul>
 <li><b>悟空缓存命中真正生效</b>：v0.3.11 号称补了悟空缓存命中，但那次构建没把改动编进发布包，升级后悟空命中率仍是空的。本版重新干净构建、并强制缓存重扫，悟空的「xx.x% 缓存命中」+ 悬浮拆分现在真的会显示了。总用量数字不变。</li>
 </ul>
+<hr>
+<p><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
             <title>0.3.12</title>
             <pubDate>Thu, 02 Jul 2026 11:21:14 +0800</pubDate>

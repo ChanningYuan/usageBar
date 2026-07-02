@@ -42,6 +42,11 @@ for raw in body.splitlines():
         out.append("<p>" + re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", html.escape(line)) + "</p>")
 if in_ul:
     out.append("</ul>")
+# 末尾追加「完整更新历史」链接：弹窗只显示当前版 notes，想看全的点它跳托管的 changelog 页
+# （Sparkle 的 release-notes WebView 会用系统浏览器打开外链）。页面由 usagebar-site/gen-changelog.py
+# 从本 CHANGELOG.md 生成、发版后 scp 部署到 usagebar.cn/changelog.html。
+out.append('<hr>')
+out.append('<p><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>')
 notes_html = "\n".join(out)
 
 # 2. 改写 appcast：删掉 releaseNotesLink，在 <item> 里插入内联 <description>
