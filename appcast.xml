@@ -5,32 +5,21 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.13</h3>
-<p><b>新增</b></p>
-<ul>
-<li><b>时间周期标签可配置</b>：弹层顶部的时间标签现在能在偏好设置里自由勾选、拖拽排序（最多 4 个）。新增 <b>本周 / 本月</b> 日历对齐周期（本周可选 周一 / 周日 起始），还能加一个 <b>自定义日期区间</b>。默认标签改为 <b>今日 / 本周 / 本月 / 累计</b>。</li>
-<li><b>数据源带图标</b>：偏好设置的数据源列表每行加上了对应工具的图标，更好认。</li>
-</ul>
-<p><b>变化</b></p>
-<ul>
-<li><b>偏好设置改版</b>：数据源、时间周期标签拆成两个可折叠区块，更清爽（全内联、无弹层焦点问题）。</li>
-<li><b>菜单栏固定「今日」</b>：菜单栏数字始终显示今日用量，切换弹层里的标签不再影响它；下次打开弹层默认回今日。</li>
-<li>弹层只剩「今日」一个标签时，顶部改为标题 + 「＋自定义」入口（点击直达偏好设置的时间周期标签，自动展开定位）。</li>
-</ul>
+<h3>usageBar 0.3.14</h3>
 <p><b>修复</b></p>
 <ul>
-<li>修复<b>首次打开弹层时与菜单栏之间出现间隔</b>的问题（弹层尺寸首开未按内容自适应）。</li>
+<li><b>悟空 0.9.66 起对话 token 重新计入</b>：悟空升级到 0.9.66 后，Codex 模式的对话改为直连远端、不再经本地中转，导致悟空用量停止增长（记录里 token 全是 0）。本版为悟空新增第二个数据源，从悟空内置 codex 的会话文件里读取真实 token，与升级前的历史数据按天相加。升级前后不重叠、不会重复计算；未使用新版的用户不受影响。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.13</title>
-            <pubDate>Thu, 02 Jul 2026 18:10:09 +0800</pubDate>
-            <sparkle:version>0.3.13</sparkle:version>
-            <sparkle:shortVersionString>0.3.13</sparkle:shortVersionString>
+            <title>0.3.14</title>
+            <pubDate>Mon, 06 Jul 2026 14:07:21 +0800</pubDate>
+            <sparkle:version>0.3.14</sparkle:version>
+            <sparkle:shortVersionString>0.3.14</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1723929" type="application/octet-stream" sparkle:edSignature="Y9Tuw8MwFQ7oEFtVKUQXb6W07NWBL1M4W2mKea2ezARRdeMX/M4vRM1J0TH2831H9r90K9UkkLxSIjVQ5r//DQ=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1726474" type="application/octet-stream" sparkle:edSignature="xJ4gvOjMZK/d1eHnx/hLNN3Cq8m96Xol7qFoFHokW1hvAZWqkhK1UDbKULkUalqgzAXB4T83SGA5+SYhMrD/DQ=="/>
         </item>
     </channel>
 </rss>
