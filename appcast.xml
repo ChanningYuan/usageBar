@@ -5,21 +5,31 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.14</h3>
-<p><b>修复</b></p>
+<h3>usageBar 0.3.15</h3>
+<p><b>新增</b></p>
 <ul>
-<li><b>悟空 0.9.66 起对话 token 重新计入</b>：悟空升级到 0.9.66 后，Codex 模式的对话改为直连远端、不再经本地中转，导致悟空用量停止增长（记录里 token 全是 0）。本版为悟空新增第二个数据源，从悟空内置 codex 的会话文件里读取真实 token，与升级前的历史数据按天相加。升级前后不重叠、不会重复计算；未使用新版的用户不受影响。</li>
+<li><b>点开来源看用量明细（Claude Code 订阅 / API · Codex）</b>：弹层里把鼠标移到这几行会浮现「›」，点进去是该来源在当前周期的详情页——大号总量 + 缓存命中环、Token 构成、按模型、按会话，每个用量数字旁并列<b>等效 API 花费</b>（订阅口径标「≈ 等效」，是「按官方 API 价值多少」的参照，非真实账单）。详情页顶部能直接切 今日 / 本周 / 本月 / 累计。</li>
+</ul>
+<p>  - Claude：净输入 / 输出 / 缓存读 / 缓存写 四格 + 各模型（Opus / Sonnet / Haiku…）的命中率与花费。</p>
+<p>  - Codex：输入 / 输出 两块，缓存输入、思考（reasoning）作为子项挂在下面；按模型区分 GPT-5.5 / GPT-5.x-Codex / o4-mini 等；会话标题取自 Codex 侧栏的真实标题。</p>
+<ul>
+<li><b>外观 · 主题</b>：偏好设置新增 深色 / 浅色 / 跟随系统（默认跟随系统），详情页与列表整体换皮。</li>
+<li><b>单来源直达详情</b>：今日只有一个可展开来源有用量时，点开菜单栏直接进它的今日详情。</li>
+</ul>
+<p><b>变化</b></p>
+<ul>
+<li>详情页采用跟随系统的中性灰配色，界面高度随内容自适应（内容少不留空白、内容多可滚动）。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.14</title>
-            <pubDate>Mon, 06 Jul 2026 14:07:21 +0800</pubDate>
-            <sparkle:version>0.3.14</sparkle:version>
-            <sparkle:shortVersionString>0.3.14</sparkle:shortVersionString>
+            <title>0.3.15</title>
+            <pubDate>Wed, 08 Jul 2026 00:58:15 +0800</pubDate>
+            <sparkle:version>0.3.15</sparkle:version>
+            <sparkle:shortVersionString>0.3.15</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1726474" type="application/octet-stream" sparkle:edSignature="xJ4gvOjMZK/d1eHnx/hLNN3Cq8m96Xol7qFoFHokW1hvAZWqkhK1UDbKULkUalqgzAXB4T83SGA5+SYhMrD/DQ=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1924078" type="application/octet-stream" sparkle:edSignature="ej3dAWuBD4xFbX5jnpsmW1bRxLrrD0aLRVcD//5eDtayMxGPqewytONMN2+4mRt6yWNZHJetCfdlJT3bP0FoDg=="/>
         </item>
     </channel>
 </rss>
