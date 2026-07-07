@@ -274,15 +274,22 @@ struct UsageRootView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            content
-            Divider()
-            footer
+        Group {
+            if let pid = viewModel.detailProviderId {
+                // drill-in：整个弹层切成该 provider 的详情页（顶部 ‹返回 回列表）
+                ProviderDetailView(viewModel: viewModel, providerId: pid)
+            } else {
+                VStack(spacing: 0) {
+                    header
+                    Divider()
+                    content
+                    Divider()
+                    footer
+                }
+                .frame(width: 400, height: totalHeight)
+                .background(Color(nsColor: .windowBackgroundColor))
+            }
         }
-        .frame(width: 400, height: totalHeight)
-        .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { qoderStatus.refresh() }
     }
 
@@ -333,46 +340,12 @@ struct UsageRootView: View {
 
     // MARK: - 时间标签栏（按 TabSettings 动态渲染）
 
-    /// 当前要渲染的 tab 窗口序列（勾选 ∩ 顺序；custom 需区间有效）
+    /// 当前要渲染的 tab 窗口序列（勾选 ∩ 顺序；custom 需区间有效）。逻辑见 `TimeTabs.swift`（详情页共用）。
     private var tabWindows: [TimeWindow] {
-        tabSettings.tabOrder.compactMap { windowFor(id: $0) }
+        tabSettings.orderedWindows
     }
 
-    private func windowFor(id: String) -> TimeWindow? {
-        switch id {
-        case "today": return .today
-        case "thisWeek": return .thisWeek
-        case "last7Days": return .last7Days
-        case "thisMonth": return .thisMonth
-        case "last30Days": return .last30Days
-        case "all": return .all
-        case "custom": return tabSettings.customRange.map { TimeWindow.custom($0) }
-        default: return nil
-        }
-    }
-
-    private func windowLabel(_ w: TimeWindow) -> String {
-        switch w {
-        case .today: return "今日"
-        case .thisWeek: return "本周"
-        case .last7Days: return "7天"
-        case .thisMonth: return "本月"
-        case .last30Days: return "30天"
-        case .all: return "累计"
-        case .custom(let r): return shortRangeLabel(r)
-        }
-    }
-
-    /// 自定义区间短标签：同月 `6/1–15`、跨月 `6/28–7/3`
-    private func shortRangeLabel(_ r: ClosedRange<Date>) -> String {
-        let cal = Calendar.current
-        let lo = cal.dateComponents([.month, .day], from: r.lowerBound)
-        let hi = cal.dateComponents([.month, .day], from: r.upperBound)
-        if lo.month == hi.month {
-            return "\(lo.month ?? 0)/\(lo.day ?? 0)–\(hi.day ?? 0)"
-        }
-        return "\(lo.month ?? 0)/\(lo.day ?? 0)–\(hi.month ?? 0)/\(hi.day ?? 0)"
-    }
+    private func windowLabel(_ w: TimeWindow) -> String { w.tabLabel }
 
     /// 当前可见 provider id 列表(按 ProviderRegistry 注册顺序 + Settings 过滤)
     private var visibleProviderIds: [String] {
@@ -408,7 +381,12 @@ struct UsageRootView: View {
                 VStack(spacing: 5) {
                     ForEach(displayed, id: \.self) { pid in
                         let stat = viewModel.stats.first { $0.provider == pid } ?? StatRecord(provider: pid, time: viewModel.window.id, token: 0)
-                        ProviderRowView(stat: stat, maxToken: maxT)
+                        ProviderRowView(
+                            stat: stat,
+                            maxToken: maxT,
+                            expandable: (pid == "claude-sub" || pid == "claude-api" || pid == "codex"),
+                            onExpand: { viewModel.openDetail(pid) }
+                        )
                         if showsQoderHint(for: pid) {
                             qoderHintRow
                         }
@@ -572,7 +550,11 @@ struct UsageRootView: View {
 struct ProviderRowView: View {
     let stat: StatRecord
     let maxToken: Int
+    /// 可展开（v1 只有 Claude 订阅 / API）→ 悬浮浮现 › 导航箭头 + 行高亮，点击进详情页
+    var expandable: Bool = false
+    var onExpand: (() -> Void)? = nil
     @State private var hoveringCache = false
+    @State private var hoveringRow = false
 
     private var meta: ProviderMeta { ProviderMetaLookup.meta(for: stat.provider) }
     private var cached: Int { max(0, min(stat.cachedToken, stat.token)) }
@@ -617,8 +599,25 @@ struct ProviderRowView: View {
                 }
                 .frame(width: 66, height: 32, alignment: .trailing)
                 .copyableExact(stat.token)
+
+            // 悬浮才浮现的 › 导航箭头（drill-in「点进详情」指示，不常驻）
+            if expandable && hoveringRow {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .transition(.opacity)
+            }
         }
         .frame(height: 32)
+        .background(
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Color.primary.opacity(expandable && hoveringRow ? 0.05 : 0))
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            if expandable { withAnimation(.easeInOut(duration: 0.12)) { hoveringRow = hovering } }
+        }
+        .onTapGesture { if expandable { onExpand?() } }
     }
 
     // 悬浮气泡：缓存/非缓存绝对值（白卡片样式，与数字/合计的复制浮层一致）

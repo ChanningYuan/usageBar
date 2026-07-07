@@ -108,6 +108,39 @@ public enum DailyAggregator {
         let start = cal.date(from: comps) ?? now
         return dayFmt.string(from: start)
     }
+
+    /// 返回「某日界串是否落在窗口内」的判定闭包。
+    /// 与 `aggregate` 完全一致的日界比较口径，供懒加载明细扫描器（`ClaudeDetailScanner`）
+    /// 复用，保证详情合计与主行完全对得上。
+    public static func windowPredicate(
+        _ window: TimeWindow,
+        weekStartMonday: Bool = true,
+        now: Date = Date()
+    ) -> (String) -> Bool {
+        switch window {
+        case .today:
+            let today = dayFmt.string(from: now)
+            return { $0 == today }
+        case .thisWeek:
+            let s = weekStartDayString(weekStartMonday: weekStartMonday, from: now)
+            return { $0 >= s }
+        case .last7Days:
+            let s = dayStringDaysAgo(6, from: now)
+            return { $0 >= s }
+        case .thisMonth:
+            let s = monthStartDayString(from: now)
+            return { $0 >= s }
+        case .last30Days:
+            let s = dayStringDaysAgo(29, from: now)
+            return { $0 >= s }
+        case .all:
+            return { _ in true }
+        case .custom(let r):
+            let lo = dayFmt.string(from: r.lowerBound)
+            let hi = dayFmt.string(from: r.upperBound)
+            return { $0 >= lo && $0 <= hi }
+        }
+    }
 }
 
 // MARK: - 文件 mtime/size 读取 helper

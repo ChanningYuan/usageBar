@@ -12,6 +12,13 @@ final class UsageViewModel: ObservableObject {
     @Published var lastRefreshAt: Date?
     @Published var justRefreshed: Bool = false
 
+    // MARK: - drill-in 详情（懒加载，独立于主刷新快路径）
+
+    /// 非 nil = 正在看某 provider（claude-sub / claude-api）的详情页；nil = 列表态
+    @Published var detailProviderId: String? = nil
+    /// 已加载的详情（nil 且 detailProviderId != nil = 加载中）
+    @Published var detail: ProviderDetail? = nil
+
     /// 全量缓存：4 窗口 × 5 provider = 20 条
     private var allStats: [StatRecord] = []
 
@@ -151,6 +158,61 @@ final class UsageViewModel: ObservableObject {
         guard newWindow != window else { return }
         window = newWindow
         self.stats = allStats.filter { $0.time == newWindow.id }
+    }
+
+    // MARK: - drill-in 详情
+
+    /// 进入某 provider 详情页：切路由 + 异步懒加载明细（当前窗口）。
+    func openDetail(_ providerId: String) {
+        detailProviderId = providerId
+        detail = nil
+        Task { await loadDetail(providerId: providerId) }
+    }
+
+    /// 今日「仅有一个可展开 provider 有用量」时返回它的 id（打开弹层直接进今日详情用）；否则 nil。
+    /// 判定：全量缓存里今日记录 ∩ 可见 ∩ token>0，恰好一个，且属于可展开集合。
+    func soleTodayDetailProvider() -> String? {
+        let visible = Set(ProviderVisibilitySettings.shared.visibleProviderIds())
+        let expandable: Set<String> = ["claude-sub", "claude-api", "codex"]
+        let providers = Set(
+            allStats
+                .filter { $0.time == TimeWindow.today.id && visible.contains($0.provider) && $0.token > 0 }
+                .map { $0.provider }
+        )
+        guard providers.count == 1, let only = providers.first, expandable.contains(only) else { return nil }
+        return only
+    }
+
+    /// 返回列表态。
+    func closeDetail() {
+        detailProviderId = nil
+        detail = nil
+    }
+
+    /// 详情页内切周期：切窗口（`window` 是同一个 @Published，返回列表时列表 tab 随之跟随）
+    /// + 按新周期重载明细（`detail=nil` 先显示「统计中…」）。
+    func changeWindowInDetail(_ newWindow: TimeWindow) {
+        guard let pid = detailProviderId, newWindow != window else { return }
+        changeWindow(newWindow)   // 更新 window + 列表 stats
+        detail = nil
+        Task { await loadDetail(providerId: pid) }
+    }
+
+    private func loadDetail(providerId: String) async {
+        let win = window
+        let weekStartMonday = TabSettings.shared.weekStartMonday
+        // 按 provider 分发到对应扫描器：Codex 走 CodexDetailScanner（累计差分口径），其余走 Claude。
+        let d: ProviderDetail
+        if providerId == "codex" {
+            d = await CodexDetailScanner.shared.detail(
+                providerId: providerId, window: win, weekStartMonday: weekStartMonday)
+        } else {
+            d = await ClaudeDetailScanner.shared.detail(
+                providerId: providerId, window: win, weekStartMonday: weekStartMonday)
+        }
+        // 仅当用户仍停在同一 provider 详情页才 commit（防止快速来回切）
+        guard detailProviderId == providerId, win == window else { return }
+        detail = d
     }
 
     private func triggerJustRefreshedFlash() {

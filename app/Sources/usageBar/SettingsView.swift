@@ -22,6 +22,7 @@ struct SettingsView: View {
     @ObservedObject var settings: ProviderVisibilitySettings
     @ObservedObject private var qoderStatus: QoderUsageStatus = .shared
     @ObservedObject private var tabSettings: TabSettings = .shared
+    @ObservedObject private var themeSettings: ThemeSettings = .shared
     @ObservedObject private var nav = SettingsNavigation.shared
     @State private var draggingTab: String?
     @State private var dataSourceExpanded = true
@@ -41,6 +42,8 @@ struct SettingsView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
+                        appearanceSection
+                        Divider()
                         dataSourceSection
                         Divider()
                         timeTabsSection.id("timeTabs")
@@ -154,6 +157,31 @@ struct SettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - 外观（主题）
+
+    /// 外观主题：深色 / 浅色 / 跟随系统（segmented，实时生效）
+    private var appearanceSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "circle.lefthalf.filled")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text("外观 · 主题")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+            }
+            Picker("", selection: $themeSettings.theme) {
+                ForEach(AppTheme.allCases, id: \.self) { t in
+                    Text(t.label).tag(t)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 300)
+            .padding(.leading, 2)
+        }
     }
 
     // MARK: - 数据源（provider 折叠段）

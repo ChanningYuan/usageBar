@@ -8,6 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // .accessory：不在 Dock 显示、不抢焦点、不进 Cmd+Tab
         NSApp.setActivationPolicy(.accessory)
+        // 应用已保存的外观主题（深色 / 浅色 / 跟随系统）
+        ThemeSettings.shared.applyToApp()
         statusBarController = StatusBarController()
     }
 

@@ -20,6 +20,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     private var titleSubscription: AnyCancellable?
     private var settingsSubscription: AnyCancellable?
     private var tabSettingsSubscription: AnyCancellable?
+    private var themeSubscription: AnyCancellable?
 
     /// 后台刷新间隔：10 分钟（mtime 增量后单次成本低，但仍避免高频）
     private let refreshInterval: TimeInterval = 600
@@ -39,6 +40,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         installTitleSubscription()
         installSettingsSubscription()
         installTabSettingsSubscription()
+        installThemeSubscription()
 
         Task {
             // 1. 先从磁盘读 mtime 缓存（< 100ms）
@@ -57,6 +59,22 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         titleSubscription = viewModel.$lastRefreshAt
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.updateMenuBarTitle() }
+    }
+
+    /// 主题变化 → 显式同步 popover 外观。
+    /// NSPopover 锚在菜单栏状态项上，继承的是「菜单栏/系统」外观，**不吃 `NSApp.appearance` 的覆盖**，
+    /// 所以设置窗变了、弹层不变。必须单独给 `popover.appearance` 赋值（.system → nil 跟随系统）。
+    private func installThemeSubscription() {
+        applyThemeToPopover()
+        themeSubscription = ThemeSettings.shared.$theme
+            .receive(on: RunLoop.main)
+            .sink { [weak self] newTheme in
+                self?.popover.appearance = newTheme.nsAppearance
+            }
+    }
+
+    private func applyThemeToPopover() {
+        popover.appearance = ThemeSettings.shared.theme.nsAppearance
     }
 
     /// tab 配置变化（周起始 / 自定义区间 / 勾选排序）→ 从内存缓存重算，即时刷新 popover。
@@ -122,6 +140,11 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
             popover.performClose(sender)
         } else {
             guard let button = statusItem.button else { return }
+            // 今日仅单个可展开 provider 有用量 → 打开即进它的今日详情（锚定今日，与菜单栏数字一致）。
+            // 否则维持总览列表（关闭时 popoverDidClose 已复位今日 + 退出详情，故重开会重新判定）。
+            if viewModel.detailProviderId == nil, let sole = viewModel.soleTodayDetailProvider() {
+                viewModel.openDetail(sole)
+            }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
             startOutsideClickMonitor()
@@ -199,7 +222,9 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     nonisolated func popoverDidClose(_ notification: Notification) {
         Task { @MainActor [weak self] in
             self?.stopOutsideClickMonitor()
-            // 关闭时复位到「今日」tab → 下次打开默认停在今日（B1）
+            // 关闭时退出详情页 + 复位到「今日」tab → 下次打开默认是列表态的今日
+            //（否则再次打开停在旧详情页，且右上角 tag 与实际窗口不一致）
+            self?.viewModel.closeDetail()
             self?.viewModel.changeWindow(.today)
         }
     }
