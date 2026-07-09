@@ -126,50 +126,67 @@ public enum CodexPricing {
     }
 }
 
-/// 跨厂商统一价目路由（等效 API 价）：按 modelId 归属分发到对应厂商价表。
+/// 跨厂商统一价目路由（等效 API 价）：按 modelId 归属分发。
 ///
-/// 供混合厂商的 provider（OpenCode 等）与明细页四格复用：claude-* → `ClaudePricing`，
-/// gpt-* / o3* / o4* → `CodexPricing`，其它厂商（glm / gemini …）暂无价表按 0 计
-/// （宁显示 $0 不乱算）。后续要支持第三方厂商模型价，在这里加路由即可。
+/// 优先级：claude-* → `ClaudePricing`、gpt-*/o3*/o4* → `CodexPricing`（内置表含 5m/1h
+/// 缓存写拆分、codex 变体细分等手工精调，且有「宁高不漏」兜底）→ 其余厂商查
+/// `RemotePricing`（models.dev 远程表，glm/gemini/deepseek… 约 5000 模型）→ 都没有按 0 计
+/// （宁显示 $0 不乱算，UI 侧配「无价目」反馈引导）。
+///
+/// `provider` 选传（opencode 落库带 providerID）：远程表按 (provider, model) 精确匹配，
+/// 同名模型多渠道价不同时不会取错；不传则按官方渠道优先的扁平表。
 public enum UnifiedPricing {
-    public static func inputRate(for modelId: String) -> Double {
+    public static func inputRate(for modelId: String, provider: String? = nil) -> Double {
         if isClaude(modelId) { return ClaudePricing.inputRate(for: modelId) }
         if isOpenAI(modelId) { return CodexPricing.inputRate(for: modelId) }
-        return 0
+        return (remote(provider, modelId)?.input ?? 0) / 1_000_000
     }
 
-    public static func outputRate(for modelId: String) -> Double {
+    public static func outputRate(for modelId: String, provider: String? = nil) -> Double {
         if isClaude(modelId) { return ClaudePricing.outputRate(for: modelId) }
         if isOpenAI(modelId) { return CodexPricing.outputRate(for: modelId) }
-        return 0
+        return (remote(provider, modelId)?.output ?? 0) / 1_000_000
     }
 
-    /// 缓存读单价（已含各家折扣倍率）
-    public static func cacheReadRate(for modelId: String) -> Double {
+    /// 缓存读单价（已含各家折扣倍率；远程表的 cache_read 本身就是折后价）
+    public static func cacheReadRate(for modelId: String, provider: String? = nil) -> Double {
         if isClaude(modelId) { return ClaudePricing.inputRate(for: modelId) * ClaudePricing.cacheReadMul }
         if isOpenAI(modelId) { return CodexPricing.inputRate(for: modelId) * CodexPricing.cachedInputMul }
-        return 0
+        return (remote(provider, modelId)?.cacheRead ?? 0) / 1_000_000
     }
 
     /// 缓存写单价（5m 档；OpenAI 无缓存写计费概念恒 0）
-    public static func cacheWrite5mRate(for modelId: String) -> Double {
+    public static func cacheWrite5mRate(for modelId: String, provider: String? = nil) -> Double {
         if isClaude(modelId) { return ClaudePricing.inputRate(for: modelId) * ClaudePricing.cacheWrite5mMul }
-        return 0
+        if isOpenAI(modelId) { return 0 }
+        return (remote(provider, modelId)?.cacheWrite ?? 0) / 1_000_000
     }
 
-    /// 缓存写单价（1h 档）
-    public static func cacheWrite1hRate(for modelId: String) -> Double {
+    /// 缓存写单价（1h 档；远程表无 5m/1h 拆分，1h 计费只存在于 Anthropic 直连、走内置表，
+    /// 远程侧按同 cache_write 价计）
+    public static func cacheWrite1hRate(for modelId: String, provider: String? = nil) -> Double {
         if isClaude(modelId) { return ClaudePricing.inputRate(for: modelId) * ClaudePricing.cacheWrite1hMul }
-        return 0
+        if isOpenAI(modelId) { return 0 }
+        return (remote(provider, modelId)?.cacheWrite ?? 0) / 1_000_000
     }
 
     /// 等效 API 花费（美元）。output 需已含 reasoning（app 统一口径：reasoning ⊂ output）。
-    public static func cost(_ t: TokenBreakdown, modelId: String) -> Double {
-        Double(t.input) * inputRate(for: modelId)
-            + Double(t.output) * outputRate(for: modelId)
-            + Double(t.cacheRead) * cacheReadRate(for: modelId)
-            + Double(t.cacheCreate5m) * cacheWrite5mRate(for: modelId)
-            + Double(t.cacheCreate1h) * cacheWrite1hRate(for: modelId)
+    public static func cost(_ t: TokenBreakdown, modelId: String, provider: String? = nil) -> Double {
+        Double(t.input) * inputRate(for: modelId, provider: provider)
+            + Double(t.output) * outputRate(for: modelId, provider: provider)
+            + Double(t.cacheRead) * cacheReadRate(for: modelId, provider: provider)
+            + Double(t.cacheCreate5m) * cacheWrite5mRate(for: modelId, provider: provider)
+            + Double(t.cacheCreate1h) * cacheWrite1hRate(for: modelId, provider: provider)
+    }
+
+    /// 该模型是否完全无价可依（内置 + 远程都没有）→ UI「无价目」反馈引导用
+    public static func hasNoPricing(for modelId: String, provider: String? = nil) -> Bool {
+        if isClaude(modelId) || isOpenAI(modelId) { return false }
+        return remote(provider, modelId) == nil
+    }
+
+    private static func remote(_ provider: String?, _ modelId: String) -> RemotePricing.Rate? {
+        RemotePricing.shared.rate(provider: provider, model: modelId)
     }
 
     static func isClaude(_ m: String) -> Bool { m.hasPrefix("claude-") }

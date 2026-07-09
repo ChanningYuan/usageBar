@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import usageBarCore
 import usageBarProviders
@@ -322,13 +323,46 @@ struct ProviderDetailView: View {
                         .foregroundStyle(pal.text2)
                         .frame(width: 56, alignment: .trailing)
                     hitPill(m.hitRate)
-                    Text(fmtCost(m.cost))
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(pal.text)
+                    if m.cost == 0, m.tokens.total > 0, UnifiedPricing.hasNoPricing(for: m.modelId) {
+                        // 内置+远程价目都没有的模型：给反馈入口（预填 issue），感知长尾缺价
+                        Button(action: { openPricingIssue(model: m.modelId) }) {
+                            Text("无价目")
+                                .font(.system(size: 9))
+                                .foregroundStyle(pal.text3)
+                                .padding(.horizontal, 4).padding(.vertical, 1)
+                                .background(RoundedRectangle(cornerRadius: 4)
+                                    .strokeBorder(pal.text3.opacity(0.45), lineWidth: 0.5))
+                        }
+                        .buttonStyle(.plain)
+                        .help("该模型暂无价目，点击一键反馈（打开预填好的 GitHub Issue）")
                         .frame(width: 46, alignment: .trailing)
+                    } else {
+                        Text(fmtCost(m.cost))
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(pal.text)
+                            .frame(width: 46, alignment: .trailing)
+                    }
                 }
             }
         }
+    }
+
+    /// 打开预填好的「价目缺失」GitHub Issue（用户只需点 Submit）
+    private func openPricingIssue(model: String) {
+        let ver = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let body = """
+        - 模型 id: `\(model)`
+        - 来源: \(providerId)
+        - usageBar 版本: \(ver)
+
+        该模型的等效花费显示为 $0（内置与远程价目表均未收录），请补充价格。
+        """
+        var comp = URLComponents(string: "https://github.com/ChanningYuan/usageBar/issues/new")!
+        comp.queryItems = [
+            .init(name: "title", value: "[价目缺失] \(model)"),
+            .init(name: "body", value: body),
+        ]
+        if let url = comp.url { NSWorkspace.shared.open(url) }
     }
 
     private func hitPill(_ r: Double) -> some View {

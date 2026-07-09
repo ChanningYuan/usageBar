@@ -111,6 +111,8 @@ final class UsageViewModel: ObservableObject {
         ProviderVisibilitySettings.shared.autoConfigureFirstRunIfNeeded(providerIdsToKeep: keep)
         // 每次刷新顺带扫一遍 Qoder 的 env 开关状态（CLI/Work 共用），驱动弹层/设置页横幅。
         QoderUsageStatus.shared.refresh()
+        // 远程价目表每日条件拉取（内部 24h 节流 + ETag 304，非到期零开销；详见 RemotePricing）
+        Task.detached(priority: .utility) { await RemotePricing.shared.refreshIfNeeded() }
         self.lastRefreshAt = Date()
         self.isRefreshing = false
         log("local done, total \(allStats.count) records")

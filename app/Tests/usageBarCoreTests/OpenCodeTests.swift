@@ -51,6 +51,7 @@ final class OpenCodeTests: XCTestCase {
     }
 
     func testCostFallbackToEquivalentPricing() throws {
+        clearRemotePricing()
         let now = Date()
         let dbPath = try makeTempDB(
             sessions: [("ses_r", nil, "订阅会话")],
@@ -69,12 +70,57 @@ final class OpenCodeTests: XCTestCase {
     }
 
     func testUnifiedPricingRouting() {
+        clearRemotePricing()
         XCTAssertEqual(UnifiedPricing.inputRate(for: "claude-opus-4-8"),
                        ClaudePricing.inputRate(for: "claude-opus-4-8"))
         XCTAssertEqual(UnifiedPricing.outputRate(for: "gpt-5.5-fast"),
                        CodexPricing.outputRate(for: "gpt-5.5-fast"))
         XCTAssertEqual(UnifiedPricing.cacheWrite5mRate(for: "gpt-5.5-fast"), 0, "OpenAI 无缓存写计费")
-        XCTAssertEqual(UnifiedPricing.inputRate(for: "glm-5.2"), 0, "无价表厂商不乱算")
+        XCTAssertEqual(UnifiedPricing.inputRate(for: "glm-5.2"), 0, "内置+远程都没有时不乱算")
+        XCTAssertTrue(UnifiedPricing.hasNoPricing(for: "glm-5.2"))
+        XCTAssertFalse(UnifiedPricing.hasNoPricing(for: "claude-opus-4-8"), "claude 系永远有内置兜底")
+    }
+
+    // MARK: - 远程价目（models.dev 瘦身表）
+
+    func testRemotePricingLookupAndUnifiedFallback() throws {
+        let fixture = Data("""
+        {"providers":{
+          "zai":{"glm-5.2":{"input":0.6,"output":2.2,"cache_read":0.11}},
+          "openrouter":{"glm-5.2":{"input":9,"output":9}},
+          "google":{"gemini-3-pro":{"input":1.25,"output":10,"cache_read":0.31,"cache_write":1.625}}
+        }}
+        """.utf8)
+        XCTAssertTrue(RemotePricing.shared.injectForTesting(fixture))
+
+        // (provider, model) 精确命中
+        XCTAssertEqual(RemotePricing.shared.rate(provider: "zai", model: "glm-5.2")?.input, 0.6)
+        // 扁平表:官方渠道(zai 在 canonical 序)优先于转售渠道(openrouter)
+        XCTAssertEqual(RemotePricing.shared.rate(provider: nil, model: "glm-5.2")?.input, 0.6)
+        XCTAssertEqual(RemotePricing.shared.rate(provider: "不存在的渠道", model: "glm-5.2")?.input, 0.6)
+
+        // UnifiedPricing 兜底链:未知厂商模型经远程表有价了
+        XCTAssertEqual(UnifiedPricing.inputRate(for: "glm-5.2", provider: "zai"), 0.6 / 1_000_000)
+        XCTAssertEqual(UnifiedPricing.cacheWrite5mRate(for: "gemini-3-pro"), 1.625 / 1_000_000)
+        XCTAssertFalse(UnifiedPricing.hasNoPricing(for: "glm-5.2"))
+        XCTAssertTrue(UnifiedPricing.hasNoPricing(for: "totally-unknown-model"))
+        // claude/gpt 内置优先,不受远程影响
+        XCTAssertEqual(UnifiedPricing.inputRate(for: "claude-opus-4-8"),
+                       ClaudePricing.inputRate(for: "claude-opus-4-8"))
+    }
+
+    func testOpenCodeCostFallbackViaRemotePricing() throws {
+        let fixture = Data(#"{"providers":{"zai":{"glm-5.2":{"input":0.6,"output":2.2}}}}"#.utf8)
+        XCTAssertTrue(RemotePricing.shared.injectForTesting(fixture))
+        let now = Date()
+        let dbPath = try makeTempDB(
+            sessions: [("ses_r", nil, "glm 订阅会话")],
+            messages: [("msg_g", "ses_r", now, "\"glm-5.2\"", 1000, 100, 0, 0, 0, 0)])
+
+        let messages = OpenCodeDB.load(dbPath: dbPath).messages
+        let g = try XCTUnwrap(messages.first)
+        // 过去显示 $0 的 glm,经远程表折算:1000×$0.6/1M + 100×$2.2/1M = $0.00082
+        XCTAssertEqual(g.cost, 0.00082, accuracy: 1e-12)
     }
 
     func testLoadMissingDBReturnsEmpty() {
@@ -174,7 +220,13 @@ final class OpenCodeTests: XCTestCase {
     private func msg(_ sid: String, _ time: Date, tokens: TokenBreakdown,
                      model: String = "claude-opus-4-8", cost: Double = 0) -> OpenCodeDB.MessageRow {
         OpenCodeDB.MessageRow(sessionId: sid, date: DailyAggregator.dateString(for: time),
-                              time: time, modelId: model, tokens: tokens, cost: cost)
+                              time: time, modelId: model, providerId: "anthropic",
+                              tokens: tokens, cost: cost)
+    }
+
+    /// 清空远程价目表（RemotePricing 是进程级单例,涉价测试必须显式设定自己的表,避免顺序耦合）
+    private func clearRemotePricing() {
+        XCTAssertTrue(RemotePricing.shared.injectForTesting(Data(#"{"providers":{}}"#.utf8)))
     }
 
     /// 按 opencode 官方 schema 建临时库并插入 assistant 消息

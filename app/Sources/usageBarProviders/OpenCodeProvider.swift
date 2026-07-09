@@ -19,6 +19,8 @@ enum OpenCodeDB {
         let date: String
         let time: Date
         let modelId: String
+        /// 渠道 id（"openai"/"anthropic"/"zai"…），远程价目 (provider, model) 精确匹配用
+        let providerId: String
         let tokens: TokenBreakdown
         let cost: Double
     }
@@ -70,7 +72,8 @@ enum OpenCodeDB {
                json_extract(m.data, '$.tokens.reasoning'),
                json_extract(m.data, '$.tokens.cache.read'),
                json_extract(m.data, '$.tokens.cache.write'),
-               json_extract(m.data, '$.cost')
+               json_extract(m.data, '$.cost'),
+               json_extract(m.data, '$.providerID')
           FROM message m
          WHERE json_extract(m.data, '$.role') = 'assistant'
         """
@@ -100,6 +103,7 @@ enum OpenCodeDB {
 
             let time = Date(timeIntervalSince1970: Double(sqlite3_column_int64(stmt, 1)) / 1000.0)
             let modelId = text(stmt, 2) ?? "unknown"
+            let providerId = text(stmt, 9) ?? ""
             // 订阅登录 opencode 记 cost=0（无真实扣费）→ 按模型等效 API 价兜底；
             // API key 用户 cost>0 用真实值
             let dbCost = sqlite3_column_double(stmt, 8)
@@ -108,8 +112,10 @@ enum OpenCodeDB {
                 date: DailyAggregator.dateString(for: time),
                 time: time,
                 modelId: modelId,
+                providerId: providerId,
                 tokens: tokens,
-                cost: dbCost > 0 ? dbCost : UnifiedPricing.cost(tokens, modelId: modelId)
+                cost: dbCost > 0 ? dbCost : UnifiedPricing.cost(
+                    tokens, modelId: modelId, provider: providerId.isEmpty ? nil : providerId)
             ))
         }
         return rows
