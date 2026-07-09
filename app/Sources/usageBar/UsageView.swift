@@ -43,6 +43,7 @@ enum ProviderMetaLookup {
         "cursor": .init(id: "cursor", displayName: "Cursor", brandColor: "#000000"),
         "openclaw": .init(id: "openclaw", displayName: "OpenClaw", brandColor: "#E8632C"),
         "hermes": .init(id: "hermes", displayName: "Hermes Agent", brandColor: "#7C3AED"),
+        "opencode": .init(id: "opencode", displayName: "OpenCode", brandColor: "#F59E0B"),
     ]
 
     static func meta(for id: String) -> ProviderMeta {
@@ -187,6 +188,17 @@ struct ProviderIcon: View {
                 } else {
                     roundedBox(bg: "#7C3AED") {
                         Text("H").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                    }
+                }
+            case "opencode":
+                if let img = BundleIconLoader.load(name: "opencode", ext: "svg") {
+                    Image(nsImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: size, height: size)
+                } else {
+                    roundedBox(bg: "#F59E0B") {
+                        Text("OC").font(.system(size: 8, weight: .semibold)).foregroundStyle(.white)
                     }
                 }
             case "wukong":
@@ -384,7 +396,7 @@ struct UsageRootView: View {
                         ProviderRowView(
                             stat: stat,
                             maxToken: maxT,
-                            expandable: (pid == "claude-sub" || pid == "claude-api" || pid == "codex"),
+                            expandable: (pid == "claude-sub" || pid == "claude-api" || pid == "codex" || pid == "opencode"),
                             onExpand: { viewModel.openDetail(pid) }
                         )
                         if showsQoderHint(for: pid) {
