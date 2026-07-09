@@ -206,6 +206,9 @@ final class UsageViewModel: ObservableObject {
         if providerId == "codex" {
             d = await CodexDetailScanner.shared.detail(
                 providerId: providerId, window: win, weekStartMonday: weekStartMonday)
+        } else if providerId == "opencode" {
+            d = await OpenCodeDetailScanner.shared.detail(
+                window: win, weekStartMonday: weekStartMonday)
         } else {
             d = await ClaudeDetailScanner.shared.detail(
                 providerId: providerId, window: win, weekStartMonday: weekStartMonday)

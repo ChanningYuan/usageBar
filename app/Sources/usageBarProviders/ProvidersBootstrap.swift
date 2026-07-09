@@ -40,6 +40,7 @@ public enum UsageBarProviders {
             CursorProvider(),  // ⚠️ 唯一联网 provider（本地无真实 token，必须联网拉取）
             OpenClawProvider(),
             HermesProvider(),
+            OpenCodeProvider(),
             // TODO: TongyiProvider(IndexedDB,无法解析)
         ]
 
