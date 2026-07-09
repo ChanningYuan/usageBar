@@ -5,31 +5,29 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.15</h3>
+<h3>usageBar 0.3.16</h3>
 <p><b>新增</b></p>
 <ul>
-<li><b>点开来源看用量明细（Claude Code 订阅 / API · Codex）</b>：弹层里把鼠标移到这几行会浮现「›」，点进去是该来源在当前周期的详情页——大号总量 + 缓存命中环、Token 构成、按模型、按会话，每个用量数字旁并列<b>等效 API 花费</b>（订阅口径标「≈ 等效」，是「按官方 API 价值多少」的参照，非真实账单）。详情页顶部能直接切 今日 / 本周 / 本月 / 累计。</li>
+<li><b>新数据源：OpenCode</b>（社区贡献 [@ri-char](https://github.com/ri-char)，#2）：聚合显示 [OpenCode](https://opencode.ai) 的 token 用量，直读本地数据库、零配置。支持行内展开明细：总量 + 缓存命中环、指标区按 OpenCode 口径拆解（净输入 / 缓存读 / 缓存写 独立格，输出格内嵌「思考 (reasoning)」子项）、按模型、按会话。</li>
 </ul>
-<p>  - Claude：净输入 / 输出 / 缓存读 / 缓存写 四格 + 各模型（Opus / Sonnet / Haiku…）的命中率与花费。</p>
-<p>  - Codex：输入 / 输出 两块，缓存输入、思考（reasoning）作为子项挂在下面；按模型区分 GPT-5.5 / GPT-5.x-Codex / o4-mini 等；会话标题取自 Codex 侧栏的真实标题。</p>
-<ul>
-<li><b>外观 · 主题</b>：偏好设置新增 深色 / 浅色 / 跟随系统（默认跟随系统），详情页与列表整体换皮。</li>
-<li><b>单来源直达详情</b>：今日只有一个可展开来源有用量时，点开菜单栏直接进它的今日详情。</li>
-</ul>
+<p>  - 用量按消息实际发生的日期归因，跨天长会话不会把后续天的用量都记在创建日，「今日」所见即所得；思考（reasoning）token 计入输出，推理型模型不漏计。</p>
+<p>  - subagent 子会话自动并入主会话，明细列表不散落子任务行。</p>
+<p>  - 花费口径与 Claude 订阅 / Codex 一致（≈ 等效 API 价）：订阅登录 OpenCode 记 0 时按模型价目折算（GPT 系走 OpenAI 价、Claude 系走 Anthropic 价），API key 用户显示 OpenCode 记录的真实花费。</p>
+<p>  - 图标随主题切换，深色模式用 OpenCode 官方深色变体（黑框在深色下会隐形）。</p>
 <p><b>变化</b></p>
 <ul>
-<li>详情页采用跟随系统的中性灰配色，界面高度随内容自适应（内容少不留空白、内容多可滚动）。</li>
+<li>明细页四格（净输入 / 输出 / 缓存读 / 缓存写）的单价改走统一跨厂商价目路由，混合厂商来源不再一律按 Claude 价折算。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.15</title>
-            <pubDate>Wed, 08 Jul 2026 00:58:15 +0800</pubDate>
-            <sparkle:version>0.3.15</sparkle:version>
-            <sparkle:shortVersionString>0.3.15</sparkle:shortVersionString>
+            <title>0.3.16</title>
+            <pubDate>Thu, 09 Jul 2026 20:57:13 +0800</pubDate>
+            <sparkle:version>0.3.16</sparkle:version>
+            <sparkle:shortVersionString>0.3.16</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1924078" type="application/octet-stream" sparkle:edSignature="ej3dAWuBD4xFbX5jnpsmW1bRxLrrD0aLRVcD//5eDtayMxGPqewytONMN2+4mRt6yWNZHJetCfdlJT3bP0FoDg=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1963987" type="application/octet-stream" sparkle:edSignature="9SZIt1Ck9yqmvJ+472Zu2sWROZu/nk9gf4eHl5VjwmgqWkcgtY1Mc88Ugk5Jct9focpFZHvai62MTHm9tn7oDg=="/>
         </item>
     </channel>
 </rss>
