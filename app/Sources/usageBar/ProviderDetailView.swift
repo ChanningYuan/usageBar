@@ -23,8 +23,9 @@ struct ProviderDetailView: View {
 
     private var meta: ProviderMeta { ProviderMetaLookup.meta(for: providerId) }
     private var brand: Color { Color(hex: meta.brandColor) }
-    /// 成本按「等效 API 费用」展示（≈$）：Claude 订阅 + Codex（ChatGPT 订阅 plan=plus）。
-    private var isSub: Bool { providerId == "claude-sub" || providerId == "codex" }
+    /// 成本按「等效 API 费用」展示（≈$）：Claude 订阅 + Codex（ChatGPT 订阅 plan=plus）
+    /// + OpenCode（订阅 OAuth 登录时 opencode 记 cost=0，扫描层按等效价兜底）。
+    private var isSub: Bool { providerId == "claude-sub" || providerId == "codex" || providerId == "opencode" }
 
     private var pal: DetailPalette { .of(scheme) }
 
@@ -38,6 +39,12 @@ struct ProviderDetailView: View {
         // 非原始 brand #10A37F（小字对比不足）。
         if providerId == "codex" {
             return scheme == .dark ? Color(hex: "#34BE95") : Color(hex: "#0C8163")
+        }
+        // OpenCode：琥珀压暗双档（浅 #B45309 加深保白字对比 / 深保持 brand #F59E0B），
+        // 非浅色也用原始 brand #F59E0B——浅底上选中 pill 白字对比只有 ~2.2:1 过亮。
+        // （v0.3.16 验收试过官方黑灰系,深色下发灰白,弃）
+        if providerId == "opencode" {
+            return scheme == .dark ? Color(hex: "#F59E0B") : Color(hex: "#B45309")
         }
         return brand
     }
@@ -167,9 +174,12 @@ struct ProviderDetailView: View {
     private func detailBody(_ d: ProviderDetail) -> some View {
         VStack(alignment: .leading, spacing: 13) {
             hero(d)
-            // Codex 四维走「父块 + 子级」布局（输入⊃缓存输入、输出⊃思考）；其余走 Claude 2×2 图标格。
+            // Codex 四维走「父块 + 子级」布局（输入⊃缓存输入、输出⊃思考）；
+            // OpenCode 按其原生五维拆（净输入/缓存读/缓存写 + 净输出/思考）；其余走 Claude 2×2 图标格。
             if providerId == "codex" {
                 codexMetricGrid(d)
+            } else if providerId == "opencode" {
+                openCodeMetricGrid(d)
             } else {
                 metricGrid(d)
             }
@@ -220,15 +230,47 @@ struct ProviderDetailView: View {
 
     private func metricGrid(_ d: ProviderDetail) -> some View {
         let t = d.tokens
-        let inC = d.models.reduce(0.0) { $0 + Double($1.tokens.input) * ClaudePricing.inputRate(for: $1.modelId) }
-        let outC = d.models.reduce(0.0) { $0 + Double($1.tokens.output) * ClaudePricing.outputRate(for: $1.modelId) }
-        let crC = d.models.reduce(0.0) { $0 + Double($1.tokens.cacheRead) * ClaudePricing.inputRate(for: $1.modelId) * ClaudePricing.cacheReadMul }
-        let cwC = d.models.reduce(0.0) { $0 + (Double($1.tokens.cacheCreate5m) * ClaudePricing.cacheWrite5mMul + Double($1.tokens.cacheCreate1h) * ClaudePricing.cacheWrite1hMul) * ClaudePricing.inputRate(for: $1.modelId) }
+        // 单价走 UnifiedPricing 跨厂商路由（claude 系结果与原 ClaudePricing 直算一致；
+        // OpenCode 的 gpt 系走 OpenAI 价，不再被错按 Claude 价折算）
+        let inC = d.models.reduce(0.0) { $0 + Double($1.tokens.input) * UnifiedPricing.inputRate(for: $1.modelId) }
+        let outC = d.models.reduce(0.0) { $0 + Double($1.tokens.output) * UnifiedPricing.outputRate(for: $1.modelId) }
+        let crC = d.models.reduce(0.0) { $0 + Double($1.tokens.cacheRead) * UnifiedPricing.cacheReadRate(for: $1.modelId) }
+        let cwC = d.models.reduce(0.0) { $0 + Double($1.tokens.cacheCreate5m) * UnifiedPricing.cacheWrite5mRate(for: $1.modelId) + Double($1.tokens.cacheCreate1h) * UnifiedPricing.cacheWrite1hRate(for: $1.modelId) }
         return VStack(spacing: 10) {
             HStack(spacing: 10) {
                 MetricTile(icon: "arrow.down", label: "净输入 (input)", value: fmtTok(t.input), cost: fmtCost(inC), accent: accent, accentBg: accentBg, pal: pal)
                 MetricTile(icon: "arrow.up", label: "输出 (output)", value: fmtTok(t.output), cost: fmtCost(outC), accent: accent, accentBg: accentBg, pal: pal)
             }
+            HStack(spacing: 10) {
+                MetricTile(icon: "bolt.fill", label: "缓存读 (cache_read)", value: fmtTok(t.cacheRead), cost: fmtCost(crC), accent: accent, accentBg: accentBg, pal: pal)
+                MetricTile(icon: "cylinder.split.1x2.fill", label: "缓存写 (cache_creation)", value: fmtTok(t.cacheCreate), cost: fmtCost(cwC), accent: accent, accentBg: accentBg, pal: pal)
+            }
+        }
+    }
+
+    // MARK: OpenCode 指标区（净输入/缓存读/缓存写 独立格 + 输出父块⊃思考子项）
+
+    /// OpenCode 是混合口径：输入侧三项（净输入 / 缓存读 / 缓存写）是并列独立计费项
+    /// （Anthropic 式）→ Claude 式独立格；思考是输出的子集（Codex 式）→ 输出用父块挂
+    /// 「思考」子级行。网格位置沿用 Claude 2×2（输入左上 / 输出右上 / 缓存下排）。
+    /// 金额逐模型走 `UnifiedPricing`（跨厂商）。
+    private func openCodeMetricGrid(_ d: ProviderDetail) -> some View {
+        let t = d.tokens
+        let inC = d.models.reduce(0.0) { $0 + Double($1.tokens.input) * UnifiedPricing.inputRate(for: $1.modelId) }
+        let crC = d.models.reduce(0.0) { $0 + Double($1.tokens.cacheRead) * UnifiedPricing.cacheReadRate(for: $1.modelId) }
+        let cwC = d.models.reduce(0.0) { $0 + Double($1.tokens.cacheCreate5m) * UnifiedPricing.cacheWrite5mRate(for: $1.modelId) + Double($1.tokens.cacheCreate1h) * UnifiedPricing.cacheWrite1hRate(for: $1.modelId) }
+        let outC = d.models.reduce(0.0) { $0 + Double($1.tokens.output) * UnifiedPricing.outputRate(for: $1.modelId) }
+        let reasonC = d.models.reduce(0.0) { $0 + Double($1.tokens.reasoning) * UnifiedPricing.outputRate(for: $1.modelId) }
+        return VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                MetricTile(icon: "arrow.down", label: "净输入 (input)", value: fmtTok(t.input), cost: fmtCost(inC), accent: accent, accentBg: accentBg, pal: pal)
+                CodexParentTile(
+                    icon: "arrow.up", label: "输出 (output)", value: fmtTok(t.output), cost: fmtCost(outC),
+                    childLabel: "思考 (reasoning)", childValue: fmtTok(t.reasoning), childCost: fmtCost(reasonC),
+                    accent: accent, accentBg: accentBg, pal: pal)
+            }
+            // 行内混高（左独立格 / 右父块），fixedSize 让左格撑满行高对齐
+            .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 10) {
                 MetricTile(icon: "bolt.fill", label: "缓存读 (cache_read)", value: fmtTok(t.cacheRead), cost: fmtCost(crC), accent: accent, accentBg: accentBg, pal: pal)
                 MetricTile(icon: "cylinder.split.1x2.fill", label: "缓存写 (cache_creation)", value: fmtTok(t.cacheCreate), cost: fmtCost(cwC), accent: accent, accentBg: accentBg, pal: pal)
@@ -395,7 +437,9 @@ struct ProviderDetailView: View {
         let p = isSub ? "≈$" : "$"
         if c >= 10 { return String(format: "\(p)%.0f", c) }
         if c >= 1 { return String(format: "\(p)%.1f", c) }
-        if c > 0 { return String(format: "\(p)%.2f", c) }
+        if c >= 0.01 { return String(format: "\(p)%.2f", c) }
+        // <1 美分给 3 位小数——有量却显示 "0.00" 像 bug（如 7.7K 缓存读 = $0.004）
+        if c > 0 { return String(format: "\(p)%.3f", c) }
         return "\(p)0"
     }
 
@@ -403,7 +447,8 @@ struct ProviderDetailView: View {
     private func fmtDollar(_ c: Double) -> String {
         if c >= 10 { return String(format: "$%.0f", c) }
         if c >= 1 { return String(format: "$%.1f", c) }
-        if c > 0 { return String(format: "$%.2f", c) }
+        if c >= 0.01 { return String(format: "$%.2f", c) }
+        if c > 0 { return String(format: "$%.3f", c) }
         return "$0"
     }
 }
@@ -501,7 +546,9 @@ private struct MetricTile: View {
             Spacer(minLength: 0)
         }
         .padding(9)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // maxHeight 让混高行（OpenCode 独立格 + 父块并排）里卡片撑满行高，topLeading 使
+        // 图标/标题与邻格父块顶部区同高；常规等高行内容即高度、对齐方式无感
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 10).fill(pal.card))
     }
 }

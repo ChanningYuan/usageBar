@@ -2,6 +2,18 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.16] - 2026-07-09
+
+### 新增
+- **新数据源：OpenCode**（社区贡献 [@ri-char](https://github.com/ri-char)，#2）：聚合显示 [OpenCode](https://opencode.ai) 的 token 用量，直读本地数据库、零配置。支持行内展开明细：总量 + 缓存命中环、指标区按 OpenCode 口径拆解（净输入 / 缓存读 / 缓存写 独立格，输出格内嵌「思考 (reasoning)」子项）、按模型、按会话。
+  - 用量按消息实际发生的日期归因，跨天长会话不会把后续天的用量都记在创建日，「今日」所见即所得；思考（reasoning）token 计入输出，推理型模型不漏计。
+  - subagent 子会话自动并入主会话，明细列表不散落子任务行。
+  - 花费口径与 Claude 订阅 / Codex 一致（≈ 等效 API 价）：订阅登录 OpenCode 记 0 时按模型价目折算（GPT 系走 OpenAI 价、Claude 系走 Anthropic 价），API key 用户显示 OpenCode 记录的真实花费。
+  - 图标随主题切换，深色模式用 OpenCode 官方深色变体（黑框在深色下会隐形）。
+
+### 变化
+- 明细页四格（净输入 / 输出 / 缓存读 / 缓存写）的单价改走统一跨厂商价目路由，混合厂商来源不再一律按 Claude 价折算。
+
 ## [0.3.15] - 2026-07-08
 
 ### 新增

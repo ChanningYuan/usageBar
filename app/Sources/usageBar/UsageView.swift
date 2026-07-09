@@ -112,6 +112,8 @@ enum BundleIconLoader {
 struct ProviderIcon: View {
     let providerId: String
 
+    @Environment(\.colorScheme) private var colorScheme
+
     private let size: CGFloat = 22
     private var cornerRadius: CGFloat { size * 0.22 }
 
@@ -191,7 +193,9 @@ struct ProviderIcon: View {
                     }
                 }
             case "opencode":
-                if let img = BundleIconLoader.load(name: "opencode", ext: "svg") {
+                // OpenCode:官方像素风方块 mark(brand 页双变体:浅色黑框/深色白框,黑框在深色主题下会隐形)
+                if let img = BundleIconLoader.load(
+                    name: colorScheme == .dark ? "opencode-dark" : "opencode", ext: "svg") {
                     Image(nsImage: img)
                         .resizable()
                         .aspectRatio(contentMode: .fit)

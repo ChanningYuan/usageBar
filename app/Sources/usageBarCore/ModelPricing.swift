@@ -125,3 +125,53 @@ public enum CodexPricing {
         return parts.joined(separator: "-")
     }
 }
+
+/// 跨厂商统一价目路由（等效 API 价）：按 modelId 归属分发到对应厂商价表。
+///
+/// 供混合厂商的 provider（OpenCode 等）与明细页四格复用：claude-* → `ClaudePricing`，
+/// gpt-* / o3* / o4* → `CodexPricing`，其它厂商（glm / gemini …）暂无价表按 0 计
+/// （宁显示 $0 不乱算）。后续要支持第三方厂商模型价，在这里加路由即可。
+public enum UnifiedPricing {
+    public static func inputRate(for modelId: String) -> Double {
+        if isClaude(modelId) { return ClaudePricing.inputRate(for: modelId) }
+        if isOpenAI(modelId) { return CodexPricing.inputRate(for: modelId) }
+        return 0
+    }
+
+    public static func outputRate(for modelId: String) -> Double {
+        if isClaude(modelId) { return ClaudePricing.outputRate(for: modelId) }
+        if isOpenAI(modelId) { return CodexPricing.outputRate(for: modelId) }
+        return 0
+    }
+
+    /// 缓存读单价（已含各家折扣倍率）
+    public static func cacheReadRate(for modelId: String) -> Double {
+        if isClaude(modelId) { return ClaudePricing.inputRate(for: modelId) * ClaudePricing.cacheReadMul }
+        if isOpenAI(modelId) { return CodexPricing.inputRate(for: modelId) * CodexPricing.cachedInputMul }
+        return 0
+    }
+
+    /// 缓存写单价（5m 档；OpenAI 无缓存写计费概念恒 0）
+    public static func cacheWrite5mRate(for modelId: String) -> Double {
+        if isClaude(modelId) { return ClaudePricing.inputRate(for: modelId) * ClaudePricing.cacheWrite5mMul }
+        return 0
+    }
+
+    /// 缓存写单价（1h 档）
+    public static func cacheWrite1hRate(for modelId: String) -> Double {
+        if isClaude(modelId) { return ClaudePricing.inputRate(for: modelId) * ClaudePricing.cacheWrite1hMul }
+        return 0
+    }
+
+    /// 等效 API 花费（美元）。output 需已含 reasoning（app 统一口径：reasoning ⊂ output）。
+    public static func cost(_ t: TokenBreakdown, modelId: String) -> Double {
+        Double(t.input) * inputRate(for: modelId)
+            + Double(t.output) * outputRate(for: modelId)
+            + Double(t.cacheRead) * cacheReadRate(for: modelId)
+            + Double(t.cacheCreate5m) * cacheWrite5mRate(for: modelId)
+            + Double(t.cacheCreate1h) * cacheWrite1hRate(for: modelId)
+    }
+
+    static func isClaude(_ m: String) -> Bool { m.hasPrefix("claude-") }
+    static func isOpenAI(_ m: String) -> Bool { m.hasPrefix("gpt-") || m.hasPrefix("o3") || m.hasPrefix("o4") }
+}

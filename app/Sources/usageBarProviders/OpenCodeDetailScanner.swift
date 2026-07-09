@@ -1,7 +1,10 @@
 import Foundation
-import SQLite3
 import usageBarCore
 
+/// OpenCode 明细页扫描器：消息级归因 + subagent 收敛。
+///
+/// 与 `OpenCodeProvider` 共用 `OpenCodeDB` 读库；窗口过滤用消息自己的日界串，
+/// 保证明细合计与主行完全对得上（同一套 `DailyAggregator.windowPredicate` 口径）。
 public actor OpenCodeDetailScanner {
     public static let shared = OpenCodeDetailScanner()
     public init() {}
@@ -9,60 +12,60 @@ public actor OpenCodeDetailScanner {
     private struct CacheSnapshot {
         let mtime: Date
         let size: Int
-        let sessions: [SessionRow]
-    }
-
-    private struct SessionRow {
-        let id: String
-        let title: String
-        let modelId: String
-        let date: String
-        let lastActivity: Date
-        let tokens: TokenBreakdown
-        let cost: Double
+        let messages: [OpenCodeDB.MessageRow]
+        let sessions: [String: OpenCodeDB.SessionInfo]
     }
 
     private var cache: CacheSnapshot?
 
     public func detail(window: TimeWindow, weekStartMonday: Bool = true,
                        now: Date = Date()) async -> ProviderDetail {
-        let rows = loadRows()
-        let inWindow = DailyAggregator.windowPredicate(window, weekStartMonday: weekStartMonday, now: now)
+        let (messages, sessions) = loadAll()
+        return Self.compose(messages: messages, sessions: sessions,
+                            window: window, weekStartMonday: weekStartMonday, now: now)
+    }
 
-        let filtered = rows.filter { inWindow($0.date) }
+    /// 纯聚合逻辑（静态、无 IO，单测直接打）
+    static func compose(messages: [OpenCodeDB.MessageRow],
+                        sessions: [String: OpenCodeDB.SessionInfo],
+                        window: TimeWindow, weekStartMonday: Bool, now: Date) -> ProviderDetail {
+        let inWindow = DailyAggregator.windowPredicate(window, weekStartMonday: weekStartMonday, now: now)
+        let filtered = messages.filter { inWindow($0.date) }
 
         var totalTokens = TokenBreakdown()
         var totalCost = 0.0
-
-        var bySession: [String: (tokens: TokenBreakdown, cost: Double, title: String, lastActivity: Date)] = [:]
+        var bySession: [String: (tokens: TokenBreakdown, cost: Double, lastActivity: Date)] = [:]
         var byModel: [String: (tokens: TokenBreakdown, cost: Double)] = [:]
 
-        for row in filtered {
-            totalTokens.add(row.tokens)
-            totalCost += row.cost
+        for m in filtered {
+            totalTokens.add(m.tokens)
+            totalCost += m.cost
 
-            if var s = bySession[row.id] {
-                s.tokens.add(row.tokens)
-                s.cost += row.cost
-                s.lastActivity = max(s.lastActivity, row.lastActivity)
-                bySession[row.id] = s
+            // subagent 子会话收敛到根会话
+            let root = OpenCodeDB.rootSessionId(of: m.sessionId, in: sessions)
+            if var s = bySession[root] {
+                s.tokens.add(m.tokens)
+                s.cost += m.cost
+                s.lastActivity = max(s.lastActivity, m.time)
+                bySession[root] = s
             } else {
-                bySession[row.id] = (row.tokens, row.cost, row.title, row.lastActivity)
+                bySession[root] = (m.tokens, m.cost, m.time)
             }
 
-            if var m = byModel[row.modelId] {
-                m.tokens.add(row.tokens)
-                m.cost += row.cost
-                byModel[row.modelId] = m
+            if var mo = byModel[m.modelId] {
+                mo.tokens.add(m.tokens)
+                mo.cost += m.cost
+                byModel[m.modelId] = mo
             } else {
-                byModel[row.modelId] = (row.tokens, row.cost)
+                byModel[m.modelId] = (m.tokens, m.cost)
             }
         }
 
-        let sessions = bySession.map { (sid, val) in
-            SessionDetailRecord(
+        let sessionRecords = bySession.map { sid, val in
+            let title = sessions[sid]?.title ?? ""
+            return SessionDetailRecord(
                 sessionId: sid,
-                title: val.title.isEmpty ? String(sid.prefix(12)) : val.title,
+                title: title.isEmpty ? String(sid.prefix(12)) : title,
                 subtitle: String(sid.prefix(8)),
                 lastActivity: val.lastActivity,
                 tokens: val.tokens,
@@ -70,7 +73,7 @@ public actor OpenCodeDetailScanner {
             )
         }.sorted { $0.tokens.total > $1.tokens.total }
 
-        let models = byModel.map { (mid, val) in
+        let modelRecords = byModel.map { mid, val in
             ModelDetailRecord(
                 modelId: mid,
                 displayName: friendlyModelName(mid),
@@ -84,109 +87,31 @@ public actor OpenCodeDetailScanner {
             windowId: window.id,
             tokens: totalTokens,
             cost: totalCost,
-            models: models,
-            sessions: sessions
+            models: modelRecords,
+            sessions: sessionRecords
         )
     }
 
-    private func loadRows() -> [SessionRow] {
-        let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".local/share/opencode/opencode.db").path
-
-        guard let meta = sqliteMetadataWithWAL(dbPath: path) else { return [] }
+    private func loadAll() -> (messages: [OpenCodeDB.MessageRow], sessions: [String: OpenCodeDB.SessionInfo]) {
+        let path = OpenCodeDB.dbPath
+        guard let meta = OpenCodeDB.metadata(dbPath: path) else { return ([], [:]) }
 
         if let c = cache, c.mtime == meta.mtime, c.size == meta.size {
-            return c.sessions
+            return (c.messages, c.sessions)
         }
 
-        let rows = parseDB(path: path)
-        cache = CacheSnapshot(mtime: meta.mtime, size: meta.size, sessions: rows)
-        return rows
+        let (messages, sessions) = OpenCodeDB.load(dbPath: path)
+        cache = CacheSnapshot(mtime: meta.mtime, size: meta.size, messages: messages, sessions: sessions)
+        return (messages, sessions)
     }
 
-    private func sqliteMetadataWithWAL(dbPath: String) -> (mtime: Date, size: Int)? {
-        guard let db = FileMetadata.read(at: dbPath) else { return nil }
-        let wal = FileMetadata.read(at: dbPath + "-wal")
-        let mtime = max(db.mtime, wal?.mtime ?? Date.distantPast)
-        let size = db.size + (wal?.size ?? 0)
-        return (mtime, size)
-    }
-
-    private func parseDB(path: String) -> [SessionRow] {
-        let uri = "file:\(path)?mode=ro"
-        var db: OpaquePointer?
-        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
-        guard sqlite3_open_v2(uri, &db, flags, nil) == SQLITE_OK, let db else {
-            if let db { sqlite3_close(db) }
-            return []
+    /// opencode 的模型跨厂商：claude / gpt 系复用 app 既有友好名，其余 title-case（"glm-5.2" → "Glm 5.2"）
+    static func friendlyModelName(_ modelId: String) -> String {
+        if modelId.hasPrefix("claude-") { return ClaudePricing.displayName(for: modelId) }
+        if modelId.hasPrefix("gpt-") || modelId.hasPrefix("o3") || modelId.hasPrefix("o4") {
+            return CodexPricing.displayName(for: modelId)
         }
-        defer { sqlite3_close(db) }
-
-        let sql = """
-        SELECT id, title, model, time_created, time_updated,
-               tokens_input, tokens_output, tokens_cache_read, tokens_cache_write,
-               tokens_reasoning, cost
-          FROM session
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
-            if let stmt { sqlite3_finalize(stmt) }
-            return []
-        }
-        defer { sqlite3_finalize(stmt) }
-
-        var rows: [SessionRow] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            let id = String(cString: sqlite3_column_text(stmt, 0))
-            let titleRaw = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
-            let modelJson = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
-            let timeCreated = sqlite3_column_int64(stmt, 3)
-            let timeUpdated = sqlite3_column_int64(stmt, 4)
-            let input = Int(sqlite3_column_int64(stmt, 5))
-            let output = Int(sqlite3_column_int64(stmt, 6))
-            let cacheRead = Int(sqlite3_column_int64(stmt, 7))
-            let cacheWrite = Int(sqlite3_column_int64(stmt, 8))
-            let reasoning = Int(sqlite3_column_int64(stmt, 9))
-            let cost = sqlite3_column_double(stmt, 10)
-
-            let total = input + output + cacheRead + cacheWrite
-            if total == 0 { continue }
-
-            let modelId = parseModelId(modelJson)
-            let seconds = Double(timeCreated) / 1000.0
-            let date = DailyAggregator.dateString(for: Date(timeIntervalSince1970: seconds))
-            let lastActivity = Date(timeIntervalSince1970: Double(timeUpdated) / 1000.0)
-
-            let tokens = TokenBreakdown(
-                input: input,
-                output: output,
-                cacheCreate5m: cacheWrite,
-                cacheCreate1h: 0,
-                cacheRead: cacheRead,
-                reasoning: reasoning
-            )
-
-            rows.append(SessionRow(
-                id: id, title: titleRaw, modelId: modelId,
-                date: date, lastActivity: lastActivity,
-                tokens: tokens, cost: cost
-            ))
-        }
-        return rows
-    }
-
-    private func parseModelId(_ json: String) -> String {
-        // model column is JSON like {"id":"glm-5.2","providerID":"alibaba-cn"}
-        guard let data = json.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let id = obj["id"] as? String else {
-            return json.isEmpty ? "unknown" : json
-        }
-        return id
-    }
-
-    private func friendlyModelName(_ modelId: String) -> String {
-        modelId.replacingOccurrences(of: "-", with: " ")
+        return modelId.replacingOccurrences(of: "-", with: " ")
             .split(separator: " ")
             .map { $0.prefix(1).uppercased() + $0.dropFirst() }
             .joined(separator: " ")
