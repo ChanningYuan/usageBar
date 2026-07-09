@@ -5,29 +5,22 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.16</h3>
+<h3>usageBar 0.3.17</h3>
 <p><b>新增</b></p>
 <ul>
-<li><b>新数据源：OpenCode</b>（社区贡献 [@ri-char](https://github.com/ri-char)，#2）：聚合显示 [OpenCode](https://opencode.ai) 的 token 用量，直读本地数据库、零配置。支持行内展开明细：总量 + 缓存命中环、指标区按 OpenCode 口径拆解（净输入 / 缓存读 / 缓存写 独立格，输出格内嵌「思考 (reasoning)」子项）、按模型、按会话。</li>
-</ul>
-<p>  - 用量按消息实际发生的日期归因，跨天长会话不会把后续天的用量都记在创建日，「今日」所见即所得；思考（reasoning）token 计入输出，推理型模型不漏计。</p>
-<p>  - subagent 子会话自动并入主会话，明细列表不散落子任务行。</p>
-<p>  - 花费口径与 Claude 订阅 / Codex 一致（≈ 等效 API 价）：订阅登录 OpenCode 记 0 时按模型价目折算（GPT 系走 OpenAI 价、Claude 系走 Anthropic 价），API key 用户显示 OpenCode 记录的真实花费。</p>
-<p>  - 图标随主题切换，深色模式用 OpenCode 官方深色变体（黑框在深色下会隐形）。</p>
-<p><b>变化</b></p>
-<ul>
-<li>明细页四格（净输入 / 输出 / 缓存读 / 缓存写）的单价改走统一跨厂商价目路由，混合厂商来源不再一律按 Claude 价折算。</li>
+<li><b>模型价格自动更新</b>：新增远程价目表（服务端每日从 [models.dev](https://models.dev) 同步，覆盖约 146 家厂商 5000 个模型），app 每天检查一次（无变化零流量，有变化约下载 300KB）。glm / gemini / deepseek 等第三方模型的等效花费不再显示 $0，新模型上市<b>无需升级 app</b> 即可有价；Claude / GPT 系继续用内置精调价表。离线时用本地缓存，不影响任何功能。</li>
+<li><b>「无价目」一键反馈</b>：极少数价目表也未收录的模型，明细页该行会显示「无价目」标记，点击打开预填好的 GitHub Issue 反馈，我们补录后次日自动生效。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.16</title>
-            <pubDate>Thu, 09 Jul 2026 20:57:13 +0800</pubDate>
-            <sparkle:version>0.3.16</sparkle:version>
-            <sparkle:shortVersionString>0.3.16</sparkle:shortVersionString>
+            <title>0.3.17</title>
+            <pubDate>Thu, 09 Jul 2026 22:10:45 +0800</pubDate>
+            <sparkle:version>0.3.17</sparkle:version>
+            <sparkle:shortVersionString>0.3.17</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1963987" type="application/octet-stream" sparkle:edSignature="9SZIt1Ck9yqmvJ+472Zu2sWROZu/nk9gf4eHl5VjwmgqWkcgtY1Mc88Ugk5Jct9focpFZHvai62MTHm9tn7oDg=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1989073" type="application/octet-stream" sparkle:edSignature="6MdHBBT82Hw/vwxdPmOfBI5iJlj2u+TMombmvrx+fCiNc7ouK6bmW75AaV6TXPd5o8ZNB45/yr7iYteI9FCPDA=="/>
         </item>
     </channel>
 </rss>
