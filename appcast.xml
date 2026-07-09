@@ -20,7 +20,7 @@
             <sparkle:shortVersionString>0.3.17</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/latest/download/usageBar.zip" length="1989073" type="application/octet-stream" sparkle:edSignature="6MdHBBT82Hw/vwxdPmOfBI5iJlj2u+TMombmvrx+fCiNc7ouK6bmW75AaV6TXPd5o8ZNB45/yr7iYteI9FCPDA=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/download/v0.3.17/usageBar.zip" length="1989073" type="application/octet-stream" sparkle:edSignature="6MdHBBT82Hw/vwxdPmOfBI5iJlj2u+TMombmvrx+fCiNc7ouK6bmW75AaV6TXPd5o8ZNB45/yr7iYteI9FCPDA=="/>
         </item>
     </channel>
 </rss>
