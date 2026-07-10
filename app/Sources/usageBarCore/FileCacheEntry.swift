@@ -57,7 +57,10 @@ public struct PersistedCache: Codable, Sendable {
     ///   4 → 5 (2026-07-02): 悟空 provider 新增 cacheTokens 解析(v0.3.11)。v0.3.10 把悟空 records
     ///                        存成 cachedToken=0,不 bump 则升级后 mtime 未变的悟空文件仍命中旧 0 值、
     ///                        新解析不跑 → 命中率恒 0%。bump 让旧 cache 失效重扫一次。
-    public static let currentSchemaVersion = 5
+    ///   5 → 6 (2026-07-10): Codex 事件总量口径改为 input+output(与详情页统一),排除 Codex Desktop
+    ///                        「从其他 AI 应用导入」replay 快照被计入导入当天。旧 cache 按 total_tokens
+    ///                        算、含误计的导入量,必须失效重算。
+    public static let currentSchemaVersion = 6
 
     public init(entries: [FileCacheEntry]) {
         self.schemaVersion = Self.currentSchemaVersion

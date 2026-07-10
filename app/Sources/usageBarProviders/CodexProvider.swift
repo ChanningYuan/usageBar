@@ -7,8 +7,12 @@ import usageBarCore
 /// `payload.info.total_token_usage.total_tokens` 是 session 累计值（非增量）。
 /// 基础算法：每个 session 内相邻 token_count event 间的差分 = 真实增量，按 event 时间归到日期桶。
 ///
-/// ── 计量口径 ──
-/// 用 `total_token_usage.total_tokens`（= input含cached + output），符合 OpenAI Symphony spec。
+/// ── 计量口径（2026-07-10 起与详情页 CodexDetailScanner 统一）──
+/// 事件总量 = `input_tokens`(含cached) + `output_tokens`(含reasoning)。真实事件下恒等于
+/// `total_tokens`（本机 1567 事件对拍零偏差），但能天然排除 Codex Desktop「从其他 AI 应用导入」
+/// 生成的 replay 快照——那类文件单条 token_count 只有 total_tokens>0、四个细分字段全 0，认
+/// total 会把导入的历史会话整段计入导入当天（issue 实测：列表 4.3M vs 详情 1.8M 不一致）。
+/// 细分键完全缺失（未知旧格式）才回退 total_tokens。见 `eventTotal`。
 /// ⚠️ 不要改用 `info.last_token_usage`：每轮 last 把上下文/缓存输入重复计，累加会系统性高估 ~15%。
 ///
 /// ── fork / resume 跨文件去重（2026-06-26 实测定论，取代旧注释的「resume 不接续」结论）──
@@ -122,6 +126,16 @@ public struct CodexProvider: UsageProvider {
 
     // MARK: - 文件解析
 
+    /// 事件总量口径（类型注释「计量口径」段）：细分键存在时 = input(含cached) + output(含reasoning)，
+    /// 与详情页同源；Codex Desktop 导入的 replay 快照（total>0、细分全0）自然归零。
+    /// 细分键完全缺失（未知旧格式）才回退 total_tokens，不丢真实用量。
+    static func eventTotal(_ usage: [String: Any]) -> Int {
+        if usage["input_tokens"] != nil || usage["output_tokens"] != nil {
+            return ((usage["input_tokens"] as? Int) ?? 0) + ((usage["output_tokens"] as? Int) ?? 0)
+        }
+        return (usage["total_tokens"] as? Int) ?? 0
+    }
+
     /// 遍历单个 rollout 文件，收集所有有效 token_count 事件的 (ts,total)。
     /// `info==null` 的 token_count 跳过（不变量2）。
     private func parseRawEvents(url: URL) -> [(ts: Date, total: Int, cached: Int)] {
@@ -134,7 +148,7 @@ public struct CodexProvider: UsageProvider {
                   let tsStr = obj["timestamp"] as? String,
                   let ts = ISODateParser.parse(tsStr)
             else { return }
-            let total = (usage["total_tokens"] as? Int) ?? 0
+            let total = Self.eventTotal(usage)
             let cached = (usage["cached_input_tokens"] as? Int) ?? 0   // 命中读取（input 子集）→ 浅色
             events.append((ts, total, cached))
         }
