@@ -5,22 +5,21 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.17</h3>
-<p><b>新增</b></p>
+<h3>usageBar 0.3.18</h3>
+<p><b>修复</b></p>
 <ul>
-<li><b>模型价格自动更新</b>：新增远程价目表（服务端每日从 [models.dev](https://models.dev) 同步，覆盖约 146 家厂商 5000 个模型），app 每天检查一次（无变化零流量，有变化约下载 300KB）。glm / gemini / deepseek 等第三方模型的等效花费不再显示 $0，新模型上市<b>无需升级 app</b> 即可有价；Claude / GPT 系继续用内置精调价表。离线时用本地缓存，不影响任何功能。</li>
-<li><b>「无价目」一键反馈</b>：极少数价目表也未收录的模型，明细页该行会显示「无价目」标记，点击打开预填好的 GitHub Issue 反馈，我们补录后次日自动生效。</li>
+<li><b>Codex Desktop「从其他 AI 应用导入」不再虚增当天用量</b>（感谢 issue 反馈）：Codex Desktop 0.142+ 的导入功能会把 Claude Code 等应用的历史会话批量生成 rollout 快照文件，其中只有 `total_tokens` 累计值、无实际输入输出。旧版把这批快照整段计入导入当天，导致列表远大于详情页（反馈实例：4.3M vs 1.8M）。本版主列表与详情页统一按「输入 + 输出」口径计量，导入快照自然归零；真实用量两口径逐事件相等，历史各天数字不变。升级后首次刷新会自动重算一次缓存。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.17</title>
-            <pubDate>Thu, 09 Jul 2026 22:10:45 +0800</pubDate>
-            <sparkle:version>0.3.17</sparkle:version>
-            <sparkle:shortVersionString>0.3.17</sparkle:shortVersionString>
+            <title>0.3.18</title>
+            <pubDate>Fri, 10 Jul 2026 15:59:48 +0800</pubDate>
+            <sparkle:version>0.3.18</sparkle:version>
+            <sparkle:shortVersionString>0.3.18</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/download/v0.3.17/usageBar.zip" length="1989073" type="application/octet-stream" sparkle:edSignature="6MdHBBT82Hw/vwxdPmOfBI5iJlj2u+TMombmvrx+fCiNc7ouK6bmW75AaV6TXPd5o8ZNB45/yr7iYteI9FCPDA=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/download/v0.3.18/usageBar.zip" length="1989271" type="application/octet-stream" sparkle:edSignature="2NN+NWwDyaolV06J3J+7G6PElnpKnyDJOhBa10rF25SI+pxm/IkyOaeFCOZnTsp1InxA8Xl43U/0CmXzDaqtAw=="/>
         </item>
     </channel>
 </rss>
