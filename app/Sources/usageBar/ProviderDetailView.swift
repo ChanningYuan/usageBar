@@ -282,19 +282,19 @@ struct ProviderDetailView: View {
     // MARK: Codex 指标区（输入/输出 父块 + 缓存输入/思考 子级）
 
     /// Codex 四维口径下的指标区：两个父块并排（输入 / 输出），各自挂一条子级行
-    /// （缓存输入 ⊂ 输入、思考 ⊂ 输出），对齐设计稿 D 布局。金额走 `CodexPricing`。
+    /// （缓存输入 ⊂ 输入、思考 ⊂ 输出），对齐设计稿 D 布局。金额走 `UnifiedPricing`。
     private func codexMetricGrid(_ d: ProviderDetail) -> some View {
         let t = d.tokens
         // 逐模型用各自单价累加，避免混合模型时用单一价失真。
         let inputC = d.models.reduce(0.0) {
-            $0 + Double($1.tokens.input) * CodexPricing.inputRate(for: $1.modelId)
-               + Double($1.tokens.cacheRead) * CodexPricing.inputRate(for: $1.modelId) * CodexPricing.cachedInputMul
+            $0 + Double($1.tokens.input) * UnifiedPricing.inputRate(for: $1.modelId)
+               + Double($1.tokens.cacheRead) * UnifiedPricing.cacheReadRate(for: $1.modelId)
         }
         let cachedC = d.models.reduce(0.0) {
-            $0 + Double($1.tokens.cacheRead) * CodexPricing.inputRate(for: $1.modelId) * CodexPricing.cachedInputMul
+            $0 + Double($1.tokens.cacheRead) * UnifiedPricing.cacheReadRate(for: $1.modelId)
         }
-        let outputC = d.models.reduce(0.0) { $0 + Double($1.tokens.output) * CodexPricing.outputRate(for: $1.modelId) }
-        let reasoningC = d.models.reduce(0.0) { $0 + Double($1.tokens.reasoning) * CodexPricing.outputRate(for: $1.modelId) }
+        let outputC = d.models.reduce(0.0) { $0 + Double($1.tokens.output) * UnifiedPricing.outputRate(for: $1.modelId) }
+        let reasoningC = d.models.reduce(0.0) { $0 + Double($1.tokens.reasoning) * UnifiedPricing.outputRate(for: $1.modelId) }
         let fullInput = t.input + t.cacheRead   // 输入(含缓存) = 净输入 + 缓存命中
         return HStack(spacing: 10) {
             CodexParentTile(

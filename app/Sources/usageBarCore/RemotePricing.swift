@@ -4,12 +4,13 @@ import Foundation
 /// 结构 `{"providers": {providerID: {modelID: {input/output/cache_read/cache_write}}}}`，
 /// 单价 $/1M token，约 146 厂商 5000 模型）。
 ///
-/// 角色：`UnifiedPricing` 的**未知模型兜底**——claude-*/gpt-* 仍走内置表（含 5m/1h
-/// 缓存写拆分、codex 变体细分等手工精调），其余厂商（glm/gemini/deepseek…）查这里，
-/// 让「显示 $0」只剩 models.dev 也没有的真长尾。
+/// 角色（2026-07-12 起）：`UnifiedPricing` 的**唯一价源**——claude-*/gpt-* 也在这查
+/// （内置手工价格表已退役，缘由见 `ModelPricing.swift` 头注 + `_notes/docs/0712-价格统一走远程表/`），
+/// 查不到的真长尾按 $0 + 「无价目」引导。
 ///
 /// 更新策略：每日一次 ETag 条件拉取（`refreshIfNeeded`，24h 节流，304 零流量），
-/// 缓存在 Application Support；离线/首启动无缓存时静默返回 nil（由内置表/0 接住）。
+/// 缓存在 Application Support；**本地无缓存（首启/被手删）时无视节流立即拉**，
+/// 失败不记检查时间戳、下轮刷新循环自动重试，$0 窗口在联网时秒级自愈。
 public final class RemotePricing: @unchecked Sendable {
     public static let shared = RemotePricing()
 
@@ -58,9 +59,12 @@ public final class RemotePricing: @unchecked Sendable {
     // MARK: - 拉取
 
     /// 每日一次条件拉取（内部 24h 节流，随主刷新循环调用即可，非到期直接返回）。
+    /// 例外：本地一张表都没有（首启/缓存被手删）时无视节流立即拉——远程表是唯一价源，
+    /// 没表就是全员 $0，早一轮拉到早一轮恢复。
     public func refreshIfNeeded() async {
         let last = UserDefaults.standard.double(forKey: Self.checkIntervalKey)
-        guard Date().timeIntervalSince1970 - last >= Self.checkInterval else { return }
+        let throttled = Date().timeIntervalSince1970 - last < Self.checkInterval
+        guard !throttled || !hasAnyData() else { return }
 
         var req = URLRequest(url: Self.feedURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
         if let etag = UserDefaults.standard.string(forKey: Self.etagKey) {
@@ -81,6 +85,14 @@ public final class RemotePricing: @unchecked Sendable {
             UserDefaults.standard.set(etag, forKey: Self.etagKey)
         }
         install(parsed)
+    }
+
+    /// 是否已装载任何价目（含尝试读磁盘缓存）。同步方法收拢 NSLock（async 上下文不能直接调）。
+    private func hasAnyData() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        loadFromDiskLocked()
+        return !flat.isEmpty
     }
 
     /// 同步装表（NSLock 不能在 async 上下文直接调，收进同步方法）

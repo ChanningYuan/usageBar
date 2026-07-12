@@ -1,55 +1,18 @@
 import Foundation
 
-/// Claude 各模型定价（$/1M token）+ 缓存倍率 → 「等效 API 花费」估算。
+/// Claude 模型的命名与倍率常量。
 ///
-/// 订阅口径展示的「≈$」= 把该用量按官方 API 价折算的等效费用（并非真实扣费）；
-/// claude-api 变体则接近真实费用。两者共用同一张表。
-///
-/// 数据源：claude-api skill 定价表（cached 2026-06-24）。
-///   opus 4.x   $5 / $25    sonnet 4.6/5 $3 / $15
-///   haiku 4.5  $1 / $5     fable/mythos 5 $10 / $50
-///
-/// 缓存倍率（相对 input 基准价，Anthropic 标准）：
-///   命中读 0.1×、缓存写 5m 1.25×、缓存写 1h 2×、输出用 output 价。
+/// ⚠️ 2026-07-12 起**价格表退役**：所有单价统一走 `UnifiedPricing`（一级价源 = 远程表，
+/// 见 `RemotePricing`）。背景：内置手工表 cached 2026-07 没赶上 7/9 GA 的 gpt-5.6，
+/// 等效花费显示成真实的 1/4；spec 见 `_notes/docs/0712-价格统一走远程表/`。
+/// 这里只保留远程表给不了的两样：
+///   1. `displayName`——model id → 友好名，纯命名、与价格无关；
+///   2. `cacheWrite1hMul`——远程表 cache_write 只有 5m 档（input×1.25），
+///      1h 档用 Anthropic 官方倍率 input×2 补出。
 public enum ClaudePricing {
 
-    /// (输入 $/1M, 输出 $/1M)
-    struct Rate {
-        let input: Double
-        let output: Double
-    }
-
-    public static let cacheReadMul = 0.1
-    public static let cacheWrite5mMul = 1.25
+    /// 缓存写 1h 档相对 input 基准价的倍率（Anthropic 标准；5m 档远程表直接有价）
     public static let cacheWrite1hMul = 2.0
-
-    /// 某模型的 input 单价（$/token）
-    public static func inputRate(for modelId: String) -> Double { rate(for: modelId).input / 1_000_000 }
-    /// 某模型的 output 单价（$/token）
-    public static func outputRate(for modelId: String) -> Double { rate(for: modelId).output / 1_000_000 }
-
-    /// 按 model id 关键字匹配（model 形如 "claude-opus-4-8" / "claude-sonnet-4-6"）。
-    /// 未知模型按 opus 价兜底（宁可略高不漏算）。
-    static func rate(for modelId: String) -> Rate {
-        let m = modelId.lowercased()
-        if m.contains("haiku")  { return Rate(input: 1,  output: 5) }
-        if m.contains("sonnet") { return Rate(input: 3,  output: 15) }
-        if m.contains("opus")   { return Rate(input: 5,  output: 25) }
-        if m.contains("fable") || m.contains("mythos") { return Rate(input: 10, output: 50) }
-        return Rate(input: 5, output: 25)
-    }
-
-    /// 等效 API 花费（美元）。
-    public static func cost(_ t: TokenBreakdown, modelId: String) -> Double {
-        let r = rate(for: modelId)
-        let inRate = r.input / 1_000_000
-        let outRate = r.output / 1_000_000
-        return Double(t.input)         * inRate
-             + Double(t.output)        * outRate
-             + Double(t.cacheRead)     * inRate * cacheReadMul
-             + Double(t.cacheCreate5m) * inRate * cacheWrite5mMul
-             + Double(t.cacheCreate1h) * inRate * cacheWrite1hMul
-    }
 
     /// model id → 友好名："claude-opus-4-8" → "Opus 4.8"，"claude-sonnet-4-6" → "Sonnet 4.6"。
     /// 取首个含字母的段作 family、其余纯数字段拼成版本号。
@@ -67,51 +30,8 @@ public enum ClaudePricing {
     }
 }
 
-/// Codex (OpenAI) 各模型定价（$/1M token）→ 「等效 API 花费」估算。
-///
-/// Codex 用 ChatGPT 订阅（plan_type=plus）跑，展示的「≈$」是按官方 API 价折算的等效费用（非真实扣费）。
-///
-/// 数据源：OpenAI 官方 API 定价（cached 2026-07，https://developers.openai.com/api/docs/pricing）：
-///   gpt-5.5 $5/$30   gpt-5.4 $2.5/$15   gpt-5.x-codex $1.75/$14
-///   gpt-5   $1.25/$10  o4-mini $1.1/$4.4  o3 $2/$8
-///
-/// 缓存输入折扣：OpenAI prompt caching 命中的 `cached_input_tokens` 按 ~0.1× input 价计（90% off）。
-/// 思考 `reasoning_output_tokens` 已含在 `output_tokens` 内、按 output 价计（不额外加）。
+/// Codex (OpenAI) 模型的命名工具。价格表已退役（缘由见 `ClaudePricing` 头注），只留 displayName。
 public enum CodexPricing {
-
-    struct Rate {
-        let input: Double
-        let output: Double
-    }
-
-    /// 缓存命中输入相对 input 基准价的倍率（OpenAI ~90% 折扣）。
-    public static let cachedInputMul = 0.1
-
-    public static func inputRate(for modelId: String) -> Double { rate(for: modelId).input / 1_000_000 }
-    public static func outputRate(for modelId: String) -> Double { rate(for: modelId).output / 1_000_000 }
-
-    /// 按 model id 关键字匹配（"gpt-5.5" / "gpt-5-codex" / "o4-mini" …）。codex 变体优先判定。
-    /// 未知模型按 gpt-5.5 兜底（宁可略高不漏算）。
-    static func rate(for modelId: String) -> Rate {
-        let m = modelId.lowercased()
-        if m.contains("codex") { return Rate(input: 1.75, output: 14) }
-        if m.contains("5.5")   { return Rate(input: 5,    output: 30) }
-        if m.contains("5.4")   { return Rate(input: 2.5,  output: 15) }
-        if m.contains("o4")    { return Rate(input: 1.1,  output: 4.4) }
-        if m.contains("o3")    { return Rate(input: 2,    output: 8) }
-        if m.contains("gpt-5") || m.contains("5") { return Rate(input: 1.25, output: 10) }
-        return Rate(input: 5, output: 30)
-    }
-
-    /// 等效 API 花费（美元）。TokenBreakdown 走 Codex 口径：input=净输入, cacheRead=缓存命中, output=输出（含 reasoning）。
-    public static func cost(_ t: TokenBreakdown, modelId: String) -> Double {
-        let r = rate(for: modelId)
-        let inRate = r.input / 1_000_000
-        let outRate = r.output / 1_000_000
-        return Double(t.input)     * inRate
-             + Double(t.cacheRead) * inRate * cachedInputMul
-             + Double(t.output)    * outRate
-    }
 
     /// model id → 友好名："gpt-5.5" → "GPT-5.5"，"gpt-5-codex" → "GPT-5-Codex"，"o4-mini" → "o4-mini"。
     public static func displayName(for modelId: String) -> String {
@@ -126,48 +46,49 @@ public enum CodexPricing {
     }
 }
 
-/// 跨厂商统一价目路由（等效 API 价）：按 modelId 归属分发。
+/// 跨厂商统一查价（等效 API 价）：**唯一入口，一级价源 = 远程表**（2026-07-12 拍板，
+/// spec 见 `_notes/docs/0712-价格统一走远程表/`）。
 ///
-/// 优先级：claude-* → `ClaudePricing`、gpt-*/o3*/o4* → `CodexPricing`（内置表含 5m/1h
-/// 缓存写拆分、codex 变体细分等手工精调，且有「宁高不漏」兜底）→ 其余厂商查
-/// `RemotePricing`（models.dev 远程表，glm/gemini/deepseek… 约 5000 模型）→ 都没有按 0 计
-/// （宁显示 $0 不乱算，UI 侧配「无价目」反馈引导）。
+/// 查价顺序：
+///   1. id 规整：别名映射（models.dev 根本没有的内部别名 → 有价真身，如 codex-auto-review）；
+///   2. 查 `RemotePricing`（约 150 厂商 5000 模型）——精确 id 未命中时依次退化：
+///      去 `-YYYYMMDD` 日期后缀 → 逐段剥**纯字母**尾段（"-fast" 这类服务档位变体，最多 2 段）。
+///      纯数字尾段绝不剥：claude-opus-4-8 剥成 claude-opus-4 就串到别的模型价了；
+///   3. 都查不到按 0 计（宁显 $0 不猜价，UI 侧配「无价目」反馈引导）。
 ///
 /// `provider` 选传（opencode 落库带 providerID）：远程表按 (provider, model) 精确匹配，
-/// 同名模型多渠道价不同时不会取错；不传则按官方渠道优先的扁平表。
+/// 同名模型多渠道价不同时不会取错；不传则按 claude-*/gpt-* 推断官方渠道。
 public enum UnifiedPricing {
+
+    /// models.dev 没有的内部别名 → 有价真模型 id
+    static let aliases: [String: String] = [
+        "codex-auto-review": "gpt-5.3-codex",
+        "claude-mythos-5": "claude-fable-5",
+    ]
+
     public static func inputRate(for modelId: String, provider: String? = nil) -> Double {
-        if isClaude(modelId) { return ClaudePricing.inputRate(for: modelId) }
-        if isOpenAI(modelId) { return CodexPricing.inputRate(for: modelId) }
-        return (remote(provider, modelId)?.input ?? 0) / 1_000_000
+        (rate(modelId, provider)?.input ?? 0) / 1_000_000
     }
 
     public static func outputRate(for modelId: String, provider: String? = nil) -> Double {
-        if isClaude(modelId) { return ClaudePricing.outputRate(for: modelId) }
-        if isOpenAI(modelId) { return CodexPricing.outputRate(for: modelId) }
-        return (remote(provider, modelId)?.output ?? 0) / 1_000_000
+        (rate(modelId, provider)?.output ?? 0) / 1_000_000
     }
 
-    /// 缓存读单价（已含各家折扣倍率；远程表的 cache_read 本身就是折后价）
+    /// 缓存读单价（远程表的 cache_read 本身就是折后价）
     public static func cacheReadRate(for modelId: String, provider: String? = nil) -> Double {
-        if isClaude(modelId) { return ClaudePricing.inputRate(for: modelId) * ClaudePricing.cacheReadMul }
-        if isOpenAI(modelId) { return CodexPricing.inputRate(for: modelId) * CodexPricing.cachedInputMul }
-        return (remote(provider, modelId)?.cacheRead ?? 0) / 1_000_000
+        (rate(modelId, provider)?.cacheRead ?? 0) / 1_000_000
     }
 
-    /// 缓存写单价（5m 档；OpenAI 无缓存写计费概念恒 0）
+    /// 缓存写单价（5m 档 = 远程表 cache_write 原值）
     public static func cacheWrite5mRate(for modelId: String, provider: String? = nil) -> Double {
-        if isClaude(modelId) { return ClaudePricing.inputRate(for: modelId) * ClaudePricing.cacheWrite5mMul }
-        if isOpenAI(modelId) { return 0 }
-        return (remote(provider, modelId)?.cacheWrite ?? 0) / 1_000_000
+        (rate(modelId, provider)?.cacheWrite ?? 0) / 1_000_000
     }
 
-    /// 缓存写单价（1h 档；远程表无 5m/1h 拆分，1h 计费只存在于 Anthropic 直连、走内置表，
-    /// 远程侧按同 cache_write 价计）
+    /// 缓存写单价（1h 档）：只存在于 Anthropic 直连，远程表没这档，用官方倍率×远程 input 底价补；
+    /// 非 Claude 本就不产生 1h token，按 5m 档价兜住口径。
     public static func cacheWrite1hRate(for modelId: String, provider: String? = nil) -> Double {
-        if isClaude(modelId) { return ClaudePricing.inputRate(for: modelId) * ClaudePricing.cacheWrite1hMul }
-        if isOpenAI(modelId) { return 0 }
-        return (remote(provider, modelId)?.cacheWrite ?? 0) / 1_000_000
+        guard let r = rate(modelId, provider) else { return 0 }
+        return (isClaude(modelId) ? r.input * ClaudePricing.cacheWrite1hMul : r.cacheWrite) / 1_000_000
     }
 
     /// 等效 API 花费（美元）。output 需已含 reasoning（app 统一口径：reasoning ⊂ output）。
@@ -179,14 +100,44 @@ public enum UnifiedPricing {
             + Double(t.cacheCreate1h) * cacheWrite1hRate(for: modelId, provider: provider)
     }
 
-    /// 该模型是否完全无价可依（内置 + 远程都没有）→ UI「无价目」反馈引导用
+    /// 该模型是否完全无价可依（别名/归一化后远程表仍没有）→ UI「无价目」反馈引导用
     public static func hasNoPricing(for modelId: String, provider: String? = nil) -> Bool {
-        if isClaude(modelId) || isOpenAI(modelId) { return false }
-        return remote(provider, modelId) == nil
+        rate(modelId, provider) == nil
     }
 
-    private static func remote(_ provider: String?, _ modelId: String) -> RemotePricing.Rate? {
-        RemotePricing.shared.rate(provider: provider, model: modelId)
+    // MARK: - 查表
+
+    private static func rate(_ modelId: String, _ provider: String?) -> RemotePricing.Rate? {
+        for id in candidates(for: modelId) {
+            if let r = RemotePricing.shared.rate(provider: provider ?? providerHint(id), model: id) {
+                return r
+            }
+        }
+        return nil
+    }
+
+    /// 查价候选 id 序列：别名真身 → 去日期后缀 → 逐段剥纯字母尾段（最多 2 段）
+    static func candidates(for modelId: String) -> [String] {
+        var id = aliases[modelId.lowercased()] ?? modelId
+        var out = [id]
+        if let r = id.range(of: "-\\d{8}$", options: .regularExpression) {
+            id = String(id[..<r.lowerBound])
+            out.append(id)
+        }
+        for _ in 0..<2 {
+            let segs = id.split(separator: "-")
+            guard segs.count > 1, let last = segs.last, last.allSatisfy({ $0.isLetter }) else { break }
+            id = segs.dropLast().joined(separator: "-")
+            out.append(id)
+        }
+        return out
+    }
+
+    /// 官方渠道提示：同名模型出现在转售渠道（openrouter 等）时保证取官方价
+    static func providerHint(_ m: String) -> String? {
+        if isClaude(m) { return "anthropic" }
+        if isOpenAI(m) { return "openai" }
+        return nil
     }
 
     static func isClaude(_ m: String) -> Bool { m.hasPrefix("claude-") }

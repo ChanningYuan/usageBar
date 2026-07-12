@@ -51,14 +51,16 @@ final class OpenCodeTests: XCTestCase {
     }
 
     func testCostFallbackToEquivalentPricing() throws {
-        clearRemotePricing()
+        // gpt-5.5-fast 远程表没有精确键 → 剥纯字母尾段规整到 gpt-5.5（一级价源=远程表）
+        let fixture = Data(#"{"providers":{"openai":{"gpt-5.5":{"input":5,"output":30,"cache_read":0.5}}}}"#.utf8)
+        XCTAssertTrue(RemotePricing.shared.injectForTesting(fixture))
         let now = Date()
         let dbPath = try makeTempDB(
             sessions: [("ses_r", nil, "订阅会话")],
             messages: [
                 // 订阅登录 cost=0 → gpt-5.5 等效价：1000×$5/1M + (100+50)×$30/1M = $0.0095
                 ("msg_g", "ses_r", now, "\"gpt-5.5-fast\"", 1000, 100, 50, 0, 0, 0),
-                // 未知厂商模型 cost=0 → 无价表，保持 0（宁缺不乱算）
+                // 表里没有的模型 cost=0 → 保持 0（宁显 $0 不猜价）
                 ("msg_u", "ses_r", now, "\"glm-5.2\"", 1000, 100, 0, 0, 0, 0),
             ])
 
@@ -69,16 +71,34 @@ final class OpenCodeTests: XCTestCase {
         XCTAssertEqual(u.cost, 0)
     }
 
-    func testUnifiedPricingRouting() {
+    func testUnifiedPricingRemoteFirstRouting() {
+        // 2026-07-12 起一级价源=远程表，内置手工表退役（0712-价格统一走远程表 spec）
+        let fixture = Data("""
+        {"providers":{
+          "anthropic":{"claude-opus-4-8":{"input":5,"output":25,"cache_read":0.5,"cache_write":6.25}},
+          "openai":{"gpt-5.6-sol":{"input":5,"output":30,"cache_read":0.5,"cache_write":6.25},
+                    "gpt-5.3-codex":{"input":1.75,"output":14,"cache_read":0.175}}
+        }}
+        """.utf8)
+        XCTAssertTrue(RemotePricing.shared.injectForTesting(fixture))
+
+        // 精确命中（本次 bug 主角：5.6-sol 不再落到 gpt-5 老价）
+        XCTAssertEqual(UnifiedPricing.inputRate(for: "gpt-5.6-sol"), 5 / 1_000_000)
+        XCTAssertEqual(UnifiedPricing.outputRate(for: "gpt-5.6-sol"), 30.0 / 1_000_000)
+        // 归一化：去 -YYYYMMDD 日期后缀
+        XCTAssertEqual(UnifiedPricing.inputRate(for: "claude-opus-4-8-20260101"), 5 / 1_000_000)
+        // 别名：codex-auto-review（models.dev 没有）→ gpt-5.3-codex
+        XCTAssertEqual(UnifiedPricing.outputRate(for: "codex-auto-review"), 14.0 / 1_000_000)
+        // 缓存写：5m 直接用远程 cache_write；1h 档远程没有，按官方倍率 input×2 补
+        XCTAssertEqual(UnifiedPricing.cacheWrite5mRate(for: "claude-opus-4-8"), 6.25 / 1_000_000)
+        XCTAssertEqual(UnifiedPricing.cacheWrite1hRate(for: "claude-opus-4-8"), 10.0 / 1_000_000)
+        // 纯数字尾段绝不剥：opus-4-9 不能吃到 opus-4-8 的价
+        XCTAssertTrue(UnifiedPricing.hasNoPricing(for: "claude-opus-4-9"))
+
+        // 空表（首启断网）：claude/gpt 同样 $0 + 无价目（1c 口径，不再有内置兜底）
         clearRemotePricing()
-        XCTAssertEqual(UnifiedPricing.inputRate(for: "claude-opus-4-8"),
-                       ClaudePricing.inputRate(for: "claude-opus-4-8"))
-        XCTAssertEqual(UnifiedPricing.outputRate(for: "gpt-5.5-fast"),
-                       CodexPricing.outputRate(for: "gpt-5.5-fast"))
-        XCTAssertEqual(UnifiedPricing.cacheWrite5mRate(for: "gpt-5.5-fast"), 0, "OpenAI 无缓存写计费")
-        XCTAssertEqual(UnifiedPricing.inputRate(for: "glm-5.2"), 0, "内置+远程都没有时不乱算")
-        XCTAssertTrue(UnifiedPricing.hasNoPricing(for: "glm-5.2"))
-        XCTAssertFalse(UnifiedPricing.hasNoPricing(for: "claude-opus-4-8"), "claude 系永远有内置兜底")
+        XCTAssertEqual(UnifiedPricing.inputRate(for: "claude-opus-4-8"), 0)
+        XCTAssertTrue(UnifiedPricing.hasNoPricing(for: "claude-opus-4-8"))
     }
 
     // MARK: - 远程价目（models.dev 瘦身表）
@@ -104,9 +124,8 @@ final class OpenCodeTests: XCTestCase {
         XCTAssertEqual(UnifiedPricing.cacheWrite5mRate(for: "gemini-3-pro"), 1.625 / 1_000_000)
         XCTAssertFalse(UnifiedPricing.hasNoPricing(for: "glm-5.2"))
         XCTAssertTrue(UnifiedPricing.hasNoPricing(for: "totally-unknown-model"))
-        // claude/gpt 内置优先,不受远程影响
-        XCTAssertEqual(UnifiedPricing.inputRate(for: "claude-opus-4-8"),
-                       ClaudePricing.inputRate(for: "claude-opus-4-8"))
+        // claude/gpt 同走远程：此 fixture 无 anthropic → 查无价（内置兜底已退役）
+        XCTAssertTrue(UnifiedPricing.hasNoPricing(for: "claude-opus-4-8"))
     }
 
     func testOpenCodeCostFallbackViaRemotePricing() throws {

@@ -111,7 +111,7 @@ public actor CodexDetailScanner {
 
                 let tb = TokenBreakdown(input: net, output: dOut, cacheRead: dCa, reasoning: min(dRe, dOut))
                 let model = ev.model.isEmpty ? meta.firstModel : ev.model
-                let c = CodexPricing.cost(tb, modelId: model)
+                let c = UnifiedPricing.cost(tb, modelId: model)
                 hero.add(tb); heroCost += c
                 byModel[model, default: TokenBreakdown()].add(tb); modelCost[model, default: 0] += c
                 bySession[sid, default: TokenBreakdown()].add(tb); sessionCost[sid, default: 0] += c

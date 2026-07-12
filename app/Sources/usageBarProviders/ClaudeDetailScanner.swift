@@ -216,7 +216,7 @@ public actor ClaudeDetailScanner {
         var sessionCost: [String: Double] = [:]
 
         for u in units where u.provider == providerId && inWindow(u.date) {
-            let c = ClaudePricing.cost(u.tokens, modelId: u.model)
+            let c = UnifiedPricing.cost(u.tokens, modelId: u.model)
             hero.add(u.tokens); heroCost += c
             byModel[u.model, default: TokenBreakdown()].add(u.tokens)
             modelCost[u.model, default: 0] += c
