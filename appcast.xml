@@ -5,21 +5,25 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.18</h3>
+<h3>usageBar 0.3.19</h3>
 <p><b>修复</b></p>
 <ul>
-<li><b>Codex Desktop「从其他 AI 应用导入」不再虚增当天用量</b>（感谢 issue 反馈）：Codex Desktop 0.142+ 的导入功能会把 Claude Code 等应用的历史会话批量生成 rollout 快照文件，其中只有 `total_tokens` 累计值、无实际输入输出。旧版把这批快照整段计入导入当天，导致列表远大于详情页（反馈实例：4.3M vs 1.8M）。本版主列表与详情页统一按「输入 + 输出」口径计量，导入快照自然归零；真实用量两口径逐事件相等，历史各天数字不变。升级后首次刷新会自动重算一次缓存。</li>
+<li><b>GPT-5.6 系列等效花费显示过低（约为真实的 1/4）</b>：内置价表没赶上 7 月 9 日发布的 GPT-5.6，`gpt-5.6-sol` 被按旧 GPT-5 基础价（$1.25/$10）折算，官方实际为 $5/$30。本版起该系列按官方价计算，打开明细即自动按新价重算，历史数据无需迁移。</li>
+</ul>
+<p><b>变化</b></p>
+<ul>
+<li><b>等效花费计价统一走远程价目表</b>：Claude / GPT 系不再使用内置价表，与其他厂商一致改用每日自动更新的远程价目表（0.3.17 引入，源自 [models.dev](https://models.dev)），新模型上市后价格自动跟进、无需升级 app。价目缓存缺失时（如首次启动）会立即拉取；极端离线场景下短暂显示 $0 并标注「无价目」，联网后自动恢复。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.18</title>
-            <pubDate>Fri, 10 Jul 2026 15:59:48 +0800</pubDate>
-            <sparkle:version>0.3.18</sparkle:version>
-            <sparkle:shortVersionString>0.3.18</sparkle:shortVersionString>
+            <title>0.3.19</title>
+            <pubDate>Sun, 12 Jul 2026 17:37:25 +0800</pubDate>
+            <sparkle:version>0.3.19</sparkle:version>
+            <sparkle:shortVersionString>0.3.19</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/download/v0.3.18/usageBar.zip" length="1989271" type="application/octet-stream" sparkle:edSignature="2NN+NWwDyaolV06J3J+7G6PElnpKnyDJOhBa10rF25SI+pxm/IkyOaeFCOZnTsp1InxA8Xl43U/0CmXzDaqtAw=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/download/v0.3.19/usageBar.zip" length="1989678" type="application/octet-stream" sparkle:edSignature="VKEcoS7XKWOrT606tAH4fGEWnRgFYe0qWjV06w5aIXFjcYlf0yZSL0k78H7pN0S0bKiTgtgVdIC/PjE2hwJ5AA=="/>
         </item>
     </channel>
 </rss>
