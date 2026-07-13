@@ -5,25 +5,25 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.19</h3>
+<h3>usageBar 0.3.20</h3>
 <p><b>修复</b></p>
 <ul>
-<li><b>GPT-5.6 系列等效花费显示过低（约为真实的 1/4）</b>：内置价表没赶上 7 月 9 日发布的 GPT-5.6，`gpt-5.6-sol` 被按旧 GPT-5 基础价（$1.25/$10）折算，官方实际为 $5/$30。本版起该系列按官方价计算，打开明细即自动按新价重算，历史数据无需迁移。</li>
+<li><b>明细页完整显示日志记录的模型 ID</b>：通过 ccx 等方式让 Claude Code 使用跨厂商模型时，日志会如实记录 `gpt-5.6-sol`，旧版却套用 Claude 友好名格式化，最终只显示成 `Gpt`。本版「按模型」列表直接展示日志原始 `modelId`，日期后缀、服务档位和代理模型名均不再丢失。</li>
 </ul>
 <p><b>变化</b></p>
 <ul>
-<li><b>等效花费计价统一走远程价目表</b>：Claude / GPT 系不再使用内置价表，与其他厂商一致改用每日自动更新的远程价目表（0.3.17 引入，源自 [models.dev](https://models.dev)），新模型上市后价格自动跟进、无需升级 app。价目缓存缺失时（如首次启动）会立即拉取；极端离线场景下短暂显示 $0 并标注「无价目」，联网后自动恢复。</li>
+<li>Claude Code、Codex、OpenCode 的模型明细统一改为准确优先的原始 ID；等效花费仍独立走远程统一价目表，显示改动不影响计价。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.19</title>
-            <pubDate>Sun, 12 Jul 2026 17:37:25 +0800</pubDate>
-            <sparkle:version>0.3.19</sparkle:version>
-            <sparkle:shortVersionString>0.3.19</sparkle:shortVersionString>
+            <title>0.3.20</title>
+            <pubDate>Mon, 13 Jul 2026 11:59:37 +0800</pubDate>
+            <sparkle:version>0.3.20</sparkle:version>
+            <sparkle:shortVersionString>0.3.20</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/download/v0.3.19/usageBar.zip" length="1989678" type="application/octet-stream" sparkle:edSignature="VKEcoS7XKWOrT606tAH4fGEWnRgFYe0qWjV06w5aIXFjcYlf0yZSL0k78H7pN0S0bKiTgtgVdIC/PjE2hwJ5AA=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/download/v0.3.20/usageBar.zip" length="1986330" type="application/octet-stream" sparkle:edSignature="0t08cCDIjQRurJR+qEabknMFvXA4crsnk9OuAsoQ/FVbJFvtBCLGD2B2nRYcTszrhdl8TwpLplp9yaQqn9BfAQ=="/>
         </item>
     </channel>
 </rss>
