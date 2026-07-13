@@ -76,7 +76,6 @@ public actor OpenCodeDetailScanner {
         let modelRecords = byModel.map { mid, val in
             ModelDetailRecord(
                 modelId: mid,
-                displayName: friendlyModelName(mid),
                 tokens: val.tokens,
                 cost: val.cost
             )
@@ -105,15 +104,4 @@ public actor OpenCodeDetailScanner {
         return (messages, sessions)
     }
 
-    /// opencode 的模型跨厂商：claude / gpt 系复用 app 既有友好名，其余 title-case（"glm-5.2" → "Glm 5.2"）
-    static func friendlyModelName(_ modelId: String) -> String {
-        if modelId.hasPrefix("claude-") { return ClaudePricing.displayName(for: modelId) }
-        if modelId.hasPrefix("gpt-") || modelId.hasPrefix("o3") || modelId.hasPrefix("o4") {
-            return CodexPricing.displayName(for: modelId)
-        }
-        return modelId.replacingOccurrences(of: "-", with: " ")
-            .split(separator: " ")
-            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
-            .joined(separator: " ")
-    }
 }

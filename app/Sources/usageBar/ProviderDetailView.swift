@@ -316,7 +316,7 @@ struct ProviderDetailView: View {
             ForEach(d.models) { m in
                 HStack(spacing: 8) {
                     Circle().fill(accent).frame(width: 7, height: 7)
-                    Text(m.displayName).font(.system(size: 11)).foregroundStyle(pal.text).lineLimit(1)
+                    Text(m.modelId).font(.system(size: 11)).foregroundStyle(pal.text).lineLimit(1)
                     Spacer(minLength: 6)
                     Text(fmtTok(m.tokens.total))
                         .font(.system(size: 10.5, design: .monospaced))

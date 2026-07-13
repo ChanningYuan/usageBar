@@ -93,18 +93,16 @@ public struct SessionDetailRecord: Sendable, Equatable, Identifiable {
 
 /// 分模型明细行（详情页「按模型」列表一行）。
 public struct ModelDetailRecord: Sendable, Equatable, Identifiable {
+    /// 日志原始 model id；详情页原样展示，不做厂商命名格式化。
     public let modelId: String
-    /// 友好名："claude-opus-4-8" → "Opus 4.8"
-    public let displayName: String
     public let tokens: TokenBreakdown
     public let cost: Double
 
     public var id: String { modelId }
     public var hitRate: Double { tokens.hitRate }
 
-    public init(modelId: String, displayName: String, tokens: TokenBreakdown, cost: Double) {
+    public init(modelId: String, tokens: TokenBreakdown, cost: Double) {
         self.modelId = modelId
-        self.displayName = displayName
         self.tokens = tokens
         self.cost = cost
     }

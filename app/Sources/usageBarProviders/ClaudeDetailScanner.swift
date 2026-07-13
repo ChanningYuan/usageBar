@@ -225,8 +225,7 @@ public actor ClaudeDetailScanner {
         }
 
         let models = byModel.map { (mid, tb) in
-            ModelDetailRecord(modelId: mid, displayName: ClaudePricing.displayName(for: mid),
-                              tokens: tb, cost: modelCost[mid] ?? 0)
+            ModelDetailRecord(modelId: mid, tokens: tb, cost: modelCost[mid] ?? 0)
         }.sorted { $0.tokens.total > $1.tokens.total }
 
         let sessions = bySession.map { (sid, tb) -> SessionDetailRecord in

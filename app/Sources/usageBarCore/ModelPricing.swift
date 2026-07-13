@@ -1,49 +1,14 @@
 import Foundation
 
-/// Claude 模型的命名与倍率常量。
+/// Claude 计价中远程表无法表达的倍率常量。
 ///
-/// ⚠️ 2026-07-12 起**价格表退役**：所有单价统一走 `UnifiedPricing`（一级价源 = 远程表，
-/// 见 `RemotePricing`）。背景：内置手工表 cached 2026-07 没赶上 7/9 GA 的 gpt-5.6，
-/// 等效花费显示成真实的 1/4；spec 见 `_notes/docs/0712-价格统一走远程表/`。
-/// 这里只保留远程表给不了的两样：
-///   1. `displayName`——model id → 友好名，纯命名、与价格无关；
-///   2. `cacheWrite1hMul`——远程表 cache_write 只有 5m 档（input×1.25），
-///      1h 档用 Anthropic 官方倍率 input×2 补出。
+/// ⚠️ 2026-07-12 起所有单价统一走 `UnifiedPricing`（一级价源 = 远程表，
+/// 见 `RemotePricing`）。远程表 cache_write 只有 5m 档（input×1.25），
+/// 1h 档用 Anthropic 官方倍率 input×2 补出。
 public enum ClaudePricing {
 
     /// 缓存写 1h 档相对 input 基准价的倍率（Anthropic 标准；5m 档远程表直接有价）
     public static let cacheWrite1hMul = 2.0
-
-    /// model id → 友好名："claude-opus-4-8" → "Opus 4.8"，"claude-sonnet-4-6" → "Sonnet 4.6"。
-    /// 取首个含字母的段作 family、其余纯数字段拼成版本号。
-    public static func displayName(for modelId: String) -> String {
-        var s = modelId
-        if s.hasPrefix("claude-") { s.removeFirst("claude-".count) }
-        let toks = s.split(separator: "-").map(String.init)
-        guard !toks.isEmpty else { return modelId }
-        let fam = toks.first { $0.contains(where: { $0.isLetter }) } ?? toks[0]
-        // 只取 ≤2 位的数字段当版本号（"4"/"8"），滤掉 8 位日期后缀（"20251001"）
-        let nums = toks.filter { !$0.isEmpty && $0.count <= 2 && $0.allSatisfy { $0.isNumber } }
-        let family = fam.prefix(1).uppercased() + fam.dropFirst()
-        let vers = nums.joined(separator: ".")
-        return vers.isEmpty ? family : "\(family) \(vers)"
-    }
-}
-
-/// Codex (OpenAI) 模型的命名工具。价格表已退役（缘由见 `ClaudePricing` 头注），只留 displayName。
-public enum CodexPricing {
-
-    /// model id → 友好名："gpt-5.5" → "GPT-5.5"，"gpt-5-codex" → "GPT-5-Codex"，"o4-mini" → "o4-mini"。
-    public static func displayName(for modelId: String) -> String {
-        guard !modelId.isEmpty else { return "未知模型" }
-        let parts = modelId.split(separator: "-").map { (tok: Substring) -> String in
-            let s = String(tok)
-            if s.lowercased() == "gpt" { return "GPT" }
-            if s.lowercased() == "codex" { return "Codex" }
-            return s
-        }
-        return parts.joined(separator: "-")
-    }
 }
 
 /// 跨厂商统一查价（等效 API 价）：**唯一入口，一级价源 = 远程表**（2026-07-12 拍板，

@@ -221,13 +221,21 @@ final class OpenCodeTests: XCTestCase {
         XCTAssertEqual(detail.tokens.cached, daily?.cachedToken)
     }
 
-    // MARK: - 模型友好名
+    // MARK: - 模型原始 ID
 
-    func testFriendlyModelName() {
-        XCTAssertEqual(OpenCodeDetailScanner.friendlyModelName("claude-opus-4-8"), "Opus 4.8")
-        XCTAssertEqual(OpenCodeDetailScanner.friendlyModelName("gpt-5.5-fast"), "GPT-5.5-fast")
-        XCTAssertEqual(OpenCodeDetailScanner.friendlyModelName("glm-5.2"), "Glm 5.2")
-        XCTAssertEqual(OpenCodeDetailScanner.friendlyModelName("gemini-3-pro"), "Gemini 3 Pro")
+    func testDetailPreservesRawModelIds() {
+        let now = Date()
+        let rows = [
+            msg("ses_gpt", now, tokens: tb(input: 100), model: "gpt-5.6-sol"),
+            msg("ses_claude", now, tokens: tb(input: 200), model: "claude-opus-4-8"),
+            msg("ses_glm", now, tokens: tb(input: 300), model: "glm-5.2"),
+        ]
+
+        let detail = OpenCodeDetailScanner.compose(
+            messages: rows, sessions: [:], window: .today, weekStartMonday: true, now: now)
+
+        XCTAssertEqual(Set(detail.models.map(\.modelId)),
+                       Set(["gpt-5.6-sol", "claude-opus-4-8", "glm-5.2"]))
     }
 
     // MARK: - helpers

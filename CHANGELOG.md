@@ -2,6 +2,14 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.20] - 2026-07-13
+
+### 修复
+- **明细页完整显示日志记录的模型 ID**：通过 ccx 等方式让 Claude Code 使用跨厂商模型时，日志会如实记录 `gpt-5.6-sol`，旧版却套用 Claude 友好名格式化，最终只显示成 `Gpt`。本版「按模型」列表直接展示日志原始 `modelId`，日期后缀、服务档位和代理模型名均不再丢失。
+
+### 变化
+- Claude Code、Codex、OpenCode 的模型明细统一改为准确优先的原始 ID；等效花费仍独立走远程统一价目表，显示改动不影响计价。
+
 ## [0.3.19] - 2026-07-12
 
 ### 修复
