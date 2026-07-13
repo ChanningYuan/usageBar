@@ -57,11 +57,17 @@ public actor CodexDetailScanner {
 
     // MARK: - 对外入口
 
-    /// 扫描并聚合 Codex 在某窗口的明细（分模型 + 分会话 + 四维 Hero）。
-    public func detail(providerId: String, window: TimeWindow,
+    /// 扫描并聚合 Codex（或同款 rollout 格式的 provider）在某窗口的明细。
+    ///
+    /// ⚠️ `root` / `requirePath` 由调用方传入（v0.3.22 起）。此前路径写死 `~/.codex/sessions`，
+    /// 悟空（内置 codex 内核，rollout 落在 `~/.real/**/kernel/codex/sessions/`，格式**完全同款**）
+    /// 没法复用。参数化后同一套差分算法两边共用。
+    public func detail(providerId: String, root: URL, requirePath: String? = nil,
+                       window: TimeWindow,
                        weekStartMonday: Bool = true, now: Date = Date()) async -> ProviderDetail {
         // 文件名 `rollout-{ISO时间}-{uuid}` 字典序 == 时间序 → 父会话一定排在它的 fork 之前。
-        let files = allFiles().sorted { $0.lastPathComponent < $1.lastPathComponent }
+        let files = allFiles(root: root, requirePath: requirePath)
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
         let inWindow = DailyAggregator.windowPredicate(window, weekStartMonday: weekStartMonday, now: now)
         let threadNames = loadThreadNames()   // sessionId → Codex 侧栏标题
 
@@ -163,12 +169,13 @@ public actor CodexDetailScanner {
 
     // MARK: - 文件枚举（与 CodexProvider 同源）
 
-    private func allFiles() -> [URL] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let dir = home.appendingPathComponent(".codex/sessions")
-        guard FileManager.default.fileExists(atPath: dir.path) else { return [] }
-        return JSONLReader.findFiles(under: dir) { url in
-            url.pathExtension == "jsonl" && url.lastPathComponent.hasPrefix("rollout-")
+    private func allFiles(root: URL, requirePath: String?) -> [URL] {
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+        return JSONLReader.findFiles(under: root) { url in
+            guard url.pathExtension == "jsonl",
+                  url.lastPathComponent.hasPrefix("rollout-") else { return false }
+            if let req = requirePath, !url.path.contains(req) { return false }
+            return true
         }
     }
 

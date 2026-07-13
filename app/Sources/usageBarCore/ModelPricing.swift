@@ -31,6 +31,25 @@ public enum UnifiedPricing {
         "claude-mythos-5": "claude-fable-5",
     ]
 
+    /// **通用名 / 厂商打码名黑名单：一律不查表，直接判无价目。**
+    ///
+    /// 这些不是模型 id，而是「路由名」或「套餐档位名」：
+    /// - `auto` —— Cursor / WorkBuddy / Qoder 都用它表示「自动选模型」。真实成本取决于当时选中的是谁，
+    ///   我们无从得知 → **无价目才是诚实的**。
+    /// - `ultimate` / `efficient` / `lite` / `performance` —— Qoder CLI 的**套餐档位名**（2026-07-13 实测）
+    /// - `qmodel` / `qmodel_latest` / `qwork-auto` / `dmodel` / `kmodel` / `gm51model` —— Qoder 的打码别名
+    ///
+    /// ⚠️ **为什么必须黑名单、而不能靠"查不到就算了"**：`auto` 这种大众名字在 154 个 provider 的
+    /// 价目表里**必然撞名**。实测它先命中 `llmgateway/auto`（单价全 0 → 静默显示 $0），
+    /// 加了「零价不算数」的兜底后又滑到 `morph/auto`（**有价**！）—— 于是 Cursor 的 376 万 token
+    /// 会被按一个毫不相干的服务的价格算钱，**从"错成 $0"变成"错成一个有模有样的数字"，更危险**。
+    /// 通用名撞名是结构性的，只能在入口拦掉。
+    static let genericAliases: Set<String> = [
+        "auto",
+        "ultimate", "efficient", "lite", "performance",
+        "qmodel", "qmodel_latest", "qwork-auto", "dmodel", "kmodel", "gm51model",
+    ]
+
     public static func inputRate(for modelId: String, provider: String? = nil) -> Double {
         (rate(modelId, provider)?.input ?? 0) / 1_000_000
     }
@@ -65,16 +84,32 @@ public enum UnifiedPricing {
             + Double(t.cacheCreate1h) * cacheWrite1hRate(for: modelId, provider: provider)
     }
 
-    /// 该模型是否完全无价可依（别名/归一化后远程表仍没有）→ UI「无价目」反馈引导用
+    /// 该模型是否完全无价可依（别名/归一化后远程表仍没有，**或命中了但单价全 0**）→ UI「无价目」反馈引导用。
+    ///
+    /// ⚠️ v0.3.22 修复（线上现存 bug，v0.3.21 就有）：**「命中但单价全 0」以前被当成有价**。
+    /// 典型是模型名 `auto` —— Cursor / WorkBuddy 都用它，而远程价目表里恰好有个
+    /// **毫不相干**的 `llmgateway/auto`（另一家服务的路由模型），单价是 `{input: 0, output: 0}`。
+    /// 于是 `rate != nil` → `hasNoPricing` 返回 false → UI **不弹「无价目」，而是把 `$0` 当成真价静默显示**。
+    /// 用户看到 $0 会以为免费/极便宜，实际是查错了表。影响面：Cursor 的 `auto`（实测 376 万 token）、
+    /// WorkBuddy 的全部用量。详情页会把这个假 $0 **逐行放大展示**（按模型/按会话每行都有金额列），故本版必修。
+    ///
+    /// 修法是通用兜底：**单价全 0 的命中一律视为无价**（真·免费模型不存在；全 0 只可能是查错表或数据缺失）。
     public static func hasNoPricing(for modelId: String, provider: String? = nil) -> Bool {
-        rate(modelId, provider) == nil
+        guard let r = rate(modelId, provider) else { return true }
+        return r.input == 0 && r.output == 0 && r.cacheRead == 0 && r.cacheWrite == 0
     }
 
     // MARK: - 查表
 
     private static func rate(_ modelId: String, _ provider: String?) -> RemotePricing.Rate? {
+        // 通用路由名 / 厂商打码名：入口直接拦掉，绝不进表（见 `genericAliases` 的说明）。
+        // 不拦的话它们必然在 154 个 provider 的表里撞名，算出一个"有模有样但完全错误"的金额。
+        if genericAliases.contains(modelId.lowercased()) { return nil }
+
         for id in candidates(for: modelId) {
             if let r = RemotePricing.shared.rate(provider: provider ?? providerHint(id), model: id) {
+                // 单价全 0 的命中不算数（见 `hasNoPricing`）——继续找下一个候选 id。
+                if r.input == 0 && r.output == 0 && r.cacheRead == 0 && r.cacheWrite == 0 { continue }
                 return r
             }
         }

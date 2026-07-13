@@ -62,7 +62,9 @@ public struct PersistedCache: Codable, Sendable {
     ///                        算、含误计的导入量,必须失效重算。
     ///   6 → 7 (2026-07-13): Claude Code 的 `claude-sub` / `claude-api` 合并为 `claude-code`。
     ///                        旧 cache 仍存拆分 id,不失效会让新 provider filter 不到历史记录全显 0。
-    public static let currentSchemaVersion = 7
+    /// v8（v0.3.22）：Cursor 聚合口径改为「同 (时间戳,模型) 取终值」，旧的聚合结果全部作废。
+    /// 不 bump 的话，用户升级后 Cursor 的数字不会自己变对（旧结果还躺在缓存里）。
+    public static let currentSchemaVersion = 8
 
     public init(entries: [FileCacheEntry]) {
         self.schemaVersion = Self.currentSchemaVersion

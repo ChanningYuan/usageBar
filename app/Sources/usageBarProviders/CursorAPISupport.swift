@@ -70,8 +70,21 @@ struct CursorUsageEvent {
     let totalTokens: Int       // Total Tokens
     let cost: String           // Cost（原样保留字符串）
 
-    /// 去重 key：时间戳 + total，足以唯一标识一次对话
-    var dedupeKey: String { "\(timestampISO)|\(totalTokens)" }
+    /// 去重 key：**时间戳 + 模型**。
+    ///
+    /// ⚠️ v0.3.22 修复（用量虚高 +72%）：旧 key 是 `时间戳|totalTokens`，看着"足以唯一标识一次对话"，
+    /// 实则**去重完全失效** —— Cursor 的用量事件是**累计快照**：一条对话进行中会被反复上报，
+    /// **时间戳固定在对话开始那一刻，token 逐次累加**，服务端只保留终值。于是 `totalTokens` 每次都变
+    /// → key 永远不重复 → 每一份中间快照都被当成新事件累加。
+    ///
+    /// 实测同一条对话（2026-07-13T08:08:46.812Z / claude-fable-5-thinking-high）在 mirror 里存了 4 份：
+    /// `1,891,508 → 5,659,446 → 6,183,595 → 14,504,573`，真值只有终值 1450 万，却被加成 2824 万。
+    /// 全量对账：显示 94,164,889 vs 真值 54,742,624（虚高 39,422,265，+72%）。
+    ///
+    /// 同类前科：悟空 `testRolloutCumulativeMustDiffNotSum`、Codex 峰值跟踪 —— **累计型数据被当成增量累加**。
+    ///
+    /// 去掉 token 后，同一条对话的多份快照落到同一个 key 上 → 由 `mergeIntoMirror` 取终值覆盖。
+    var dedupeKey: String { "\(timestampISO)|\(model)" }
 
     /// 序列化成 mirror jsonl 一行（usageBar 统一 schema）
     func toJSONLine() -> String {
@@ -90,13 +103,20 @@ struct CursorUsageEvent {
         return String(data: data, encoding: .utf8) ?? "{}"
     }
 
-    /// 从 mirror jsonl 一行还原 dedupeKey（用于去重，不需完整反序列化）
+    /// 从 mirror jsonl 一行还原 dedupeKey（时间戳 + 模型）。与 `dedupeKey` 必须同构。
     static func dedupeKey(fromJSONLine line: String) -> String? {
         guard let data = line.data(using: .utf8),
               let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let ts = obj["timestamp"] as? String else { return nil }
-        let total = (obj["total_tokens"] as? Int) ?? 0
-        return "\(ts)|\(total)"
+        let model = (obj["model"] as? String) ?? ""
+        return "\(ts)|\(model)"
+    }
+
+    /// 从 mirror jsonl 一行取 total_tokens（同 key 取终值时比大小用）。
+    static func totalTokens(fromJSONLine line: String) -> Int {
+        guard let data = line.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return 0 }
+        return (obj["total_tokens"] as? Int) ?? 0
     }
 }
 

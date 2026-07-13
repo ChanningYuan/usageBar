@@ -175,13 +175,16 @@ final class UsageViewModel: ObservableObject {
     /// 判定：全量缓存里今日记录 ∩ 可见 ∩ token>0，恰好一个，且属于可展开集合。
     func soleTodayDetailProvider() -> String? {
         let visible = Set(ProviderVisibilitySettings.shared.visibleProviderIds())
-        let expandable: Set<String> = ["claude-code", "codex"]
         let providers = Set(
             allStats
                 .filter { $0.time == TimeWindow.today.id && visible.contains($0.provider) && $0.token > 0 }
                 .map { $0.provider }
         )
-        guard providers.count == 1, let only = providers.first, expandable.contains(only) else { return nil }
+        // 门禁走声明表（v0.3.22）。此前这里还硬编码着 `["claude-code", "codex"]` ——
+        // 比 UsageView 那处白名单还旧（OpenCode 早就能 drill-in 了却没加进来），
+        // 正是「同一个门禁散在多处、加 provider 必漏」的活证据。
+        guard providers.count == 1, let only = providers.first,
+              ProviderDetailRegistry.isDrillable(only) else { return nil }
         return only
     }
 
@@ -203,17 +206,38 @@ final class UsageViewModel: ObservableObject {
     private func loadDetail(providerId: String) async {
         let win = window
         let weekStartMonday = TabSettings.shared.weekStartMonday
-        // 按 provider 分发到对应扫描器：Codex 走 CodexDetailScanner（累计差分口径），其余走 Claude。
+        // 扫描器由 provider 声明表给（`ProviderDetailSpec.swift`），不再手写 if/else 分派链。
+        // ⚠️ `.claudeTranscript` 必须把根目录传下去 —— 重构前 ClaudeDetailScanner 的路径是写死的
+        //    `~/.claude/projects`、完全无视 providerId，Cowork 一旦放开 drill-in 就会显示 Claude Code
+        //    的数据（白名单恰好挡住、bug 尚未暴露）。
+        guard let spec = ProviderDetailRegistry.spec(for: providerId) else { return }
         let d: ProviderDetail
-        if providerId == "codex" {
+        switch spec.scanner {
+        case .claudeTranscript(let src):
+            d = await ClaudeDetailScanner.shared.detail(
+                providerId: providerId, root: src.root,
+                includeHidden: src.includeHidden,
+                requirePath: src.requirePath, excludePath: src.excludePath,
+                window: win, weekStartMonday: weekStartMonday)
+        case .codexRollout(let root, let requirePath):
             d = await CodexDetailScanner.shared.detail(
-                providerId: providerId, window: win, weekStartMonday: weekStartMonday)
-        } else if providerId == "opencode" {
+                providerId: providerId, root: root, requirePath: requirePath,
+                window: win, weekStartMonday: weekStartMonday)
+        case .openCode:
             d = await OpenCodeDetailScanner.shared.detail(
                 window: win, weekStartMonday: weekStartMonday)
-        } else {
-            d = await ClaudeDetailScanner.shared.detail(
-                providerId: providerId, window: win, weekStartMonday: weekStartMonday)
+        case .cursor:
+            d = await CursorDetailScanner.shared.detail(
+                window: win, weekStartMonday: weekStartMonday)
+        case .workBuddy:
+            d = await WorkBuddyDetailScanner.shared.detail(
+                window: win, weekStartMonday: weekStartMonday)
+        case .qoderIde:
+            d = await QoderIdeDetailScanner.shared.detail(
+                window: win, weekStartMonday: weekStartMonday)
+        case .wukong:
+            d = await WukongDetailScanner.shared.detail(
+                window: win, weekStartMonday: weekStartMonday)
         }
         // 仅当用户仍停在同一 provider 详情页才 commit（防止快速来回切）
         guard detailProviderId == providerId, win == window else { return }

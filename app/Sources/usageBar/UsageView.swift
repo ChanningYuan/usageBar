@@ -417,7 +417,9 @@ struct UsageRootView: View {
                         ProviderRowView(
                             stat: stat,
                             maxToken: maxT,
-                            expandable: (pid == "claude-code" || pid == "codex" || pid == "opencode"),
+                            // 门禁由 provider 声明表决定（有 spec 才能 drill-in），
+                            // 不再手写白名单——加详情页时漏改这里就是「点不进去」。
+                            expandable: ProviderDetailRegistry.isDrillable(pid),
                             onExpand: { viewModel.openDetail(pid) }
                         )
                         if showsQoderHint(for: pid) {

@@ -24,33 +24,24 @@ struct ProviderDetailView: View {
 
     private var meta: ProviderMeta { ProviderMetaLookup.meta(for: providerId) }
     private var brand: Color { Color(hex: meta.brandColor) }
-    /// 当前可展开 provider 都展示「等效 API 费用」（≈$）。
-    private var usesEquivalentCost: Bool {
-        providerId == "claude-code" || providerId == "codex" || providerId == "opencode"
+
+    /// provider 声明表（指标块清单 / 门禁 / 金额档 / 强调色 / 扫描器）。见 `ProviderDetailSpec.swift`。
+    /// 门禁保证只有有声明的 provider 才能进到这里；兜底给 Claude Code 形态，不崩。
+    private var spec: ProviderDetailSpec {
+        ProviderDetailRegistry.spec(for: providerId)
+            ?? ProviderDetailRegistry.specs["claude-code"]!
     }
+
+    /// 是否展示「等效 API 费用」（≈$ 前缀）。三档金额口径见 `CostUnit`。
+    private var usesEquivalentCost: Bool { spec.costUnit == .equivalentUSD }
 
     private var pal: DetailPalette { .of(scheme) }
 
-    /// 强调色：Claude Code 按设计稿调过的赭石橙（浅 #C85A2B / 深 #E8794F，比原始 brand
-    /// #D97757 更沉、浅底对比更好）；其它 provider 退回各自 brand。
-    private var accent: Color {
-        if providerId == "claude-code" {
-            return scheme == .dark ? Color(hex: "#E8794F") : Color(hex: "#C85A2B")
-        }
-        // Codex：品牌绿按设计稿调过深浅两档（浅 #0C8163 加深保小字对比 / 深 #34BE95 提亮），
-        // 非原始 brand #10A37F（小字对比不足）。
-        if providerId == "codex" {
-            return scheme == .dark ? Color(hex: "#34BE95") : Color(hex: "#0C8163")
-        }
-        // OpenCode：琥珀压暗双档（浅 #B45309 加深保白字对比 / 深保持 brand #F59E0B），
-        // 非浅色也用原始 brand #F59E0B——浅底上选中 pill 白字对比只有 ~2.2:1 过亮。
-        // （v0.3.16 验收试过官方黑灰系,深色下发灰白,弃）
-        if providerId == "opencode" {
-            return scheme == .dark ? Color(hex: "#F59E0B") : Color(hex: "#B45309")
-        }
-        return brand
-    }
+    /// 强调色：一律走声明表的深浅两档（原始品牌色小字对比普遍不足，见 `ProviderDetailSpec`）。
+    private var accent: Color { spec.accent(scheme) }
     private var accentBg: Color { accent.opacity(scheme == .dark ? 0.15 : 0.095) }
+    /// 实心 accent 之上的文字色（按亮度自动选深/白）。Cursor 的银灰 accent 配白字会糊。
+    private var onAccent: Color { spec.onAccent(scheme) }
     private var greenBg: Color { pal.green.opacity(scheme == .dark ? 0.13 : 0.095) }
     /// 中性 segmented 容器底（周期切换器 + 用量/时间 共用）——中性灰避免 accentBg tint 在系统灰底上过亮。
     private var segBg: Color { Color.primary.opacity(scheme == .dark ? 0.08 : 0.06) }
@@ -144,7 +135,7 @@ struct ProviderDetailView: View {
                     Button(action: { viewModel.changeWindowInDetail(win) }) {
                         Text(win.tabLabel)
                             .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundStyle(win == sel ? Color.white : pal.text2)
+                            .foregroundStyle(win == sel ? onAccent : pal.text2)
                             .padding(.horizontal, 8).padding(.vertical, 2)
                             .background(RoundedRectangle(cornerRadius: 4).fill(win == sel ? accent : Color.clear))
                             .contentShape(Rectangle())
@@ -173,26 +164,23 @@ struct ProviderDetailView: View {
 
     // MARK: - 主体
 
+    /// 照 `spec.metricRows` 渲染，不再按 provider 分叉（原先是 codexMetricGrid /
+    /// openCodeMetricGrid / metricGrid 三个近乎重复的函数，加 7 个 provider 会变成 10 个）。
     private func detailBody(_ d: ProviderDetail) -> some View {
         VStack(alignment: .leading, spacing: 13) {
             hero(d)
-            // Codex 四维走「父块 + 子级」布局（输入⊃缓存输入、输出⊃思考）；
-            // OpenCode 按其原生五维拆（净输入/缓存读/缓存写 + 净输出/思考）；其余走 Claude 2×2 图标格。
-            if providerId == "codex" {
-                codexMetricGrid(d)
-            } else if providerId == "opencode" {
-                openCodeMetricGrid(d)
-            } else {
-                metricGrid(d)
-            }
-            if d.sourceCount >= 2 {
+            metricGrid(d)
+            if spec.hasSources, d.sourceCount >= 2 {
                 hairline
                 sourcesSection(d)
             }
             hairline
             modelsSection(d)
-            hairline
-            sessionsSection(d)
+            // Cursor 无会话维度（本地 mirror 无 conversationId）→ 整块缺席
+            if spec.hasSessions {
+                hairline
+                sessionsSection(d)
+            }
         }
     }
 
@@ -217,98 +205,59 @@ struct ProviderDetailView: View {
         }
     }
 
-    /// 缓存命中率：Claude = cached/total（与主行一致）；
-    /// Codex = 缓存命中 / 输入（cached/(净输入+cached)，即 prompt cache 命中率，语义更贴切）。
-    private func ringRate(_ t: TokenBreakdown) -> Double {
-        if providerId == "codex" {
-            let fullInput = t.input + t.cacheRead
-            return fullInput > 0 ? Double(t.cacheRead) / Double(fullInput) : 0
-        }
-        return t.hitRate
-    }
+    /// 缓存命中率口径由声明表给（`.ofTotal` Claude 系 / `.ofInput` Codex 系）。
+    private func ringRate(_ t: TokenBreakdown) -> Double { spec.ring.rate(t) }
 
-    /// Hero 副行金额段：当前可展开 provider 统一按「≈ $X 等效」展示。
+    /// Hero 副行金额段。三档各自的措辞。
     private func heroCostLabel(_ c: Double) -> String {
-        usesEquivalentCost ? "≈ \(fmtDollar(c)) 等效" : fmtDollar(c)
+        switch spec.costUnit {
+        case .equivalentUSD:
+            return "≈ \(fmtDollar(c)) 等效"
+        case .credits:
+            // 数据自带的内部积分（WorkBuddy），不查价目表
+            let n = c >= 100 ? String(format: "%.0f", c)
+                  : c >= 1  ? String(format: "%.1f", c)
+                            : String(format: "%.2f", c)
+            return "≈ \(n) Credits"
+        case .unavailable:
+            // 模型名被厂商打码（qmodel），价目表永远查不到；本地也没有 credit
+            return "无价目"
+        }
     }
 
-    // MARK: 2×2 图标指标格
+    // MARK: 指标区（照 spec.metricRows 渲染，provider 只声明块清单）
 
+    /// 三种既有形态——Claude 独立格 ×4 / Codex 父块 ×2 / OpenCode 独立格 ×3 + 父块 ×1——
+    /// 现在全部由**同一份清单**表达，视觉与重构前逐像素一致（这是本次抽象的验收标准）。
+    /// 单价逐模型走 `UnifiedPricing` 跨厂商路由，算法见 `MetricKind.cost`。
     private func metricGrid(_ d: ProviderDetail) -> some View {
-        let t = d.tokens
-        // 单价走 UnifiedPricing 跨厂商路由（claude 系结果与原 ClaudePricing 直算一致；
-        // OpenCode 的 gpt 系走 OpenAI 价，不再被错按 Claude 价折算）
-        let inC = d.models.reduce(0.0) { $0 + Double($1.tokens.input) * UnifiedPricing.inputRate(for: $1.modelId) }
-        let outC = d.models.reduce(0.0) { $0 + Double($1.tokens.output) * UnifiedPricing.outputRate(for: $1.modelId) }
-        let crC = d.models.reduce(0.0) { $0 + Double($1.tokens.cacheRead) * UnifiedPricing.cacheReadRate(for: $1.modelId) }
-        let cwC = d.models.reduce(0.0) { $0 + Double($1.tokens.cacheCreate5m) * UnifiedPricing.cacheWrite5mRate(for: $1.modelId) + Double($1.tokens.cacheCreate1h) * UnifiedPricing.cacheWrite1hRate(for: $1.modelId) }
-        return VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                MetricTile(icon: "arrow.down", label: "净输入 (input)", value: fmtTok(t.input), cost: fmtCost(inC), accent: accent, accentBg: accentBg, pal: pal)
-                MetricTile(icon: "arrow.up", label: "输出 (output)", value: fmtTok(t.output), cost: fmtCost(outC), accent: accent, accentBg: accentBg, pal: pal)
-            }
-            HStack(spacing: 10) {
-                MetricTile(icon: "bolt.fill", label: "缓存读 (cache_read)", value: fmtTok(t.cacheRead), cost: fmtCost(crC), accent: accent, accentBg: accentBg, pal: pal)
-                MetricTile(icon: "cylinder.split.1x2.fill", label: "缓存写 (cache_creation)", value: fmtTok(t.cacheCreate), cost: fmtCost(cwC), accent: accent, accentBg: accentBg, pal: pal)
+        VStack(spacing: 10) {
+            ForEach(Array(spec.metricRows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 10) {
+                    ForEach(Array(row.enumerated()), id: \.offset) { _, block in
+                        metricBlockView(block, d)
+                    }
+                }
+                // 行内可能混高（独立格 + 父块并排），fixedSize 让矮格撑满行高、顶部对齐
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    // MARK: OpenCode 指标区（净输入/缓存读/缓存写 独立格 + 输出父块⊃思考子项）
-
-    /// OpenCode 是混合口径：输入侧三项（净输入 / 缓存读 / 缓存写）是并列独立计费项
-    /// （Anthropic 式）→ Claude 式独立格；思考是输出的子集（Codex 式）→ 输出用父块挂
-    /// 「思考」子级行。网格位置沿用 Claude 2×2（输入左上 / 输出右上 / 缓存下排）。
-    /// 金额逐模型走 `UnifiedPricing`（跨厂商）。
-    private func openCodeMetricGrid(_ d: ProviderDetail) -> some View {
-        let t = d.tokens
-        let inC = d.models.reduce(0.0) { $0 + Double($1.tokens.input) * UnifiedPricing.inputRate(for: $1.modelId) }
-        let crC = d.models.reduce(0.0) { $0 + Double($1.tokens.cacheRead) * UnifiedPricing.cacheReadRate(for: $1.modelId) }
-        let cwC = d.models.reduce(0.0) { $0 + Double($1.tokens.cacheCreate5m) * UnifiedPricing.cacheWrite5mRate(for: $1.modelId) + Double($1.tokens.cacheCreate1h) * UnifiedPricing.cacheWrite1hRate(for: $1.modelId) }
-        let outC = d.models.reduce(0.0) { $0 + Double($1.tokens.output) * UnifiedPricing.outputRate(for: $1.modelId) }
-        let reasonC = d.models.reduce(0.0) { $0 + Double($1.tokens.reasoning) * UnifiedPricing.outputRate(for: $1.modelId) }
-        return VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                MetricTile(icon: "arrow.down", label: "净输入 (input)", value: fmtTok(t.input), cost: fmtCost(inC), accent: accent, accentBg: accentBg, pal: pal)
-                CodexParentTile(
-                    icon: "arrow.up", label: "输出 (output)", value: fmtTok(t.output), cost: fmtCost(outC),
-                    childLabel: "思考 (reasoning)", childValue: fmtTok(t.reasoning), childCost: fmtCost(reasonC),
-                    accent: accent, accentBg: accentBg, pal: pal)
-            }
-            // 行内混高（左独立格 / 右父块），fixedSize 让左格撑满行高对齐
-            .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 10) {
-                MetricTile(icon: "bolt.fill", label: "缓存读 (cache_read)", value: fmtTok(t.cacheRead), cost: fmtCost(crC), accent: accent, accentBg: accentBg, pal: pal)
-                MetricTile(icon: "cylinder.split.1x2.fill", label: "缓存写 (cache_creation)", value: fmtTok(t.cacheCreate), cost: fmtCost(cwC), accent: accent, accentBg: accentBg, pal: pal)
-            }
-        }
-    }
-
-    // MARK: Codex 指标区（输入/输出 父块 + 缓存输入/思考 子级）
-
-    /// Codex 四维口径下的指标区：两个父块并排（输入 / 输出），各自挂一条子级行
-    /// （缓存输入 ⊂ 输入、思考 ⊂ 输出），对齐设计稿 D 布局。金额走 `UnifiedPricing`。
-    private func codexMetricGrid(_ d: ProviderDetail) -> some View {
-        let t = d.tokens
-        // 逐模型用各自单价累加，避免混合模型时用单一价失真。
-        let inputC = d.models.reduce(0.0) {
-            $0 + Double($1.tokens.input) * UnifiedPricing.inputRate(for: $1.modelId)
-               + Double($1.tokens.cacheRead) * UnifiedPricing.cacheReadRate(for: $1.modelId)
-        }
-        let cachedC = d.models.reduce(0.0) {
-            $0 + Double($1.tokens.cacheRead) * UnifiedPricing.cacheReadRate(for: $1.modelId)
-        }
-        let outputC = d.models.reduce(0.0) { $0 + Double($1.tokens.output) * UnifiedPricing.outputRate(for: $1.modelId) }
-        let reasoningC = d.models.reduce(0.0) { $0 + Double($1.tokens.reasoning) * UnifiedPricing.outputRate(for: $1.modelId) }
-        let fullInput = t.input + t.cacheRead   // 输入(含缓存) = 净输入 + 缓存命中
-        return HStack(spacing: 10) {
-            CodexParentTile(
-                icon: "arrow.down", label: "输入 (input)", value: fmtTok(fullInput), cost: fmtCost(inputC),
-                childLabel: "缓存输入 (cached)", childValue: fmtTok(t.cacheRead), childCost: fmtCost(cachedC),
+    @ViewBuilder
+    private func metricBlockView(_ block: MetricBlock, _ d: ProviderDetail) -> some View {
+        switch block {
+        case .tile(let kind):
+            MetricTile(
+                icon: kind.icon, label: kind.tileLabel,
+                value: fmtTok(kind.value(d.tokens)), cost: metricCost(kind.cost(d.models)),
                 accent: accent, accentBg: accentBg, pal: pal)
-            CodexParentTile(
-                icon: "arrow.up", label: "输出 (output)", value: fmtTok(t.output), cost: fmtCost(outputC),
-                childLabel: "思考 (reasoning)", childValue: fmtTok(t.reasoning), childCost: fmtCost(reasoningC),
+        case .parent(let kind, let child):
+            ParentTile(
+                icon: kind.icon, label: kind.tileLabel,
+                value: fmtTok(kind.value(d.tokens)), cost: metricCost(kind.cost(d.models)),
+                childLabel: child.childLabel,
+                childValue: fmtTok(child.value(d.tokens)), childCost: metricCost(child.cost(d.models)),
                 accent: accent, accentBg: accentBg, pal: pal)
         }
     }
@@ -467,6 +416,12 @@ struct ProviderDetailView: View {
                 .font(.system(size: 10.5, design: .monospaced))
                 .foregroundStyle(pal.text2)
                 .frame(width: 56, alignment: .trailing)
+            // v0.3.22 新增：会话也显示缓存命中率。数据现成（tokens 就是 5 列拆分），
+            // 一眼看出哪个会话吃缓存、哪个在烧新 token。
+            // ⚠️ 用 `tokens.hitRate`（cached/total）而非 `ringRate` —— 与紧邻的「按模型」行
+            // （`m.hitRate`）**同口径**，避免同一页两个药丸算法不同。
+            // （Codex 的 Hero 环用的是另一套 cached/输入，是重构前就有的口径分歧，本版不动。）
+            hitPill(s.tokens.hitRate)
             Text(fmtCost(s.cost))
                 .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(pal.text)
@@ -487,7 +442,7 @@ struct ProviderDetailView: View {
         Button(action: action) {
             Text(label)
                 .font(.system(size: 9.5, weight: .semibold))
-                .foregroundStyle(active ? Color.white : pal.text2)
+                .foregroundStyle(active ? onAccent : pal.text2)
                 .padding(.horizontal, 8).padding(.vertical, 2)
                 .background(RoundedRectangle(cornerRadius: 4).fill(active ? accent : Color.clear))
                 .contentShape(Rectangle())
@@ -512,15 +467,34 @@ struct ProviderDetailView: View {
         return "\(n)"
     }
 
+    /// 金额三档（`CostUnit`）：
+    /// - `.equivalentUSD` → `≈$12.3`（token × 价目表单价）
+    /// - `.credits`       → `6.78 Cr`（数据自带的信用点；**不查价目表**）
+    /// - `.unavailable`   → `—`（模型名被厂商打码 + 本地无 credit，如 Qoder 全家桶）
     private func fmtCost(_ c: Double) -> String {
-        // 当前详情页统一展示等效 API 费用；保留兜底分支供未来其它 provider 复用
-        let p = usesEquivalentCost ? "≈$" : "$"
-        if c >= 10 { return String(format: "\(p)%.0f", c) }
-        if c >= 1 { return String(format: "\(p)%.1f", c) }
-        if c >= 0.01 { return String(format: "\(p)%.2f", c) }
-        // <1 美分给 3 位小数——有量却显示 "0.00" 像 bug（如 7.7K 缓存读 = $0.004）
-        if c > 0 { return String(format: "\(p)%.3f", c) }
-        return "\(p)0"
+        switch spec.costUnit {
+        case .unavailable:
+            return "—"
+        case .credits:
+            // credit 是整条消息的标量，**拆不到四列** → 指标区格子里不显示（见 metricCost）
+            if c >= 100 { return String(format: "%.0f Cr", c) }
+            if c >= 1 { return String(format: "%.1f Cr", c) }
+            return c > 0 ? String(format: "%.2f Cr", c) : "0 Cr"
+        case .equivalentUSD:
+            if c >= 10 { return String(format: "≈$%.0f", c) }
+            if c >= 1 { return String(format: "≈$%.1f", c) }
+            if c >= 0.01 { return String(format: "≈$%.2f", c) }
+            // <1 美分给 3 位小数——有量却显示 "0.00" 像 bug（如 7.7K 缓存读 = $0.004）
+            if c > 0 { return String(format: "≈$%.3f", c) }
+            return "≈$0"
+        }
+    }
+
+    /// 指标区格子里的金额。`.credits` 档下**必须是 `—`**：
+    /// credit 是整条消息的一个标量，**拆不到「净输入/输出/缓存读/缓存写」四列**
+    /// （等效美元能拆，是因为每列各有单价）。硬按四列摊会是编造。
+    private func metricCost(_ c: Double) -> String {
+        spec.costUnit == .credits ? "—" : fmtCost(c)
     }
 
     /// 纯 $ 金额（无 ≈ 前缀），Hero 副行金额段自带 ≈ 时用
@@ -633,11 +607,13 @@ private struct MetricTile: View {
     }
 }
 
-// MARK: - Codex 父块（Top + 分隔线 + └ 子级行）
+// MARK: - 指标父块（Top + 分隔线 + └ 子级行）
 
-/// Codex 指标父块：顶部（图标 + 标签 + 数值 + 金额，同 `MetricTile`）+ 分隔线 + 缩进子级行。
+/// 「父块 ⊃ 子级」指标块：顶部（图标 + 标签 + 数值 + 金额，同 `MetricTile`）+ 分隔线 + 缩进子级行。
 /// 子级行字号收小一档（示从属），窄列下 label 截断不换行。对齐设计稿 D 布局。
-private struct CodexParentTile: View {
+/// 用于表达**子集关系**：Codex 的 输入 ⊃ 缓存输入、输出 ⊃ 思考；OpenCode / WorkBuddy 的 输出 ⊃ 思考。
+/// （原名 `CodexParentTile`，v0.3.22 抽象后已非 Codex 专属，改名 `ParentTile`。）
+private struct ParentTile: View {
     let icon: String
     let label: String        // 输入 (input)
     let value: String        // 33.0M

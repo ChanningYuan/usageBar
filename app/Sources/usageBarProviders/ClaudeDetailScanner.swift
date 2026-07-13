@@ -45,13 +45,26 @@ public actor ClaudeDetailScanner {
 
     // MARK: - 对外入口
 
-    /// 扫描并聚合 Claude Code 在某窗口的明细。
-    public func detail(providerId: String, window: TimeWindow,
+    /// 扫描并聚合某个 Claude 同构 transcript 源在某窗口的明细。
+    ///
+    /// ⚠️ 文件源必须由调用方传入（v0.3.22 起）。此前这里的路径是**写死**的 `~/.claude/projects`、
+    /// 完全无视传进来的 `providerId` —— Cowork 等同构 provider 一旦放开 drill-in，就会把
+    /// **Claude Code 的数据当成自己的显示**。当时只是被 `UsageView` 的手写白名单恰好挡住，bug 未暴露。
+    /// 现在文件源随 provider 声明表（`ProviderDetailSpec.scanner`）下发，同源不同根，互不串。
+    ///
+    /// `includeHidden` / `requirePath` / `excludePath` 必须与对应 provider 的**主行扫描口径逐字一致**，
+    /// 否则详情页的分项之和会对不上列表主行。
+    public func detail(providerId: String, root: URL,
+                       includeHidden: Bool = false,
+                       requirePath: String? = nil,
+                       excludePath: String? = nil,
+                       window: TimeWindow,
                        weekStartMonday: Bool = true, now: Date = Date()) async -> ProviderDetail {
         var units: [Unit] = []
         var metas: [String: SessionMeta] = [:]
 
-        for url in allFiles() {
+        for url in allFiles(root: root, includeHidden: includeHidden,
+                            requirePath: requirePath, excludePath: excludePath) {
             let path = url.path
             guard let meta = FileMetadata.read(at: path) else { continue }
 
@@ -87,11 +100,16 @@ public actor ClaudeDetailScanner {
 
     // MARK: - 文件枚举（与 ClaudeJsonlScanner 同源）
 
-    private func allFiles() -> [URL] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let dir = home.appendingPathComponent(".claude/projects")
-        guard FileManager.default.fileExists(atPath: dir.path) else { return [] }
-        return JSONLReader.findFiles(under: dir) { $0.pathExtension == "jsonl" }
+    /// 列出该源下的所有 transcript。源由调用方给（见 `detail(providerId:root:...)` 的说明）。
+    private func allFiles(root: URL, includeHidden: Bool,
+                          requirePath: String?, excludePath: String?) -> [URL] {
+        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
+        return JSONLReader.findFiles(under: root, includeHidden: includeHidden) { url in
+            guard url.pathExtension == "jsonl" else { return false }
+            if let req = requirePath, !url.path.contains(req) { return false }
+            if let exc = excludePath, url.path.contains(exc) { return false }
+            return true
+        }
     }
 
     // MARK: - 单文件解析（窗口无关）
