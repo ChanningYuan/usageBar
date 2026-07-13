@@ -5,25 +5,26 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.20</h3>
-<p><b>修复</b></p>
-<ul>
-<li><b>明细页完整显示日志记录的模型 ID</b>：通过 ccx 等方式让 Claude Code 使用跨厂商模型时，日志会如实记录 `gpt-5.6-sol`，旧版却套用 Claude 友好名格式化，最终只显示成 `Gpt`。本版「按模型」列表直接展示日志原始 `modelId`，日期后缀、服务档位和代理模型名均不再丢失。</li>
-</ul>
+<h3>usageBar 0.3.21</h3>
 <p><b>变化</b></p>
 <ul>
-<li>Claude Code、Codex、OpenCode 的模型明细统一改为准确优先的原始 ID；等效花费仍独立走远程统一价目表，显示改动不影响计价。</li>
+<li><b>Claude Code 合并为一行</b>：原「Claude Code (订阅)」「Claude Code (API)」两行合并成单个「Claude Code」。旧的订阅/API 二分并不成立——官方 API-key 直连和订阅在日志里长得一模一样，而「API」那行实际只装得下 Vertex / Bedrock；通过 ccx 等中转的流量还会被错贴成「订阅」。合并后主列表就是这份日志的真实总量，token 一个不少。</li>
+<li><b>明细页新增「按来源」</b>：在 Claude Code 明细页按「官方直连 (Anthropic)」和「中转/代理」拆分 token 与等效花费，回答「为什么我的 Claude Code 里有 gpt 模型」。仅当两类都有消耗时才出现，纯官方用户看不到这个区块。</li>
+</ul>
+<p><b>修复</b></p>
+<ul>
+<li><b>价格全为 $0</b>：部分用户升级后所有金额显示 $0。根因是价目表拉取被网络或安全软件拦截，而本地又没有任何价目表可用。本版三处加固：安装包内置一份价目快照兜底（构建时自动从线上表生成）；本地无缓存时不再发送可能导致服务器返回「无需更新」空响应的校验头；价目表超过 7 天未更新时在偏好设置中提示。token 统计始终不受价目表影响。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.20</title>
-            <pubDate>Mon, 13 Jul 2026 11:59:37 +0800</pubDate>
-            <sparkle:version>0.3.20</sparkle:version>
-            <sparkle:shortVersionString>0.3.20</sparkle:shortVersionString>
+            <title>0.3.21</title>
+            <pubDate>Mon, 13 Jul 2026 17:42:25 +0800</pubDate>
+            <sparkle:version>0.3.21</sparkle:version>
+            <sparkle:shortVersionString>0.3.21</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/download/v0.3.20/usageBar.zip" length="1986330" type="application/octet-stream" sparkle:edSignature="0t08cCDIjQRurJR+qEabknMFvXA4crsnk9OuAsoQ/FVbJFvtBCLGD2B2nRYcTszrhdl8TwpLplp9yaQqn9BfAQ=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/download/v0.3.21/usageBar.zip" length="2055775" type="application/octet-stream" sparkle:edSignature="ktG/Y+sFyoASizCNNlWtLxaHQVPw/75wV5Qjlw2x/vR/OH6YNVgKhIV6pkc/w0SBP9VzPZB44tAjg37NanGQDg=="/>
         </item>
     </channel>
 </rss>
