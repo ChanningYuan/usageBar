@@ -9,10 +9,31 @@ import Foundation
 /// 查不到的真长尾按 $0 + 「无价目」引导。
 ///
 /// 更新策略：每日一次 ETag 条件拉取（`refreshIfNeeded`，24h 节流，304 零流量），
-/// 缓存在 Application Support；**本地无缓存（首启/被手删）时无视节流立即拉**，
-/// 失败不记检查时间戳、下轮刷新循环自动重试，$0 窗口在联网时秒级自愈。
+/// 缓存在 Application Support；**磁盘无缓存（首启/被手删）时无视节流立即拉**。
+///
+/// 三层价源（2026-07-13 v0.3.21 加固，驱动案例见 `_notes/docs/0713-ClaudeCode合并与来源层/`）：
+///   1. 磁盘缓存（Application Support/usageBar/pricing.json）—— 最新，永远优先
+///   2. **安装包内置快照**（build-app.sh 构建时从线上表 curl，随 app 分发）—— 拉取被拦时兜底，
+///      新鲜度 = 发版日；只在磁盘缓存不存在时装载，且**不影响强拉判定**（见 `hasDiskCache`）
+///   3. 都没有 → $0 + 「无价目」引导
+///
+/// ⚠️ ETag 与「是否强拉」都以**磁盘缓存是否存在**为准，不看内存里有没有表：
+/// 快照装了表但磁盘仍空，此时必须继续无条件强拉，否则快照会把首启拉取顶掉、价格永远停在发版日。
 public final class RemotePricing: @unchecked Sendable {
     public static let shared = RemotePricing()
+
+    /// 表龄超过它就在设置页提示「价格表未更新」（拉取失败会静默退化成过期表，必须可见化）
+    public static let staleAfter: TimeInterval = 7 * 24 * 3600
+
+    /// 价目表新鲜度（设置页提示用）
+    public struct Freshness: Sendable {
+        /// 磁盘缓存最后一次成功落盘的时间；nil = 从未成功拉到过
+        public let lastUpdated: Date?
+        /// 正在用安装包内置快照（= app 从未成功拉到线上表，多半被网络/安全软件拦了）
+        public let usingSnapshot: Bool
+        /// 表龄 > 7 天，或压根没成功拉到过 → 设置页出提示
+        public let isStale: Bool
+    }
 
     /// 单价（$/1M token）。cache_write 按 Anthropic 标准即 5m 档口径。
     public struct Rate: Sendable {
@@ -27,6 +48,8 @@ public final class RemotePricing: @unchecked Sendable {
     /// 扁平表（modelID → Rate）：同名模型多渠道时按 `canonicalProviders` 优先序取值
     private var flat: [String: Rate] = [:]
     private var diskLoaded = false
+    /// 当前内存里的表来自安装包内置快照（而非磁盘缓存）
+    private var usingSnapshot = false
 
     /// 同名模型出现在多个渠道（如 openrouter 转售）时，优先采用官方渠道的价格
     private static let canonicalProviders = [
@@ -59,15 +82,21 @@ public final class RemotePricing: @unchecked Sendable {
     // MARK: - 拉取
 
     /// 每日一次条件拉取（内部 24h 节流，随主刷新循环调用即可，非到期直接返回）。
-    /// 例外：本地一张表都没有（首启/缓存被手删）时无视节流立即拉——远程表是唯一价源，
-    /// 没表就是全员 $0，早一轮拉到早一轮恢复。
+    /// 例外：**磁盘上没有缓存**（首启 / 被手删 / 历次拉取全被拦）时无视节流立即拉——
+    /// 远程表是唯一的「活」价源，没落盘就一直强拉，直到成功。
+    ///
+    /// ⚠️ 判定看**磁盘**不看内存：内置快照会把内存表填满，若还用「内存有没有表」判定，
+    /// 装了快照的机器就再也不强拉了，价格永远停在发版日。
     public func refreshIfNeeded() async {
         let last = UserDefaults.standard.double(forKey: Self.checkIntervalKey)
         let throttled = Date().timeIntervalSince1970 - last < Self.checkInterval
-        guard !throttled || !hasAnyData() else { return }
+        let hasCache = hasDiskCache
+        guard !throttled || !hasCache else { return }
 
         var req = URLRequest(url: Self.feedURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
-        if let etag = UserDefaults.standard.string(forKey: Self.etagKey) {
+        // 加固①：只有磁盘缓存在时才带 ETag。缓存没了（或从未落盘）却残留 ETag 的话，
+        // 服务器回 304 空响应 → 本地永远装不上表 → 全员 $0 死锁。
+        if hasCache, let etag = UserDefaults.standard.string(forKey: Self.etagKey) {
             req.setValue(etag, forHTTPHeaderField: "If-None-Match")
         }
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
@@ -80,19 +109,46 @@ public final class RemotePricing: @unchecked Sendable {
         // 结构校验通过才落盘替换（防服务端残表把本地好缓存冲掉）
         guard let parsed = Self.parse(data), parsed.count >= 30 else { return }
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
-        try? data.write(to: cacheFile, options: .atomic)
-        if let etag = http.value(forHTTPHeaderField: "ETag") {
+        // 加固②：写盘成功才存 ETag。写失败却存了 ETag → 下轮带 ETag 换回 304 空响应、
+        // 磁盘依然没表 → 同一个死锁。内存表照装，本次会话仍有正确价。
+        let wrote = (try? data.write(to: cacheFile, options: .atomic)) != nil
+        if wrote, let etag = http.value(forHTTPHeaderField: "ETag") {
             UserDefaults.standard.set(etag, forKey: Self.etagKey)
         }
         install(parsed)
     }
 
-    /// 是否已装载任何价目（含尝试读磁盘缓存）。同步方法收拢 NSLock（async 上下文不能直接调）。
-    private func hasAnyData() -> Bool {
+    /// 磁盘缓存是否存在。**内置快照不算**——ETag 与强拉判定都以它为准。
+    private var hasDiskCache: Bool {
+        FileManager.default.fileExists(atPath: cacheFile.path)
+    }
+
+    /// 加固④：装载安装包内置快照兜底（build-app.sh 构建时从线上表 curl 生成，随 app 分发）。
+    ///
+    /// 只在**磁盘缓存不存在**时装（磁盘缓存更新、永远优先）。快照不写盘、不产生 ETag，
+    /// 所以 `refreshIfNeeded` 仍会按「无磁盘缓存」无条件强拉——快照只负责消灭「全员 $0」，
+    /// 不阻断价格更新。data 走 autoclosure：磁盘缓存在时压根不会去读那 330KB。
+    @discardableResult
+    public func installBundledSnapshotIfNeeded(_ data: @autoclosure () -> Data?) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         loadFromDiskLocked()
-        return !flat.isEmpty
+        guard flat.isEmpty else { return false }          // 已有磁盘缓存 → 快照不插手
+        guard let d = data(), let parsed = Self.parse(d), parsed.count >= 30 else { return false }
+        apply(parsed)
+        usingSnapshot = true
+        return true
+    }
+
+    /// 加固③：价目表新鲜度（设置页提示用）。表龄按磁盘缓存的 mtime 算。
+    public func freshness() -> Freshness {
+        lock.lock()
+        defer { lock.unlock() }
+        loadFromDiskLocked()
+        let mtime = (try? FileManager.default.attributesOfItem(atPath: cacheFile.path))?[.modificationDate] as? Date
+        // 从未成功落盘（nil）也算过期——这正是「拉取被拦、一直吃快照」的情形，必须提示
+        let stale = mtime.map { Date().timeIntervalSince($0) > Self.staleAfter } ?? true
+        return Freshness(lastUpdated: mtime, usingSnapshot: usingSnapshot, isStale: stale)
     }
 
     /// 同步装表（NSLock 不能在 async 上下文直接调，收进同步方法）
@@ -100,6 +156,7 @@ public final class RemotePricing: @unchecked Sendable {
         lock.lock()
         apply(table)
         diskLoaded = true
+        usingSnapshot = false   // 已经是线上表了，不再是快照
         lock.unlock()
     }
 

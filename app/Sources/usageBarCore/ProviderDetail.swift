@@ -108,6 +108,22 @@ public struct ModelDetailRecord: Sendable, Equatable, Identifiable {
     }
 }
 
+/// 分来源明细行（Claude Code 详情页「按来源」列表一行）。
+public struct SourceDetailRecord: Sendable, Equatable, Identifiable {
+    public let source: ClaudeSource
+    public let tokens: TokenBreakdown
+    public let cost: Double
+
+    public var id: String { source.rawValue }
+    public var hitRate: Double { tokens.hitRate }
+
+    public init(source: ClaudeSource, tokens: TokenBreakdown, cost: Double) {
+        self.source = source
+        self.tokens = tokens
+        self.cost = cost
+    }
+}
+
 /// 某 provider 在某窗口的完整明细（drill-in 详情页的唯一数据源）。
 public struct ProviderDetail: Sendable, Equatable {
     public let providerId: String
@@ -117,21 +133,26 @@ public struct ProviderDetail: Sendable, Equatable {
     public let tokens: TokenBreakdown
     /// ≈$ 等效 API 花费合计
     public let cost: Double
+    /// 分来源（固定顺序：官方直连 → 中转/代理；无流量来源不输出）
+    public let sources: [SourceDetailRecord]
     /// 分模型（token 降序），已过滤 `<synthetic>`
     public let models: [ModelDetailRecord]
     /// 分会话（默认 token 降序；UI 可切时间序）
     public let sessions: [SessionDetailRecord]
 
     public var hitRate: Double { tokens.hitRate }
+    public var sourceCount: Int { sources.count }
     public var modelCount: Int { models.count }
     public var sessionCount: Int { sessions.count }
 
     public init(providerId: String, windowId: String, tokens: TokenBreakdown,
-                cost: Double, models: [ModelDetailRecord], sessions: [SessionDetailRecord]) {
+                cost: Double, sources: [SourceDetailRecord] = [],
+                models: [ModelDetailRecord], sessions: [SessionDetailRecord]) {
         self.providerId = providerId
         self.windowId = windowId
         self.tokens = tokens
         self.cost = cost
+        self.sources = sources
         self.models = models
         self.sessions = sessions
     }

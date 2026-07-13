@@ -27,11 +27,23 @@ final class ProviderVisibilitySettings: ObservableObject {
     private enum Keys {
         static let disabledProviders = "usagebar.disabledProviders.v1"
         static let didAutoConfigure = "usagebar.didAutoConfigureVisibility.v1"
+        static let didMigrateClaudeMerge = "usagebar.didMigrateClaudeMerge.v1"
     }
 
     private init() {
-        let pd = UserDefaults.standard.array(forKey: Keys.disabledProviders) as? [String] ?? []
-        self.disabledProviders = Set(pd)
+        let defaults = UserDefaults.standard
+        let pd = defaults.array(forKey: Keys.disabledProviders) as? [String] ?? []
+        var disabled = Set(pd)
+
+        if !defaults.bool(forKey: Keys.didMigrateClaudeMerge) {
+            if disabled.contains("claude-sub") && disabled.contains("claude-api") {
+                disabled.insert("claude-code")
+                defaults.set(Array(disabled), forKey: Keys.disabledProviders)
+            }
+            defaults.set(true, forKey: Keys.didMigrateClaudeMerge)
+        }
+
+        self.disabledProviders = disabled
     }
 
     // MARK: - 查询

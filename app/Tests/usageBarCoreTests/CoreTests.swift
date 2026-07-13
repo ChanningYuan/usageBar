@@ -3,7 +3,7 @@ import XCTest
 
 final class StatRecordTests: XCTestCase {
     func testStatRecordCodable() throws {
-        let r = StatRecord(provider: "claude-sub", time: "today", token: 12345)
+        let r = StatRecord(provider: "claude-code", time: "today", token: 12345)
         let data = try JSONEncoder().encode(r)
         let decoded = try JSONDecoder().decode(StatRecord.self, from: data)
         XCTAssertEqual(r, decoded)
@@ -11,26 +11,26 @@ final class StatRecordTests: XCTestCase {
 
     func testDailyAggregator() {
         let dailys = [
-            FileDailyRecord(provider: "claude-sub", date: "2026-05-20", token: 100),
-            FileDailyRecord(provider: "claude-sub", date: "2026-05-19", token: 200),
-            FileDailyRecord(provider: "claude-sub", date: "2026-05-01", token: 999),
-            FileDailyRecord(provider: "claude-api", date: "2026-05-20", token: 50),
+            FileDailyRecord(provider: "claude-code", date: "2026-05-20", token: 100),
+            FileDailyRecord(provider: "claude-code", date: "2026-05-19", token: 200),
+            FileDailyRecord(provider: "claude-code", date: "2026-05-01", token: 999),
+            FileDailyRecord(provider: "cowork", date: "2026-05-20", token: 50),
         ]
         // 用 2026-05-20 为 now 测试
         let now = DailyAggregator.shanghaiFmtToDate("2026-05-20")
         let result = DailyAggregator.aggregate(
             allDailyRecords: dailys,
-            providerIds: ["claude-sub", "claude-api"],
+            providerIds: ["claude-code", "cowork"],
             now: now
         )
-        let subToday = result.first { $0.provider == "claude-sub" && $0.time == "today" }
-        XCTAssertEqual(subToday?.token, 100)
+        let ccToday = result.first { $0.provider == "claude-code" && $0.time == "today" }
+        XCTAssertEqual(ccToday?.token, 100)
 
-        let subAll = result.first { $0.provider == "claude-sub" && $0.time == "all" }
-        XCTAssertEqual(subAll?.token, 100 + 200 + 999)
+        let ccAll = result.first { $0.provider == "claude-code" && $0.time == "all" }
+        XCTAssertEqual(ccAll?.token, 100 + 200 + 999)
 
-        let apiToday = result.first { $0.provider == "claude-api" && $0.time == "today" }
-        XCTAssertEqual(apiToday?.token, 50)
+        let coworkToday = result.first { $0.provider == "cowork" && $0.time == "today" }
+        XCTAssertEqual(coworkToday?.token, 50)
     }
 
     func testTimeWindowId() {

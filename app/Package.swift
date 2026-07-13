@@ -50,6 +50,9 @@ let package = Package(
             exclude: ["Info.plist"],
             resources: [
                 .process("Icons"),
+                // 内置价目快照：build-app.sh 每次构建从线上表 curl 刷新（零人工维护）。
+                // 用途：用户机器拉不到 usagebar.cn 时兜底，避免全员 $0（见 RemotePricing 加固④）。
+                .copy("pricing-snapshot.json"),
             ],
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency"),

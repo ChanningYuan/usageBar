@@ -1,64 +1,25 @@
 import Foundation
 import usageBarCore
 
-public enum ClaudeCodeVariant: Sendable, Equatable {
-    /// `message.id` 以 `msg_01` 开头(Anthropic 官方直连，OAuth/Pro/Max 订阅)
-    case subscription
-    /// `message.id` 以 `msg_vrtx_`(Vertex AI) 或 `msg_bdrk_`(Bedrock) 开头(第三方代理 / 云厂商)
-    case api
-}
-
 /// Claude Code provider（mtime 增量版）
 ///
-/// 数据源：`~/.claude/projects/*/*.jsonl`（嵌套结构）
-/// 订阅/api 共用同一份文件，按 `message.id` 前缀拆。
-///
-/// 共享 ClaudeJsonlScanner 避免 sub+api 两次扫盘。
+/// 数据源：`~/.claude/projects/*/*.jsonl`（嵌套结构）。订阅、API、云渠道和中转
+/// 都属于同一份 Claude Code 日志；主列表统一聚合，来源只在详情页拆分。
 public struct ClaudeCodeProvider: UsageProvider {
-    public let variant: ClaudeCodeVariant
+    public let id = "claude-code"
+    public let displayName = "Claude Code"
+    public let iconSymbol = "brain.head.profile"
+    public let brandColor = "#D97757"
+    public let family: String? = "claude"
 
-    public var id: String {
-        switch variant {
-        case .subscription: return "claude-sub"
-        case .api: return "claude-api"
-        }
-    }
-
-    public var displayName: String {
-        switch variant {
-        case .subscription: return "Claude Code (订阅)"
-        case .api: return "Claude Code (API)"
-        }
-    }
-
-    public var iconSymbol: String {
-        switch variant {
-        case .subscription: return "brain.head.profile"
-        case .api: return "network"
-        }
-    }
-
-    public var brandColor: String {
-        switch variant {
-        case .subscription: return "#D97757"
-        case .api: return "#6F4A8A"
-        }
-    }
-
-    /// 父级分组,Settings 把 sub/api 聚到同一 "Claude Code" Section 头下
-    public var family: String? { "claude" }
-
-    public init(variant: ClaudeCodeVariant) {
-        self.variant = variant
-    }
+    public init() {}
 
     public func fetchDailyRecords() async throws -> [FileDailyRecord] {
-        let all = await ClaudeJsonlScanner.shared.scan()
-        return all.filter { $0.provider == id }
+        await ClaudeJsonlScanner.shared.scan()
     }
 }
 
-// MARK: - 共享扫描器（避免 sub + api 两次扫同一份 jsonl）
+// MARK: - Claude Code 扫描器
 
 public actor ClaudeJsonlScanner {
     public static let shared = ClaudeJsonlScanner()
@@ -111,16 +72,9 @@ public actor ClaudeJsonlScanner {
         return allRecords
     }
 
-    /// 解析单个 jsonl 文件，按 (variant, date) 聚合 token。
-    /// 返回的 records 含 claude-sub 和 claude-api 两种 provider。
+    /// 解析单个 jsonl 文件，统一按 `claude-code` 聚合 token。
     private func parseFile(url: URL) throws -> [FileDailyRecord] {
-        // 按 message.id 前缀判断 sub / api：
-        // - msg_vrtx_ (Vertex) / msg_bdrk_ (Bedrock) → 第三方代理 → claude-api
-        // - msg_01... (Anthropic 官方直连) → OAuth/订阅 → claude-sub
-        try ClaudeTranscriptParser.parse(url: url) { messageId in
-            (messageId.hasPrefix("msg_vrtx_") || messageId.hasPrefix("msg_bdrk_"))
-                ? "claude-api" : "claude-sub"
-        }
+        try ClaudeTranscriptParser.parse(url: url) { _ in "claude-code" }
     }
 }
 
@@ -132,7 +86,7 @@ public actor ClaudeJsonlScanner {
 /// （实际只计费一次）。这里按 `message.id` 文件内去重，只计第一次出现。
 /// 实测 `message.id` 全局唯一、无跨文件重复，故文件级去重 == 全局去重，且契合按文件的 mtime 缓存。
 ///
-/// `classify`：把 `message.id` 映射到 provider id（Claude Code 按前缀分 sub/api，Cowork 恒为 "cowork"）。
+/// `classify`：把 `message.id` 映射到 provider id（Claude Code 恒为 `claude-code`，Cowork 恒为 `cowork`）。
 public enum ClaudeTranscriptParser {
     public static func parse(
         url: URL,

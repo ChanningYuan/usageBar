@@ -29,8 +29,7 @@ struct ProviderMeta {
 enum ProviderMetaLookup {
     static let map: [String: ProviderMeta] = [
         // Claude family
-        "claude-sub": .init(id: "claude-sub", displayName: "Claude Code (订阅)", brandColor: "#D97757"),
-        "claude-api": .init(id: "claude-api", displayName: "Claude Code (API)", brandColor: "#6F4A8A"),
+        "claude-code": .init(id: "claude-code", displayName: "Claude Code", brandColor: "#D97757"),
         "cowork": .init(id: "cowork", displayName: "Claude Cowork", brandColor: "#B05730"),
         // Qoder family(Qoder 自家 AI:CLI/Work/IDE,IDE 2026-05-28 接入 SharedClientCache SQLite 直读)
         "qoder-cli": .init(id: "qoder-cli", displayName: "Qoder (CLI)", brandColor: "#10A37F"),
@@ -105,6 +104,24 @@ enum BundleIconLoader {
         NSLog("[BundleIconLoader] ❌ load(name: %@, ext: %@) 全部 fallback 都 miss", name, ext)
         return nil
     }
+
+    /// 从 bundle 加载原始数据（价目快照 pricing-snapshot.json 用）。同款多层 fallback，缺失 return nil。
+    static func loadData(name: String, ext: String) -> Data? {
+        if let url = resourceBundle?.url(forResource: name, withExtension: ext),
+           let d = try? Data(contentsOf: url) {
+            return d
+        }
+        if let url = Bundle.main.url(forResource: name, withExtension: ext),
+           let d = try? Data(contentsOf: url) {
+            return d
+        }
+        if let resURL = Bundle.main.resourceURL {
+            let direct = resURL.appendingPathComponent("usageBar_usageBar.bundle/\(name).\(ext)")
+            if let d = try? Data(contentsOf: direct) { return d }
+        }
+        NSLog("[BundleIconLoader] ❌ loadData(name: %@, ext: %@) 全部 fallback 都 miss", name, ext)
+        return nil
+    }
 }
 
 // MARK: - Provider Icon（每个 provider 一个 22×22 视图）
@@ -121,7 +138,7 @@ struct ProviderIcon: View {
     var body: some View {
         // family 模式优先(claude-* / cowork / qoder-*),fall back 到原 case
         if providerId.hasPrefix("claude-") || providerId == "cowork" {
-            // Claude sub/api/cowork 沿用各自色 + claude.svg(cowork 用更深的陶土底区分订阅版)
+            // Claude Code / Cowork 沿用各自色 + claude.svg(cowork 用更深的陶土底区分)
             let bg = ProviderMetaLookup.meta(for: providerId).brandColor
             roundedBoxWithBundleImage(bg: bg, name: "claude", ext: "svg")
         } else if providerId.hasPrefix("qoder-") {
@@ -400,7 +417,7 @@ struct UsageRootView: View {
                         ProviderRowView(
                             stat: stat,
                             maxToken: maxT,
-                            expandable: (pid == "claude-sub" || pid == "claude-api" || pid == "codex" || pid == "opencode"),
+                            expandable: (pid == "claude-code" || pid == "codex" || pid == "opencode"),
                             onExpand: { viewModel.openDetail(pid) }
                         )
                         if showsQoderHint(for: pid) {

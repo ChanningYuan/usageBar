@@ -14,7 +14,7 @@ final class UsageViewModel: ObservableObject {
 
     // MARK: - drill-in 详情（懒加载，独立于主刷新快路径）
 
-    /// 非 nil = 正在看某 provider（claude-sub / claude-api）的详情页；nil = 列表态
+    /// 非 nil = 正在看某个可展开 provider 的详情页；nil = 列表态
     @Published var detailProviderId: String? = nil
     /// 已加载的详情（nil 且 detailProviderId != nil = 加载中）
     @Published var detail: ProviderDetail? = nil
@@ -175,7 +175,7 @@ final class UsageViewModel: ObservableObject {
     /// 判定：全量缓存里今日记录 ∩ 可见 ∩ token>0，恰好一个，且属于可展开集合。
     func soleTodayDetailProvider() -> String? {
         let visible = Set(ProviderVisibilitySettings.shared.visibleProviderIds())
-        let expandable: Set<String> = ["claude-sub", "claude-api", "codex"]
+        let expandable: Set<String> = ["claude-code", "codex"]
         let providers = Set(
             allStats
                 .filter { $0.time == TimeWindow.today.id && visible.contains($0.provider) && $0.token > 0 }

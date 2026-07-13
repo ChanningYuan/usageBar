@@ -3,12 +3,12 @@ import usageBarCore
 
 /// Claude 详情懒加载扫描器（drill-in 展开分会话 / 分模型时才跑，独立于主刷新快路径）。
 ///
-/// 复用 `~/.claude/projects/*/*.jsonl`（含 subagents/），但按 (provider, sessionId, model, date)
+/// 复用 `~/.claude/projects/*/*.jsonl`（含 subagents/），按 (source, sessionId, model, date)
 /// 聚合 5 列 token，并解析 ai-title / 首条用户输入 / cwd 作为会话标题。
 ///
 /// 带独立的「按文件 mtime 内存缓存」：窗口切换只做便宜的重聚合、不重解析；数据变了调 `invalidate()`。
-/// 与主行完全同源、同去重口径（message.id 文件内去重、msg_vrtx_/msg_bdrk_ 前缀分 sub/api），
-/// 因此详情合计能跟菜单栏主行对得上。
+/// 与主行完全同源、同去重口径（message.id 文件内去重）；主行统一归 `claude-code`，
+/// 详情再按官方直连 / 中转代理两类来源解释构成。
 public actor ClaudeDetailScanner {
     public static let shared = ClaudeDetailScanner()
     public init() {}
@@ -16,7 +16,7 @@ public actor ClaudeDetailScanner {
     // MARK: - 缓存单元（窗口无关，按文件缓存）
 
     private struct Unit {
-        let provider: String
+        let source: ClaudeSource
         let sessionId: String
         let model: String
         let date: String
@@ -45,7 +45,7 @@ public actor ClaudeDetailScanner {
 
     // MARK: - 对外入口
 
-    /// 扫描并聚合某 provider（claude-sub / claude-api）在某窗口的明细。
+    /// 扫描并聚合 Claude Code 在某窗口的明细。
     public func detail(providerId: String, window: TimeWindow,
                        weekStartMonday: Bool = true, now: Date = Date()) async -> ProviderDetail {
         var units: [Unit] = []
@@ -97,7 +97,7 @@ public actor ClaudeDetailScanner {
     // MARK: - 单文件解析（窗口无关）
 
     private func parse(url: URL) -> FileParse {
-        var acc: [String: Unit] = [:]          // key = provider|session|model|date
+        var acc: [String: Unit] = [:]          // key = source|session|model|date
         var metas: [String: SessionMeta] = [:]
         var seenIds = Set<String>()
 
@@ -122,8 +122,7 @@ public actor ClaudeDetailScanner {
                 let model = (message["model"] as? String) ?? ""
                 if model.isEmpty || model == "<synthetic>" { return }
 
-                let provider = (messageId.hasPrefix("msg_vrtx_") || messageId.hasPrefix("msg_bdrk_"))
-                    ? "claude-api" : "claude-sub"
+                let source = ClaudeSource.classify(messageId: messageId, modelId: model)
 
                 let input = (usage["input_tokens"] as? Int) ?? 0
                 let output = (usage["output_tokens"] as? Int) ?? 0
@@ -142,11 +141,11 @@ public actor ClaudeDetailScanner {
                 if tb.total == 0 { return }
 
                 let date = DailyAggregator.dateString(for: ts)
-                let key = "\(provider)|\(sid)|\(model)|\(date)"
+                let key = "\(source.rawValue)|\(sid)|\(model)|\(date)"
                 if var u = acc[key] {
                     u.tokens.add(tb); acc[key] = u
                 } else {
-                    acc[key] = Unit(provider: provider, sessionId: sid, model: model, date: date, tokens: tb)
+                    acc[key] = Unit(source: source, sessionId: sid, model: model, date: date, tokens: tb)
                 }
 
                 var m = metas[sid] ?? SessionMeta(aiTitle: nil, firstUserText: nil, cwd: nil, lastActivity: ts)
@@ -206,22 +205,34 @@ public actor ClaudeDetailScanner {
     private func aggregate(providerId: String, window: TimeWindow,
                            weekStartMonday: Bool, now: Date,
                            units: [Unit], metas: [String: SessionMeta]) -> ProviderDetail {
+        guard providerId == "claude-code" else {
+            return .empty(providerId: providerId, windowId: window.id)
+        }
         let inWindow = DailyAggregator.windowPredicate(window, weekStartMonday: weekStartMonday, now: now)
 
         var hero = TokenBreakdown()
         var heroCost = 0.0
+        var bySource: [ClaudeSource: TokenBreakdown] = [:]
+        var sourceCost: [ClaudeSource: Double] = [:]
         var byModel: [String: TokenBreakdown] = [:]
         var modelCost: [String: Double] = [:]
         var bySession: [String: TokenBreakdown] = [:]
         var sessionCost: [String: Double] = [:]
 
-        for u in units where u.provider == providerId && inWindow(u.date) {
+        for u in units where inWindow(u.date) {
             let c = UnifiedPricing.cost(u.tokens, modelId: u.model)
             hero.add(u.tokens); heroCost += c
+            bySource[u.source, default: TokenBreakdown()].add(u.tokens)
+            sourceCost[u.source, default: 0] += c
             byModel[u.model, default: TokenBreakdown()].add(u.tokens)
             modelCost[u.model, default: 0] += c
             bySession[u.sessionId, default: TokenBreakdown()].add(u.tokens)
             sessionCost[u.sessionId, default: 0] += c
+        }
+
+        let sources = ClaudeSource.allCases.compactMap { source -> SourceDetailRecord? in
+            guard let tb = bySource[source], tb.total > 0 else { return nil }
+            return SourceDetailRecord(source: source, tokens: tb, cost: sourceCost[source] ?? 0)
         }
 
         let models = byModel.map { (mid, tb) in
@@ -241,6 +252,7 @@ public actor ClaudeDetailScanner {
         }.sorted { $0.tokens.total > $1.tokens.total }
 
         return ProviderDetail(providerId: providerId, windowId: window.id,
-                              tokens: hero, cost: heroCost, models: models, sessions: sessions)
+                              tokens: hero, cost: heroCost, sources: sources,
+                              models: models, sessions: sessions)
     }
 }

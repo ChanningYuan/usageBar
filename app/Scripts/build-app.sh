@@ -20,6 +20,27 @@ if [ "${SIGN:-1}" != "0" ] && security find-identity -v -p codesigning 2>/dev/nu
   DO_SIGN=1
 fi
 
+echo "→ 刷新内置价目快照 (pricing-snapshot.json)..."
+# 每次构建从线上表拉一份塞进 app 资源：用户机器拉不到 usagebar.cn 时（公司安全软件拦 app 进程、
+# 离线首启…）靠它兜底，不至于全员 $0。新鲜度 = 发版日；装上后 app 仍会照常拉线上表更新。
+# 校验通过才覆盖——拉挂了 / 拉到残表就沿用仓库里那份旧快照，绝不把好快照冲坏。
+SNAPSHOT="$PROJECT_DIR/Sources/usageBar/pricing-snapshot.json"
+SNAPSHOT_TMP="$(mktemp -t pricing-snapshot)"
+if curl -sf --max-time 30 https://usagebar.cn/pricing.json -o "$SNAPSHOT_TMP" \
+   && python3 -c "
+import json, sys
+d = json.load(open('$SNAPSHOT_TMP'))
+n = len(d.get('providers', {}))
+assert n >= 30, f'厂商数只有 {n}，疑似残表'
+print(f'   厂商数 {n} ✓')
+"; then
+  mv "$SNAPSHOT_TMP" "$SNAPSHOT"
+  echo "   快照已更新: $(du -h "$SNAPSHOT" | cut -f1)"
+else
+  rm -f "$SNAPSHOT_TMP"
+  echo "   ⚠️ 拉取/校验失败，沿用仓库里的旧快照（app 仍会在用户机器上拉线上表）"
+fi
+
 echo "→ 编译 release 模式..."
 cd "$PROJECT_DIR"
 swift build -c release

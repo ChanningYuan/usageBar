@@ -27,6 +27,8 @@ struct SettingsView: View {
     @State private var draggingTab: String?
     @State private var dataSourceExpanded = true
     @State private var tabsExpanded = true
+    /// 价目表新鲜度（打开设置时取一次，避免每次重绘都去读磁盘）
+    @State private var pricingFreshness: RemotePricing.Freshness?
 
     /// GitHub mark(模板图,跟随主题/链接色)
     private static let githubIcon: NSImage? = {
@@ -66,7 +68,10 @@ struct SettingsView: View {
         }
         .frame(minWidth: 420, minHeight: 380)
         .background(Color(nsColor: .windowBackgroundColor))
-        .onAppear { qoderStatus.refresh() }
+        .onAppear {
+            qoderStatus.refresh()
+            pricingFreshness = RemotePricing.shared.freshness()
+        }
     }
 
     // MARK: - Header / Footer
@@ -193,6 +198,7 @@ struct SettingsView: View {
             sectionHeader("数据源", count: "已启用 \(visibleProviderCount) 个", expanded: dataSourceExpanded) {
                 dataSourceExpanded.toggle()
             }
+            pricingNotice   // 价目表过期提示：折叠与否都要能看见
             if dataSourceExpanded {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(ProviderRegistry.all, id: \.id) { p in
@@ -213,6 +219,38 @@ struct SettingsView: View {
                 .padding(.leading, 2)
             }
         }
+    }
+
+    /// 价目表过期提示（加固③）：拉取失败会静默退化成「表还在、但停更了」——新模型没价、老价格漂移，
+    /// 用户完全无感。这里把它显性化。token 统计不受影响，只有 ≈$ 金额会偏旧。
+    @ViewBuilder private var pricingNotice: some View {
+        if let f = pricingFreshness, f.isStale {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Color(hex: "#D97706"))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(pricingNoticeTitle(f))
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("金额是按官方 API 价折算的「等效花费」，价目表每天从 usagebar.cn 更新一次。长期不更新，多半是网络或公司安全软件拦了 usageBar 的请求——token 统计不受影响，只有 ≈$ 金额会偏旧。")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color(hex: "#D97706").opacity(0.09)))
+        }
+    }
+
+    private func pricingNoticeTitle(_ f: RemotePricing.Freshness) -> String {
+        if let updated = f.lastUpdated {
+            let days = max(1, Int(Date().timeIntervalSince(updated) / 86400))
+            return "价格表已 \(days) 天未更新"
+        }
+        return f.usingSnapshot
+            ? "正在用安装包内置的价格表（从未成功拉到线上表）"
+            : "还没拉到价格表"
     }
 
     /// 单个 provider 行：icon + 名称 + 开关（switch）。

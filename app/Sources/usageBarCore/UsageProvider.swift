@@ -8,7 +8,7 @@ import Foundation
 /// `family`：父级分组 id,Settings 树状 UI 用它做分组(同 family 的 provider 在 Settings
 /// 里聚到同一 Section 头父级 Toggle 下,UI 渲染层不显示父级总和行,只渲染勾选的子项)。
 /// 当前 family 用法:
-///   - `claude-sub` / `claude-api` family="claude"
+///   - `claude-code` / `cowork` family="claude"
 ///   - `qoder-cli` / `qoder-work` / `qoder-ide` family="qoder"
 ///   - `codex` / `wukong` family=nil(独立 provider,Settings 自成一组)
 public protocol UsageProvider: Sendable {

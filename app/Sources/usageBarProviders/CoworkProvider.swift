@@ -19,8 +19,8 @@ public struct CoworkProvider: UsageProvider {
     public var id: String { "cowork" }
     public var displayName: String { "Claude Cowork" }
     public var iconSymbol: String { "person.2.fill" }
-    public var brandColor: String { "#B05730" }  // 比 claude-sub 的 #D97757 更深的陶土色，便于区分
-    public var family: String? { "claude" }       // 归入 Claude 组（与订阅/API 同框）
+    public var brandColor: String { "#B05730" }  // 比 Claude Code 的 #D97757 更深的陶土色，便于区分
+    public var family: String? { "claude" }       // 归入 Claude 组（与 Claude Code 同框）
 
     public init() {}
 

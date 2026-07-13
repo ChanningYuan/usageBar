@@ -24,7 +24,7 @@ public struct FileCacheEntry: Codable, Sendable, Equatable {
 
 /// 单文件内"某 provider 在某天的总 token"
 public struct FileDailyRecord: Codable, Sendable, Equatable {
-    /// "claude-sub" / "claude-api" / "qoder-cli" / "qoder-work" / "qoder-ide" / "codex" / "wukong"
+    /// "claude-code" / "cowork" / "qoder-cli" / "qoder-work" / "qoder-ide" / "codex" / "wukong"
     public let provider: String
     /// "2026-05-20" 本地日期（按 Asia/Shanghai）
     public let date: String
@@ -60,7 +60,9 @@ public struct PersistedCache: Codable, Sendable {
     ///   5 → 6 (2026-07-10): Codex 事件总量口径改为 input+output(与详情页统一),排除 Codex Desktop
     ///                        「从其他 AI 应用导入」replay 快照被计入导入当天。旧 cache 按 total_tokens
     ///                        算、含误计的导入量,必须失效重算。
-    public static let currentSchemaVersion = 6
+    ///   6 → 7 (2026-07-13): Claude Code 的 `claude-sub` / `claude-api` 合并为 `claude-code`。
+    ///                        旧 cache 仍存拆分 id,不失效会让新 provider filter 不到历史记录全显 0。
+    public static let currentSchemaVersion = 7
 
     public init(entries: [FileCacheEntry]) {
         self.schemaVersion = Self.currentSchemaVersion

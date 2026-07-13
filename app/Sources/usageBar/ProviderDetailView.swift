@@ -5,7 +5,7 @@ import usageBarProviders
 
 /// Provider 详情页（drill-in）——图标格版：Hero + 缓存命中环 + Token 2×2 图标格
 /// + 分模型（命中率 pill + 花费）+ 分会话（排序 + 展开全部/收起）。
-/// v1 只给 Claude 订阅 / API 用（懒加载数据来自 `ClaudeDetailScanner`）。
+/// Claude Code / Codex / OpenCode 共用；各自明细由对应 scanner 懒加载。
 ///
 /// 色板 / 字号严格对齐设计稿 `展开明细-分镜.pen`（YMWLk 浅 / MvCZv 深）：
 /// 强调色浅 #C85A2B / 深 #E8794F，文字三级 text/text2/text3，卡片 lCard/dCard 等。
@@ -24,16 +24,17 @@ struct ProviderDetailView: View {
 
     private var meta: ProviderMeta { ProviderMetaLookup.meta(for: providerId) }
     private var brand: Color { Color(hex: meta.brandColor) }
-    /// 成本按「等效 API 费用」展示（≈$）：Claude 订阅 + Codex（ChatGPT 订阅 plan=plus）
-    /// + OpenCode（订阅 OAuth 登录时 opencode 记 cost=0，扫描层按等效价兜底）。
-    private var isSub: Bool { providerId == "claude-sub" || providerId == "codex" || providerId == "opencode" }
+    /// 当前可展开 provider 都展示「等效 API 费用」（≈$）。
+    private var usesEquivalentCost: Bool {
+        providerId == "claude-code" || providerId == "codex" || providerId == "opencode"
+    }
 
     private var pal: DetailPalette { .of(scheme) }
 
-    /// 强调色：Claude 订阅按设计稿调过的赭石橙（浅 #C85A2B / 深 #E8794F，比原始 brand
+    /// 强调色：Claude Code 按设计稿调过的赭石橙（浅 #C85A2B / 深 #E8794F，比原始 brand
     /// #D97757 更沉、浅底对比更好）；其它 provider 退回各自 brand。
     private var accent: Color {
-        if providerId == "claude-sub" {
+        if providerId == "claude-code" {
             return scheme == .dark ? Color(hex: "#E8794F") : Color(hex: "#C85A2B")
         }
         // Codex：品牌绿按设计稿调过深浅两档（浅 #0C8163 加深保小字对比 / 深 #34BE95 提亮），
@@ -184,6 +185,10 @@ struct ProviderDetailView: View {
             } else {
                 metricGrid(d)
             }
+            if d.sourceCount >= 2 {
+                hairline
+                sourcesSection(d)
+            }
             hairline
             modelsSection(d)
             hairline
@@ -222,9 +227,9 @@ struct ProviderDetailView: View {
         return t.hitRate
     }
 
-    /// Hero 副行金额段：订阅口径 "≈ $X 等效"，API 变体 "$X"。
+    /// Hero 副行金额段：当前可展开 provider 统一按「≈ $X 等效」展示。
     private func heroCostLabel(_ c: Double) -> String {
-        isSub ? "≈ \(fmtDollar(c)) 等效" : fmtDollar(c)
+        usesEquivalentCost ? "≈ \(fmtDollar(c)) 等效" : fmtDollar(c)
     }
 
     // MARK: 2×2 图标指标格
@@ -305,6 +310,47 @@ struct ProviderDetailView: View {
                 icon: "arrow.up", label: "输出 (output)", value: fmtTok(t.output), cost: fmtCost(outputC),
                 childLabel: "思考 (reasoning)", childValue: fmtTok(t.reasoning), childCost: fmtCost(reasoningC),
                 accent: accent, accentBg: accentBg, pal: pal)
+        }
+    }
+
+    // MARK: 按来源（仅 Claude Code 两类都有流量时显示）
+
+    private func sourcesSection(_ d: ProviderDetail) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader(title: "按来源", count: d.sourceCount, unit: "个来源")
+            ForEach(d.sources) { source in
+                HStack(spacing: 8) {
+                    Circle().fill(sourceColor(source.source)).frame(width: 7, height: 7)
+                    Text(sourceName(source.source))
+                        .font(.system(size: 11))
+                        .foregroundStyle(pal.text)
+                        .lineLimit(1)
+                    Spacer(minLength: 6)
+                    Text(fmtTok(source.tokens.total))
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(pal.text2)
+                        .frame(width: 56, alignment: .trailing)
+                    hitPill(source.hitRate)
+                    Text(fmtCost(source.cost))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(pal.text)
+                        .frame(width: 46, alignment: .trailing)
+                }
+            }
+        }
+    }
+
+    private func sourceName(_ source: ClaudeSource) -> String {
+        switch source {
+        case .official: return "官方直连 (Anthropic)"
+        case .relay: return "中转/代理"
+        }
+    }
+
+    private func sourceColor(_ source: ClaudeSource) -> Color {
+        switch source {
+        case .official: return accent
+        case .relay: return Color(hex: scheme == .dark ? "#9F7ACB" : "#6F4A8A")
         }
     }
 
@@ -467,8 +513,8 @@ struct ProviderDetailView: View {
     }
 
     private func fmtCost(_ c: Double) -> String {
-        // 订阅口径 = 等效 API 费用，统一 ≈$ 前缀；API 变体是真实费用，$ 前缀
-        let p = isSub ? "≈$" : "$"
+        // 当前详情页统一展示等效 API 费用；保留兜底分支供未来其它 provider 复用
+        let p = usesEquivalentCost ? "≈$" : "$"
         if c >= 10 { return String(format: "\(p)%.0f", c) }
         if c >= 1 { return String(format: "\(p)%.1f", c) }
         if c >= 0.01 { return String(format: "\(p)%.2f", c) }

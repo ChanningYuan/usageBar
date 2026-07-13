@@ -6,7 +6,7 @@ import usageBarCore
 /// 主 App 启动时调用一次:`UsageBarProviders.registerAll()`。
 ///
 /// 注册顺序 = UI 默认渲染顺序(Settings 关闭某项后该行不渲染,但顺序不变):
-///   1. Claude 系(family="claude"):订阅 → cc-api(共 2 个实例)
+///   1. Claude 系(family="claude"):Claude Code → Cowork(共 2 个实例)
 ///   2. Qoder 系(family="qoder"):CLI → Work → IDE(共 3 个实例)
 ///       - CLI 读 ~/.qoder/projects/.../*.jsonl(transcript)
 ///       - Work 读 ~/.qoderwork/projects transcript(0.6.3 起) + 旧 main.log mirror(历史,冻结)
@@ -15,18 +15,12 @@ import usageBarCore
 ///   4. 悟空(独立)
 ///   5. WorkBuddy(独立,读 ~/.workbuddy/projects/.../*.jsonl 的 providerData.rawUsage)
 ///
-/// 共 2 + 3 + 1 + 1 + 1 = 8 个 provider。
-/// Claude 2 个实例共享 ClaudeJsonlScanner,
-/// Qoder CLI / Work / IDE 数据源各不同,各自独立扫描无需共享 scanner;单次 refresh 各 provider
-/// 只扫自己的数据源一次。
-///
-/// 固定列表风格与 ClaudeCodeVariant 一致(避免运行时动态发现的复杂度)。
+/// 固定 provider 列表，避免运行时动态发现的复杂度。
 public enum UsageBarProviders {
     public static func registerAll() {
         let providers: [any UsageProvider] = [
-            // Claude family(按 message.id 前缀拆 2 行)
-            ClaudeCodeProvider(variant: .subscription),
-            ClaudeCodeProvider(variant: .api),
+            // Claude family
+            ClaudeCodeProvider(),
             // Claude Cowork(桌面端,扫 local-agent-mode-sessions 下的 transcript)
             CoworkProvider(),
             // Qoder family(三件套全部本地直读,零配置)
