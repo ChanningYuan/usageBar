@@ -33,6 +33,10 @@ public actor QoderIdeDetailScanner {
         let model: String
         let tokens: TokenBreakdown
         let time: Date
+        /// 会话标题（来自 `chat_session.session_title`，LEFT JOIN 取回）
+        let title: String?
+        /// 工程名（`chat_session.project_name`，标题为空时兜底）
+        let project: String?
     }
 
     private struct CacheEntry {
@@ -60,23 +64,28 @@ public actor QoderIdeDetailScanner {
 
         var total = TokenBreakdown()
         var byModel: [String: TokenBreakdown] = [:]
-        var bySession: [String: (tb: TokenBreakdown, last: Date)] = [:]
+        var bySession: [String: (tb: TokenBreakdown, last: Date, title: String?, project: String?)] = [:]
 
         for r in rows where inWindow(r.date) {
             total.add(r.tokens)
             byModel[r.model, default: TokenBreakdown()].add(r.tokens)
-            var s = bySession[r.sessionId] ?? (TokenBreakdown(), r.time)
+            var s = bySession[r.sessionId] ?? (TokenBreakdown(), r.time, r.title, r.project)
             s.tb.add(r.tokens); s.last = max(s.last, r.time)
+            s.title = s.title ?? r.title
+            s.project = s.project ?? r.project
             bySession[r.sessionId] = s
         }
 
         // cost 恒 0：模型名被打码，等效美元算不出来（`CostUnit.unavailable` → UI 显示 `—`）
         let models = byModel.map { ModelDetailRecord(modelId: $0.key, tokens: $0.value, cost: 0) }
             .sorted { $0.tokens.total > $1.tokens.total }
-        let sessions = bySession.map { sid, v in
-            SessionDetailRecord(sessionId: sid, title: String(sid.prefix(12)),
-                                subtitle: String(sid.prefix(8)),
-                                lastActivity: v.last, tokens: v.tb, cost: 0)
+        // 标题优先级：会话标题（Qoder IDE 侧栏那个名字）> 工程名 > 兜底
+        let sessions = bySession.map { sid, v -> SessionDetailRecord in
+            let title = v.title?.isEmpty == false ? v.title!
+                      : (v.project?.isEmpty == false ? v.project! : "(无标题会话)")
+            return SessionDetailRecord(sessionId: sid, title: title,
+                                       subtitle: String(sid.prefix(8)),
+                                       lastActivity: v.last, tokens: v.tb, cost: 0)
         }.sorted { $0.tokens.total > $1.tokens.total }
 
         return ProviderDetail(providerId: "qoder-ide", windowId: window.id,
@@ -112,12 +121,18 @@ public actor QoderIdeDetailScanner {
         }
         defer { sqlite3_close(db) }
 
+        // LEFT JOIN chat_session 取会话标题 —— Qoder IDE 把侧栏那个会话名存在 `session_title` 里
+        // （样例："你好"），还有 `project_name` 可作兜底。主行 `QoderIdeProvider` 只读 chat_message，
+        // 详情页要标题就必须 join（v0.3.22 首版漏了，会话名显示成 sessionId 前缀）。
+        // LEFT JOIN 而非 INNER：会话记录可能被清理，不能因此丢掉用量。
         let sql = """
-        SELECT gmt_create, token_info, session_id, model_info
-          FROM chat_message
-         WHERE role='assistant'
-           AND token_info IS NOT NULL
-           AND token_info != ''
+        SELECT m.gmt_create, m.token_info, m.session_id, m.model_info,
+               s.session_title, s.project_name
+          FROM chat_message AS m
+          LEFT JOIN chat_session AS s ON s.session_id = m.session_id
+         WHERE m.role='assistant'
+           AND m.token_info IS NOT NULL
+           AND m.token_info != ''
         """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
@@ -134,12 +149,15 @@ public actor QoderIdeDetailScanner {
 
             let sid = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
             let modelJSON = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
+            let title = sqlite3_column_text(stmt, 4).map { String(cString: $0) }
+            let project = sqlite3_column_text(stmt, 5).map { String(cString: $0) }
             let ts = Date(timeIntervalSince1970: Double(gmtMs) / 1000.0)
 
             rows.append(Row(date: DailyAggregator.dateString(for: ts),
                             sessionId: sid.isEmpty ? "(未知会话)" : sid,
                             model: parseModelKey(modelJSON),
-                            tokens: tb, time: ts))
+                            tokens: tb, time: ts,
+                            title: title, project: project))
         }
         return rows
     }

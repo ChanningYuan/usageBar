@@ -36,9 +36,16 @@ public actor WorkBuddyDetailScanner {
         let time: Date
     }
 
+    /// sessionId → 会话标题的三档来源（优先级从高到低）
+    struct SessionMeta {
+        var aiTitle: String?        // WorkBuddy 自己写的 `type=="ai-title"` 行（和 Claude Code 同款）
+        var firstUserText: String?  // 首条真实用户输入
+        var cwd: String?            // 兜底：工作目录名
+    }
+
     struct FileParse {
         let rows: [Row]
-        let titles: [String: String]   // sessionId → 首条用户输入
+        let metas: [String: SessionMeta]
     }
 
     private struct CacheEntry {
@@ -56,7 +63,7 @@ public actor WorkBuddyDetailScanner {
     public func detail(window: TimeWindow, weekStartMonday: Bool = true,
                        now: Date = Date()) async -> ProviderDetail {
         var rows: [Row] = []
-        var titles: [String: String] = [:]
+        var metas: [String: SessionMeta] = [:]
 
         guard FileManager.default.fileExists(atPath: projectsDir.path) else {
             return .empty(providerId: "workbuddy", windowId: window.id)
@@ -72,15 +79,21 @@ public actor WorkBuddyDetailScanner {
                 cache[path] = CacheEntry(mtime: meta.mtime, size: meta.size, parse: fp)
             }
             rows.append(contentsOf: fp.rows)
-            for (k, v) in fp.titles where titles[k] == nil { titles[k] = v }
+            for (sid, m) in fp.metas {
+                var cur = metas[sid] ?? SessionMeta()
+                cur.aiTitle = m.aiTitle ?? cur.aiTitle
+                cur.firstUserText = cur.firstUserText ?? m.firstUserText
+                cur.cwd = cur.cwd ?? m.cwd
+                metas[sid] = cur
+            }
         }
 
-        return Self.compose(rows: rows, titles: titles, window: window,
+        return Self.compose(rows: rows, metas: metas, window: window,
                             weekStartMonday: weekStartMonday, now: now)
     }
 
     /// 纯聚合（静态、无 IO，单测直接打）
-    static func compose(rows: [Row], titles: [String: String], window: TimeWindow,
+    static func compose(rows: [Row], metas: [String: SessionMeta], window: TimeWindow,
                         weekStartMonday: Bool, now: Date) -> ProviderDetail {
         let inWindow = DailyAggregator.windowPredicate(window, weekStartMonday: weekStartMonday, now: now)
 
@@ -106,12 +119,15 @@ public actor WorkBuddyDetailScanner {
         let models = byModel.map { ModelDetailRecord(modelId: $0.key, tokens: $0.value.tb, cost: $0.value.credit) }
             .sorted { $0.tokens.total > $1.tokens.total }
 
+        // 标题优先级：ai-title（WorkBuddy 自己生成的会话名）> 首条真实用户输入 > 工作目录名 > 兜底
         let sessions = bySession.map { sid, v -> SessionDetailRecord in
-            let t = titles[sid] ?? ""
+            let m = metas[sid]
+            let title = m?.aiTitle
+                ?? m?.firstUserText
+                ?? m?.cwd.map { ($0 as NSString).lastPathComponent }
+                ?? "(无标题会话)"
             return SessionDetailRecord(
-                sessionId: sid,
-                title: t.isEmpty ? String(sid.prefix(12)) : t,
-                subtitle: String(sid.prefix(8)),
+                sessionId: sid, title: title, subtitle: String(sid.prefix(8)),
                 lastActivity: v.last, tokens: v.tb, cost: v.credit)
         }.sorted { $0.tokens.total > $1.tokens.total }
 
@@ -124,18 +140,33 @@ public actor WorkBuddyDetailScanner {
 
     static func parse(url: URL) -> FileParse {
         var rows: [Row] = []
-        var titles: [String: String] = [:]
+        var metas: [String: SessionMeta] = [:]
 
         try? JSONLReader.forEachLine(at: url) { obj in
-            guard (obj["type"] as? String) == "message" else { return }
+            let type = obj["type"] as? String
             let sid = (obj["sessionId"] as? String) ?? ""
             guard !sid.isEmpty else { return }
+
+            // ── 会话标题：WorkBuddy 自己写的 `ai-title` 行（和 Claude Code 同款，v0.3.23 才接上）
+            if type == "ai-title", let t = obj["aiTitle"] as? String, !t.isEmpty {
+                var m = metas[sid] ?? SessionMeta()
+                m.aiTitle = String(t.prefix(80))   // 取最后一条（后写覆盖前写）
+                metas[sid] = m
+                return
+            }
+
+            guard type == "message" else { return }
             let role = obj["role"] as? String
 
-            // 会话标题：首条用户输入
-            if role == "user", titles[sid] == nil,
-               let c = obj["content"] as? String, !c.isEmpty {
-                titles[sid] = String(c.prefix(40)).replacingOccurrences(of: "\n", with: " ")
+            // ── 首条真实用户输入（兜底标题）
+            // ⚠️ `content` 是**块数组** `[{type:"text", text:"..."}]`，不是字符串。
+            //    首块常是 `<system-reminder>` 之类的系统注入 → 必须跳过，否则标题是一坨垃圾。
+            if role == "user", metas[sid]?.firstUserText == nil,
+               let text = Self.plainUserText(obj["content"]) {
+                var m = metas[sid] ?? SessionMeta()
+                m.firstUserText = text
+                m.cwd = m.cwd ?? (obj["cwd"] as? String)
+                metas[sid] = m
             }
 
             guard role == "assistant",
@@ -162,11 +193,32 @@ public actor WorkBuddyDetailScanner {
                 ?? Double((usage["credit"] as? Int) ?? 0)
 
             let model = (pd["model"] as? String) ?? ""
+            var m = metas[sid] ?? SessionMeta()
+            m.cwd = m.cwd ?? (obj["cwd"] as? String)
+            metas[sid] = m
+
             rows.append(Row(date: DailyAggregator.dateString(for: ts), sessionId: sid,
                             model: model.isEmpty ? "(未知)" : model,
                             tokens: tb, credit: credit, time: ts))
         }
-        return FileParse(rows: rows, titles: titles)
+        return FileParse(rows: rows, metas: metas)
+    }
+
+    /// 从 `content` 提取可读首句。`content` 是块数组 `[{type:"text", text:"..."}]`。
+    /// 跳过 `<system-reminder>` / `<command-...>` 这类尖括号包裹的系统注入块 —— 它们不是用户说的话。
+    static func plainUserText(_ content: Any?) -> String? {
+        func clean(_ s: String) -> String? {
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            if t.isEmpty || t.hasPrefix("<") { return nil }
+            return String(t.prefix(80)).replacingOccurrences(of: "\n", with: " ")
+        }
+        if let s = content as? String { return clean(s) }
+        if let arr = content as? [[String: Any]] {
+            for part in arr where (part["type"] as? String) == "text" {
+                if let s = part["text"] as? String, let c = clean(s) { return c }
+            }
+        }
+        return nil
     }
 
     /// epoch 毫秒（Int / Double / NSNumber）→ Date。与 `WorkBuddyProvider` 同一套。

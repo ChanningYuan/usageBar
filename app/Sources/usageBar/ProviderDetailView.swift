@@ -17,6 +17,13 @@ struct ProviderDetailView: View {
     @ObservedObject private var tabSettings = TabSettings.shared
     @State private var sortByTime = false
     @State private var showAllSessions = false
+    @State private var showAllModels = false
+    @State private var showAllSources = false
+
+    /// 明细区折叠阈值：默认只显示前 N 条，多出来的收进「展开全部」。
+    /// 按模型 / 按会话 / 按来源**共用同一套**（v0.3.23 起）——此前只有「按会话」有折叠，
+    /// 「按模型」全量铺开，Claude Code 累计 7 个模型时把页面撑爆。
+    private let collapsedLimit = 3
     /// 详情内容实测高度（驱动弹层自适应，避免内容矮时底部留白）。
     @State private var bodyHeight: CGFloat = 0
     /// 内容区高度上限：超过则封顶滚动（头部 ~40 + 480 ≈ 520，与旧固定高度相当）。
@@ -265,28 +272,73 @@ struct ProviderDetailView: View {
     // MARK: 按来源（仅 Claude Code 两类都有流量时显示）
 
     private func sourcesSection(_ d: ProviderDetail) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeader(title: "按来源", count: d.sourceCount, unit: "个来源")
-            ForEach(d.sources) { source in
-                HStack(spacing: 8) {
-                    Circle().fill(sourceColor(source.source)).frame(width: 7, height: 7)
-                    Text(sourceName(source.source))
-                        .font(.system(size: 11))
-                        .foregroundStyle(pal.text)
-                        .lineLimit(1)
-                    Spacer(minLength: 6)
-                    Text(fmtTok(source.tokens.total))
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundStyle(pal.text2)
-                        .frame(width: 56, alignment: .trailing)
-                    hitPill(source.hitRate)
-                    Text(fmtCost(source.cost))
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(pal.text)
-                        .frame(width: 46, alignment: .trailing)
-                }
+        collapsibleSection(title: "按来源", unit: "个来源",
+                           items: d.sources, expanded: $showAllSources,
+                           trailing: { EmptyView() }) { source in
+            HStack(spacing: 8) {
+                Circle().fill(sourceColor(source.source)).frame(width: 7, height: 7)
+                Text(sourceName(source.source))
+                    .font(.system(size: 11))
+                    .foregroundStyle(pal.text)
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                Text(fmtTok(source.tokens.total))
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(pal.text2)
+                    .frame(width: 56, alignment: .trailing)
+                hitPill(source.hitRate)
+                Text(fmtCost(source.cost))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(pal.text)
+                    .frame(width: 46, alignment: .trailing)
             }
         }
+    }
+
+    // MARK: - 通用「可折叠明细区」（按模型 / 按会话 / 按来源共用）
+
+    /// 段头（标题 + 计数 + 可选右侧控件）+ 前 N 行 + 展开/收起按钮。
+    ///
+    /// 抽成一处的理由：折叠这件事和「这一区装的是模型还是会话」无关，
+    /// 它只关心「有多少行、显示几行」。原先只有按会话写了折叠逻辑，按模型直接全量 `ForEach`，
+    /// 于是模型一多页面就被撑爆——**同一个交互写两遍，必然有一边被漏掉**。
+    @ViewBuilder
+    private func collapsibleSection<T: Identifiable, Row: View, Trailing: View>(
+        title: String, unit: String, items: [T], expanded: Binding<Bool>,
+        @ViewBuilder trailing: () -> Trailing,
+        @ViewBuilder row: @escaping (T) -> Row
+    ) -> some View {
+        let shown = expanded.wrappedValue ? items : Array(items.prefix(collapsedLimit))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(title).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(pal.text2)
+                Text("\(items.count) \(unit)").font(.system(size: 9.5)).foregroundStyle(pal.text3)
+                Spacer()
+                trailing()
+            }
+            ForEach(shown) { row($0) }
+            if items.count > collapsedLimit {
+                expandButton(expanded: expanded, hidden: items.count - collapsedLimit, unit: unit)
+            }
+        }
+    }
+
+    private func expandButton(expanded: Binding<Bool>, hidden: Int, unit: String) -> some View {
+        Button(action: { withAnimation(.easeInOut(duration: 0.15)) { expanded.wrappedValue.toggle() } }) {
+            HStack(spacing: 4) {
+                Image(systemName: expanded.wrappedValue ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 10))
+                Text(expanded.wrappedValue
+                     ? "收起（只看前 \(collapsedLimit) 个）"
+                     : "展开全部（还有 \(hidden) \(unit)）")
+                    .font(.system(size: 10))
+            }
+            .foregroundStyle(pal.text3)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 2)
     }
 
     private func sourceName(_ source: ClaudeSource) -> String {
@@ -306,37 +358,37 @@ struct ProviderDetailView: View {
     // MARK: 分模型
 
     private func modelsSection(_ d: ProviderDetail) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeader(title: "按模型", count: d.modelCount, unit: "个模型")
-            ForEach(d.models) { m in
-                HStack(spacing: 8) {
-                    Circle().fill(accent).frame(width: 7, height: 7)
-                    Text(m.modelId).font(.system(size: 11)).foregroundStyle(pal.text).lineLimit(1)
-                    Spacer(minLength: 6)
-                    Text(fmtTok(m.tokens.total))
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundStyle(pal.text2)
-                        .frame(width: 56, alignment: .trailing)
-                    hitPill(m.hitRate)
-                    if m.cost == 0, m.tokens.total > 0, UnifiedPricing.hasNoPricing(for: m.modelId) {
-                        // 内置+远程价目都没有的模型：给反馈入口（预填 issue），感知长尾缺价
-                        Button(action: { openPricingIssue(model: m.modelId) }) {
-                            Text("无价目")
-                                .font(.system(size: 9))
-                                .foregroundStyle(pal.text3)
-                                .padding(.horizontal, 4).padding(.vertical, 1)
-                                .background(RoundedRectangle(cornerRadius: 4)
-                                    .strokeBorder(pal.text3.opacity(0.45), lineWidth: 0.5))
-                        }
-                        .buttonStyle(.plain)
-                        .help("该模型暂无价目，点击一键反馈（打开预填好的 GitHub Issue）")
-                        .frame(width: 46, alignment: .trailing)
-                    } else {
-                        Text(fmtCost(m.cost))
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(pal.text)
-                            .frame(width: 46, alignment: .trailing)
+        // v0.3.23：与「按会话」一样默认只显示前 3 个（Claude Code 累计有 7 个模型，全铺开撑爆页面）
+        collapsibleSection(title: "按模型", unit: "个模型",
+                           items: d.models, expanded: $showAllModels,
+                           trailing: { EmptyView() }) { m in
+            HStack(spacing: 8) {
+                Circle().fill(accent).frame(width: 7, height: 7)
+                Text(m.modelId).font(.system(size: 11)).foregroundStyle(pal.text).lineLimit(1)
+                Spacer(minLength: 6)
+                Text(fmtTok(m.tokens.total))
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(pal.text2)
+                    .frame(width: 56, alignment: .trailing)
+                hitPill(m.hitRate)
+                if m.cost == 0, m.tokens.total > 0, UnifiedPricing.hasNoPricing(for: m.modelId) {
+                    // 内置+远程价目都没有的模型：给反馈入口（预填 issue），感知长尾缺价
+                    Button(action: { openPricingIssue(model: m.modelId) }) {
+                        Text("无价目")
+                            .font(.system(size: 9))
+                            .foregroundStyle(pal.text3)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(RoundedRectangle(cornerRadius: 4)
+                                .strokeBorder(pal.text3.opacity(0.45), lineWidth: 0.5))
                     }
+                    .buttonStyle(.plain)
+                    .help("该模型暂无价目，点击一键反馈（打开预填好的 GitHub Issue）")
+                    .frame(width: 46, alignment: .trailing)
+                } else {
+                    Text(fmtCost(m.cost))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(pal.text)
+                        .frame(width: 46, alignment: .trailing)
                 }
             }
         }
@@ -373,29 +425,10 @@ struct ProviderDetailView: View {
 
     private func sessionsSection(_ d: ProviderDetail) -> some View {
         let sorted = sortByTime ? d.sessions.sorted { $0.lastActivity > $1.lastActivity } : d.sessions
-        let shown = showAllSessions ? sorted : Array(sorted.prefix(3))
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text("按会话").font(.system(size: 10.5, weight: .semibold)).foregroundStyle(pal.text2)
-                Text("\(d.sessionCount) 个会话").font(.system(size: 9.5)).foregroundStyle(pal.text3)
-                Spacer()
-                sortToggle
-            }
-            ForEach(shown) { s in sessionRow(s) }
-            if sorted.count > 3 {
-                Button(action: { withAnimation(.easeInOut(duration: 0.15)) { showAllSessions.toggle() } }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: showAllSessions ? "chevron.up" : "chevron.down").font(.system(size: 10))
-                        Text(showAllSessions ? "收起（只看前 3 个）" : "展开全部（还有 \(sorted.count - 3) 个会话）")
-                            .font(.system(size: 10))
-                    }
-                    .foregroundStyle(pal.text3)
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 2)
-            }
+        return collapsibleSection(title: "按会话", unit: "个会话",
+                                  items: sorted, expanded: $showAllSessions,
+                                  trailing: { sortToggle }) { s in
+            sessionRow(s)
         }
     }
 
@@ -450,13 +483,6 @@ struct ProviderDetailView: View {
         .buttonStyle(.plain)
     }
 
-    private func sectionHeader(title: String, count: Int, unit: String) -> some View {
-        HStack(spacing: 8) {
-            Text(title).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(pal.text2)
-            Text("\(count) \(unit)").font(.system(size: 9.5)).foregroundStyle(pal.text3)
-            Spacer()
-        }
-    }
 
     // MARK: - 格式化
 

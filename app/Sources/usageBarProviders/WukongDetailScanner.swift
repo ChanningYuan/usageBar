@@ -130,10 +130,15 @@ public actor WukongDetailScanner {
 
         // 会话花费按其模型构成逐一算不现实（一个会话可能跨模型）→ 用该会话 token 占比摊到总花费。
         // 与 Codex/Claude 侧的做法一致（那边是逐 unit 算好再汇总，这里旧源没有模型×会话的交叉维度）。
+        //
+        // ⚠️ **旧源没有任何可读标题**：`requests.jsonl` 是 llm_proxy 的**请求日志**，字段只有
+        // model / sessionId / traceId / path / 字节数 / 延迟 / 状态码 —— **一个字的对话内容都没有**
+        // （它记的是"谁在什么时候发了个请求"，不是"聊了什么"）。这是 10 个 provider 里**唯一**
+        // 一个数据源真的拿不出会话名的。新源（codex rollout）有首条用户消息，走 CodexDetailScanner 正常出标题。
         let sessions = bySession.map { sid, v -> SessionDetailRecord in
             let share = total.total > 0 ? Double(v.tb.total) / Double(total.total) : 0
             return SessionDetailRecord(
-                sessionId: sid, title: String(sid.prefix(12)), subtitle: String(sid.prefix(8)),
+                sessionId: sid, title: "早期会话 · \(sid.prefix(8))", subtitle: String(sid.prefix(8)),
                 lastActivity: v.last, tokens: v.tb, cost: totalCost * share)
         }
 

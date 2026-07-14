@@ -223,9 +223,13 @@ public actor ClaudeDetailScanner {
     private func aggregate(providerId: String, window: TimeWindow,
                            weekStartMonday: Bool, now: Date,
                            units: [Unit], metas: [String: SessionMeta]) -> ProviderDetail {
-        guard providerId == "claude-code" else {
-            return .empty(providerId: providerId, windowId: window.id)
-        }
+        // ⚠️ v0.3.22 修复：这里原先有一道 `guard providerId == "claude-code" else { return .empty(...) }`。
+        // 文件源虽然参数化了，但**聚合函数还硬判 providerId** → Cowork / Qoder CLI / Qoder Work
+        // 三个复用本扫描器的 provider，详情页点进去**全是空的**（"该周期这个来源没有用量"）。
+        // 本扫描器现在是「Claude 同构 transcript」的通用扫描器，不再是 claude-code 专属。
+        //
+        // `sources`（官方直连 / 中转代理）照常算——展示层由 `spec.hasSources` 决定要不要渲染，
+        // 只有 Claude Code 声明了它；其余 provider 算了也不显示，无副作用。
         let inWindow = DailyAggregator.windowPredicate(window, weekStartMonday: weekStartMonday, now: now)
 
         var hero = TokenBreakdown()
