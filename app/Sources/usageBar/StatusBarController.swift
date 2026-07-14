@@ -45,6 +45,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         Task {
             // 1. 先从磁盘读 mtime 缓存（< 100ms）
             await FileMtimeCache.shared.loadFromDisk()
+            RateLimitStore.shared.loadFromDisk()   // 额度快照：启动即从磁盘恢复，弹层立刻有旧值
             // 2. 触发第一次 refresh（命中持久化缓存的话 < 1s 完成）
             await viewModel.refresh()
             startRefreshTimer()
@@ -124,7 +125,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
 
     private func configurePopover() {
         let root = UsageRootView(viewModel: viewModel)
-        popover.contentSize = NSSize(width: 400, height: 300)
+        popover.contentSize = NSSize(width: 440, height: 300)
         popover.behavior = .transient
         popover.animates = true
         popover.delegate = self
@@ -148,7 +149,10 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
             startOutsideClickMonitor()
-            // 不自动 refresh，纯走缓存（数据靠 10min 后台 + 手动 [🔄]）
+            // 不自动 refresh token（纯走缓存，数据靠 10min 后台 + 手动 [🔄]）；
+            // 但额度：用户此刻在看 → 允许碰钥匙串采一次（冷启动时被跳过的 Qoder/Claude-OAuth 在这补上）。
+            RateLimitCoordinator.allowsKeychainAccess = true
+            Task { await RateLimitCoordinator.refreshEnabled() }
         }
     }
 
@@ -232,6 +236,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     // MARK: - Actions
 
     @objc private func refreshAction() {
+        RateLimitCoordinator.allowsKeychainAccess = true   // 手动刷新是主动动作 → 允许采需授权的额度
         Task {
             await viewModel.refresh()
         }

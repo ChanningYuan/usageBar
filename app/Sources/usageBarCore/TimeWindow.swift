@@ -4,6 +4,8 @@ import Foundation
 public enum TimeWindow: Hashable, Sendable {
     /// 本机时区 00:00 到现在
     case today
+    /// 昨天 00:00–24:00（本机时区）
+    case yesterday
     /// 本周（日历对齐，起始日可配 周一/周日）
     case thisWeek
     /// 滚动 7 天
@@ -25,6 +27,7 @@ public enum TimeWindow: Hashable, Sendable {
     public var displayName: String {
         switch self {
         case .today: return "今日"
+        case .yesterday: return "昨日"
         case .thisWeek: return "本周"
         case .last7Days: return "近 7 天"
         case .thisMonth: return "本月"

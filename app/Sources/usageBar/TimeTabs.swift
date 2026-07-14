@@ -10,6 +10,7 @@ extension TabSettings {
         tabOrder.compactMap { id in
             switch id {
             case "today": return .today
+            case "yesterday": return .yesterday
             case "thisWeek": return .thisWeek
             case "last7Days": return .last7Days
             case "thisMonth": return .thisMonth
@@ -27,6 +28,7 @@ extension TimeWindow {
     var tabLabel: String {
         switch self {
         case .today: return "今日"
+        case .yesterday: return "昨日"
         case .thisWeek: return "本周"
         case .last7Days: return "7天"
         case .thisMonth: return "本月"

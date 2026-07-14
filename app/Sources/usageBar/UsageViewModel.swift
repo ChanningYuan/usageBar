@@ -116,6 +116,9 @@ final class UsageViewModel: ObservableObject {
         self.lastRefreshAt = Date()
         self.isRefreshing = false
         log("local done, total \(allStats.count) records")
+
+        // 额度采集：跟随本次刷新（自动 10 分钟 / ⌘R 都会走到这），与 token 聚合并发、互不阻塞。
+        Task { await RateLimitCoordinator.refreshEnabled() }
         triggerJustRefreshedFlash()
 
         // 3) 第二阶段:Cursor 联网拉取(慢,~1.5s),不阻塞上面的 UI commit。

@@ -1,0 +1,132 @@
+import Foundation
+import usageBarProviders
+import usageBarCore
+
+/// 账号额度采集调度（v0.3.24）。
+///
+/// **跟随现有 token 刷新**（自动 10 分钟 + ⌘R），不新增节拍器——`UsageViewModel.refresh()` 末尾
+/// detached 调 `refreshEnabled()`，与 token 聚合并发、互不阻塞（额度是网络/钥匙串 IO，token 是扫盘）。
+///
+/// 只跑「已开启」的 provider（`RateLimitSettings`）。Qoder 一次 read → 复制到三个实例快照。
+@MainActor
+enum RateLimitCoordinator {
+
+    /// 是否允许本次采集去碰系统钥匙串。**冷启动为 false → 不弹授权框**；
+    /// 用户「打开弹层 / 手动刷新 / 在设置里开启」这类主动动作才置 true（见各调用点）。
+    /// 这样授权只发生在用户真正去看额度时，而不是 app 一启动就弹一堆框。
+    static var allowsKeychainAccess = false
+
+    /// 并发去重：一次采集在跑时，后来的调用直接跳过（避免同一轮启动读两遍钥匙串 = 弹两次）。
+    private static var inFlight = false
+
+    /// 某逻辑开关当前的数据源是否需要读系统钥匙串（决定冷启动要不要跳过它）。
+    /// - Qoder：恒需要（token 全加密）。
+    /// - Claude：仅 OAuth 源需要；statusline / CLI 零钥匙串。
+    /// - 其余（Codex 读日志 / Cursor·WorkBuddy 明文）都不需要。
+    static func needsKeychain(_ logicalId: String) -> Bool {
+        switch logicalId {
+        case "qoder": return true
+        case "claude-code": return RateLimitSettings.shared.dataSource(for: "claude-code") == "oauth"
+        default: return false
+        }
+    }
+
+    /// 采集所有已开启的 provider，写入 `RateLimitStore`。
+    /// `force` = 用户主动动作，强制允许碰钥匙串（等价于把 `allowsKeychainAccess` 提前置 true）。
+    static func refreshEnabled(now: Date = Date(), force: Bool = false) async {
+        if force { allowsKeychainAccess = true }
+        guard !inFlight else { return }
+        inFlight = true
+        defer { inFlight = false }
+
+        let s = RateLimitSettings.shared
+        // 冷启动（allowsKeychainAccess=false）时，跳过需要钥匙串的 provider → 不弹框。
+        func canRun(_ id: String) -> Bool { s.isEnabled(id) && (allowsKeychainAccess || !needsKeychain(id)) }
+
+        await withTaskGroup(of: RateLimitSnapshot?.self) { group in
+            if canRun("codex") {
+                group.addTask { CodexRateLimitReader().read(now: now) }
+            }
+            if canRun("claude-code") {
+                let source = s.dataSource(for: "claude-code")
+                group.addTask { await readClaude(source: source, now: now) }
+            }
+            if canRun("cursor") {
+                group.addTask { await CursorRateLimitReader().read(now: now) }
+            }
+            if canRun("qoder") {
+                group.addTask { await QoderRateLimitReader().read(now: now) }
+            }
+            if canRun("workbuddy") {
+                group.addTask { await WorkBuddyRateLimitReader().read(now: now) }
+            }
+            for await snap in group {
+                guard let snap else { continue }
+                store(snap)
+            }
+        }
+    }
+
+    /// 单个逻辑开关立即采一次（设置里刚打开开关时用，免得用户干等 10 分钟）。
+    /// 这是用户主动动作 → 允许碰钥匙串。
+    static func refreshOne(_ logicalId: String, now: Date = Date()) async {
+        allowsKeychainAccess = true
+        let snap: RateLimitSnapshot?
+        switch logicalId {
+        case "codex":       snap = CodexRateLimitReader().read(now: now)
+        case "claude-code": snap = await readClaude(source: RateLimitSettings.shared.dataSource(for: "claude-code"), now: now)
+        case "cursor":      snap = await CursorRateLimitReader().read(now: now)
+        case "qoder":       snap = await QoderRateLimitReader().read(now: now)
+        case "workbuddy":   snap = await WorkBuddyRateLimitReader().read(now: now)
+        default:            snap = nil
+        }
+        if let snap { store(snap) }
+    }
+
+    /// Claude 按用户选中的数据源分派——**严格按选择走，绝不跨线路回落**：
+    /// - `statusline`（默认）：只读注入产生的额度文件，**零钥匙串、零起进程**。读不到就读不到
+    ///   （Claude 还没往文件写），**绝不回落到 OAuth**——否则用户选了「零钥匙串」却被弹授权框（就是这个 bug）。
+    /// - `cli`：只抄 `claude -p /usage`，零钥匙串。同样不回落。
+    /// - `oauth`：读钥匙串 token 打官方 API（用户明确选了这条要授权的路）。
+    private static func readClaude(source: String, now: Date) async -> RateLimitSnapshot {
+        switch source {
+        case "statusline": return ClaudeStatuslineReader().read(now: now)
+        case "cli":        return ClaudeCLIReader().read(now: now)
+        default:           return await ClaudeOAuthUsageReader().read(now: now)
+        }
+    }
+
+    /// 关闭逻辑开关时清掉对应快照（Qoder 清三个）。
+    static func clear(_ logicalId: String) {
+        let ids = logicalId == "qoder" ? QoderRateLimitReader.providerIds : [logicalId]
+        for id in ids { RateLimitStore.shared.remove(id) }
+    }
+
+    /// 取消授权/重置：关开关 + 清已配置标记 + 清快照 + 清 reader 缓存 +（Claude）撤 statusline 注入。
+    /// 之后再开启会重新走引导 + 重新授权。
+    static func revoke(_ logicalId: String) {
+        let s = RateLimitSettings.shared
+        s.setEnabled(logicalId, false)
+        s.clearConfigured(logicalId)
+        clear(logicalId)
+        switch logicalId {
+        case "claude-code":
+            ClaudeOAuthUsageReader.clearCache()
+            StatuslineConfigurator.deconfigure()
+        case "qoder":
+            QoderRateLimitReader.clearCache()
+        default: break
+        }
+    }
+
+    /// Qoder 的快照复制到三个实例；其余原样写入。
+    private static func store(_ snap: RateLimitSnapshot) {
+        if snap.providerId.hasPrefix("qoder") {
+            for id in QoderRateLimitReader.providerIds {
+                RateLimitStore.shared.put(snap.with(providerId: id))
+            }
+        } else {
+            RateLimitStore.shared.put(snap)
+        }
+    }
+}

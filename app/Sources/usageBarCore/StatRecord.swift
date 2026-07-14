@@ -28,6 +28,7 @@ public extension TimeWindow {
     var id: String {
         switch self {
         case .today: return "today"
+        case .yesterday: return "yesterday"
         case .thisWeek: return "thisWeek"
         case .last7Days: return "last7Days"
         case .thisMonth: return "thisMonth"
@@ -38,5 +39,5 @@ public extension TimeWindow {
     }
 
     /// 所有需要预加载到缓存的窗口
-    static let cachedWindows: [TimeWindow] = [.today, .thisWeek, .last7Days, .thisMonth, .last30Days, .all]
+    static let cachedWindows: [TimeWindow] = [.today, .yesterday, .thisWeek, .last7Days, .thisMonth, .last30Days, .all]
 }

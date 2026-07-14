@@ -12,6 +12,8 @@ import usageBarProviders
 struct ProviderDetailView: View {
     @ObservedObject var viewModel: UsageViewModel
     let providerId: String
+    @ObservedObject private var quotaStore = RateLimitStore.shared
+    @ObservedObject private var quotaSettings = RateLimitSettings.shared
 
     @Environment(\.colorScheme) private var scheme
     @ObservedObject private var tabSettings = TabSettings.shared
@@ -52,10 +54,13 @@ struct ProviderDetailView: View {
     private var greenBg: Color { pal.green.opacity(scheme == .dark ? 0.13 : 0.095) }
     /// 中性 segmented 容器底（周期切换器 + 用量/时间 共用）——中性灰避免 accentBg tint 在系统灰底上过亮。
     private var segBg: Color { Color.primary.opacity(scheme == .dark ? 0.08 : 0.06) }
+    /// 周期切换器选中态背景（中性浅色卡片，同主列表 segmented；不用 accent 实心）
+    private var selectedTabBg: Color { scheme == .dark ? Color.white.opacity(0.16) : Color.white }
 
     private var periodLabel: String {
         switch viewModel.window {
         case .today: return "今日"
+        case .yesterday: return "昨日"
         case .thisWeek: return "本周"
         case .last7Days: return "近 7 天"
         case .thisMonth: return "本月"
@@ -69,9 +74,16 @@ struct ProviderDetailView: View {
         VStack(spacing: 0) {
             headerBar
             hairline
+            // M0 账号额度：在周期切换器【之上】—— 结构本身说清「不随周期变」，不用小字打补丁。
+            accountQuotaModule
+            // 周期切换器下沉为独立一行、撑满宽度 —— 管辖范围自明：以下随周期变，以上不变。
+            periodBar
+            hairline
             detailContent
+            hairline
+            footer
         }
-        .frame(width: 400)
+        .frame(width: 440)
         .background(pal.bg)
     }
 
@@ -119,9 +131,139 @@ struct ProviderDetailView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 8)
-            periodSwitcher
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    // MARK: - M0 账号额度模块 + 周期切换栏 + footer（v0.3.24）
+
+    /// M0 账号额度：Hero 之上、周期切换器之上。三态——正常 / 未开启引导 / 错误态说明。
+    /// 只对「有额度数据源」的 provider 显示（Cowork/OpenCode/悟空/WorkBuddy 无，整块不出现）。
+    @ViewBuilder private var accountQuotaModule: some View {
+        if RateLimitSettings.logicalKey(forProvider: providerId) != nil {
+            let snap = quotaStore.snapshot(for: providerId)
+            if !quotaSettings.isEnabled(forProvider: providerId) {
+                quotaBox {
+                    quotaNoteRow("未开启额度监测", action: "去开启 ›")
+                }
+            } else if let snap, !snap.windows.isEmpty {
+                let stale = QuotaFormat.isStale(snap.capturedAt)
+                // 头行按设计稿 bafX0 复原：「账号额度」标签 + plan 标签（Max/prolite…）。
+                // 设计里「账号级·不随周期切换」那句是关掉的，故不显示。
+                quotaBox {
+                    HStack(spacing: 6) {
+                        Text("账号额度")
+                            .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(pal.text2)
+                        if let plan = snap.planType, !plan.isEmpty {
+                            Text(plan)
+                                .font(.system(size: 8, weight: .semibold)).foregroundStyle(pal.text2)
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.08)))
+                        }
+                        Spacer()
+                    }
+                    ForEach(Array(snap.windows.enumerated()), id: \.offset) { _, w in
+                        quotaWindowRow(w, stale: stale)
+                    }
+                }
+            } else if let err = snap?.error {
+                quotaBox { quotaNoteRow(QuotaFormat.errorText(err), action: nil) }
+            }
+        }
+    }
+
+    private func quotaBox<C: View>(@ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 8) { content() }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.primary.opacity(0.04)))
+            .padding(.horizontal, 12).padding(.top, 10)
+    }
+
+    private func quotaNoteRow(_ text: String, action: String?) -> some View {
+        HStack(spacing: 6) {
+            Text("账号额度")
+                .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(pal.text2)
+            Text(text).font(.system(size: 9)).foregroundStyle(pal.text3)
+            Spacer()
+            if let action {
+                Button(action) {
+                    SettingsNavigation.shared.requestFocusQuota()   // 打开设置后定位到「账号额度」段
+                    SettingsWindowController.shared.showWindow()
+                }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
+        }
+    }
+
+    /// 像素对齐设计稿 p8ma3 的额度行（q-5 小时 / q-7 天 / q-Fable）：
+    /// 中文窗口标签(52w) + 轨道 + 百分比(34w) + 「X 后重置」(92w)。
+    private func quotaWindowRow(_ w: RateLimitWindow, stale: Bool) -> some View {
+        let color = stale ? Color.secondary : QuotaFormat.color(w, scheme: scheme)
+        return HStack(spacing: 8) {
+            Text(Self.detailWindowLabel(w))
+                .font(.system(size: 10))
+                .foregroundStyle(pal.text2)
+                .frame(width: 52, alignment: .leading)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.primary.opacity(0.09))
+                    Capsule().fill(color)
+                        .frame(width: max(4, geo.size.width * min(1, w.usedPercent / 100)))
+                }
+            }
+            .frame(height: 5)
+            Text("\(Int(w.usedPercent.rounded()))%")
+                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(color)
+                .frame(width: 34, alignment: .trailing)
+            Text(QuotaFormat.resetTextLong(w.resetsAt, stale: stale) ?? "")
+                .font(.system(size: 9))
+                .foregroundStyle(pal.text3)
+                .frame(width: 92, alignment: .trailing)
+        }
+    }
+
+    /// 详情页额度行的中文窗口标签（主列表药丸仍用 5h/7d 缩写；模型名如 Fable 原样）。
+    private static func detailWindowLabel(_ w: RateLimitWindow) -> String {
+        switch w.label {
+        case "5h": return "5 小时"
+        case "7d": return "7 天"
+        case "1h": return "1 小时"
+        case "1d": return "1 天"
+        case "3d": return "3 天"
+        case "30d": return "30 天"
+        default: return w.label
+        }
+    }
+
+    /// 周期切换器独立一行、撑满宽度。原在 header 里，下沉后管辖范围自明（以上不随周期变，以下变）。
+    private var periodBar: some View {
+        periodSwitcher
+            .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    /// 底部工具栏：刷新时间 + 设置/刷新。**不显示合计**——Hero 已有该 provider 周期总量，重复。
+    private var footer: some View {
+        HStack(spacing: 8) {
+            // 刷新时间居中 —— 与主列表 footer 保持一致（两侧 Spacer 夹住，位置对齐）
+            Spacer()
+            if let last = viewModel.lastRefreshAt {
+                Text("\(last, format: .relative(presentation: .named, unitsStyle: .wide)) 刷新")
+                    .font(.system(size: 10))
+                    .foregroundStyle(pal.text3)
+            }
+            Spacer()
+            Button(action: { SettingsWindowController.shared.showWindow() }) {
+                Image(systemName: "gearshape").font(.system(size: 10)).foregroundStyle(pal.text2)
+            }.buttonStyle(.plain)
+            Button(action: { Task { await viewModel.refresh() } }) {
+                Image(systemName: "arrow.clockwise").font(.system(size: 10)).foregroundStyle(pal.text2)
+            }.buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
     }
 
     /// 周期切换器：直接切外层 tab（今日/本周/…），列表随之跟随；单窗口时退回静态标签。
@@ -142,9 +284,10 @@ struct ProviderDetailView: View {
                     Button(action: { viewModel.changeWindowInDetail(win) }) {
                         Text(win.tabLabel)
                             .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundStyle(win == sel ? onAccent : pal.text2)
-                            .padding(.horizontal, 8).padding(.vertical, 2)
-                            .background(RoundedRectangle(cornerRadius: 4).fill(win == sel ? accent : Color.clear))
+                            .foregroundStyle(win == sel ? pal.text : pal.text2)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 3)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(win == sel ? selectedTabBg : Color.clear))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -219,7 +362,7 @@ struct ProviderDetailView: View {
     private func heroCostLabel(_ c: Double) -> String {
         switch spec.costUnit {
         case .equivalentUSD:
-            return "≈ \(fmtDollar(c)) 等效"
+            return "≈ \(fmtDollar(c))"
         case .credits:
             // 数据自带的内部积分（WorkBuddy），不查价目表
             let n = c >= 100 ? String(format: "%.0f", c)

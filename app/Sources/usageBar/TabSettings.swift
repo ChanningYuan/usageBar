@@ -17,13 +17,15 @@ import usageBarCore
 final class TabSettings: ObservableObject {
     static let shared = TabSettings()
 
-    static let maxTabs = 4
+    static let maxTabs = 5
     /// 全部候选（也是"从未存过配置"时的默认顺序）。
     /// v0.3.13 默认标签＝今日/本周/本月/累计（日历对齐比滚动近7/近30 更贴"这周/这月"直觉）；
-    /// 故把 thisWeek/thisMonth 排在 all 前、近7/近30 靠后当备选。绝大多数从 v0.3.12 升级的用户
-    /// 没有 TabSettings 存档，走此默认。
-    static let allCandidates = ["today", "thisWeek", "thisMonth", "all", "last7Days", "last30Days", "custom"]
-    static let defaultChecked: Set<String> = ["today", "thisWeek", "thisMonth", "all"]
+    /// v0.3.24 新增「昨日」并纳入默认（复盘昨天用量是高频诉求），上限 4→5。
+    /// 故把 yesterday/thisWeek/thisMonth 排在 all 前、近7/近30 靠后当备选。
+    static let allCandidates = ["today", "yesterday", "thisWeek", "thisMonth", "all", "last7Days", "last30Days", "custom"]
+    static let defaultChecked: Set<String> = ["today", "yesterday", "thisWeek", "thisMonth", "all"]
+    /// v0.3.13 的旧默认勾选集——迁移判定用（恰好等于它才自动补昨日）
+    static let legacyDefaultChecked: Set<String> = ["today", "thisWeek", "thisMonth", "all"]
 
     @Published var order: [String] { didSet { UserDefaults.standard.set(order, forKey: Keys.order) } }
     @Published private(set) var checked: Set<String> { didSet { UserDefaults.standard.set(Array(checked), forKey: Keys.checked) } }
@@ -39,6 +41,7 @@ final class TabSettings: ObservableObject {
         static let weekStart = "usagebar.weekStartMonday.v1"
         static let customLo = "usagebar.customLo.v1"
         static let customHi = "usagebar.customHi.v1"
+        static let yesterdayMigrated = "usagebar.yesterdayMigrated.v1"
     }
 
     private init() {
@@ -61,6 +64,21 @@ final class TabSettings: ObservableObject {
         self.weekStartMonday = d.object(forKey: Keys.weekStart) as? Bool ?? true
         self.customLo = d.object(forKey: Keys.customLo) as? Date
         self.customHi = d.object(forKey: Keys.customHi) as? Date
+
+        // v0.3.24 一次性迁移：**未改过标签配置**（勾选恰好等于 v0.3.13 旧默认）的老用户自动补「昨日」。
+        // 幂等——只跑一次（打标记）；用户之后手动取消「昨日」不会被复活。
+        // 新装用户走 defaultChecked（已含 yesterday），checked ≠ legacy → 不进补勾分支，只置标记。
+        if !d.bool(forKey: Keys.yesterdayMigrated) {
+            if checked == Self.legacyDefaultChecked {
+                checked.insert("yesterday")
+                // order 里把 yesterday 挪到 today 之后
+                if let yi = order.firstIndex(of: "yesterday") { order.remove(at: yi) }
+                if let ti = order.firstIndex(of: "today") {
+                    order.insert("yesterday", at: ti + 1)
+                }
+            }
+            d.set(true, forKey: Keys.yesterdayMigrated)
+        }
     }
 
     // MARK: - 派生

@@ -43,6 +43,7 @@ public enum DailyAggregator {
         now: Date = Date()
     ) -> [StatRecord] {
         let today = dayFmt.string(from: now)
+        let yesterday = dayStringDaysAgo(1, from: now)
         let day7 = dayStringDaysAgo(6, from: now)   // 含今天 = 最近 7 天（6 天前到今天）
         let day30 = dayStringDaysAgo(29, from: now) // 含今天 = 最近 30 天
         let weekStart = weekStartDayString(weekStartMonday: weekStartMonday, from: now)
@@ -63,12 +64,13 @@ public enum DailyAggregator {
         for pid in providerIds {
             let dailyMap = sumByProviderDate[pid] ?? [:]
             let cachedMap = cachedByProviderDate[pid] ?? [:]
-            var todayTotal = 0, weekTotal = 0, last7Total = 0, monthTotal = 0, last30Total = 0, allTotal = 0, customTotal = 0
-            var todayCached = 0, weekCached = 0, last7Cached = 0, monthCached = 0, last30Cached = 0, allCached = 0, customCached = 0
+            var todayTotal = 0, yestTotal = 0, weekTotal = 0, last7Total = 0, monthTotal = 0, last30Total = 0, allTotal = 0, customTotal = 0
+            var todayCached = 0, yestCached = 0, weekCached = 0, last7Cached = 0, monthCached = 0, last30Cached = 0, allCached = 0, customCached = 0
             for (date, token) in dailyMap {
                 let c = cachedMap[date] ?? 0
                 allTotal += token; allCached += c
                 if date == today { todayTotal += token; todayCached += c }
+                if date == yesterday { yestTotal += token; yestCached += c }
                 if date >= weekStart { weekTotal += token; weekCached += c }
                 if date >= day7 { last7Total += token; last7Cached += c }
                 if date >= monthStart { monthTotal += token; monthCached += c }
@@ -78,6 +80,7 @@ public enum DailyAggregator {
                 }
             }
             out.append(StatRecord(provider: pid, time: "today", token: todayTotal, cachedToken: todayCached))
+            out.append(StatRecord(provider: pid, time: "yesterday", token: yestTotal, cachedToken: yestCached))
             out.append(StatRecord(provider: pid, time: "thisWeek", token: weekTotal, cachedToken: weekCached))
             out.append(StatRecord(provider: pid, time: "last7Days", token: last7Total, cachedToken: last7Cached))
             out.append(StatRecord(provider: pid, time: "thisMonth", token: monthTotal, cachedToken: monthCached))
@@ -121,6 +124,9 @@ public enum DailyAggregator {
         case .today:
             let today = dayFmt.string(from: now)
             return { $0 == today }
+        case .yesterday:
+            let y = dayStringDaysAgo(1, from: now)
+            return { $0 == y }
         case .thisWeek:
             let s = weekStartDayString(weekStartMonday: weekStartMonday, from: now)
             return { $0 >= s }

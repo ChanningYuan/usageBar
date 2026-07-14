@@ -11,6 +11,10 @@ final class SettingsNavigation: ObservableObject {
     /// 置 true 表示"打开设置后应展开并滚到时间周期标签段"；SettingsView 消费后复位。
     @Published var pendingFocusTimeTabs = false
     func requestFocusTimeTabs() { pendingFocusTimeTabs = true }
+
+    /// 置 true 表示"打开设置后应展开并滚到账号额度段"（从额度「去授权/去开启」入口跳来）。
+    @Published var pendingFocusQuota = false
+    func requestFocusQuota() { pendingFocusQuota = true }
 }
 
 /// Settings 面板(右键菜单 → 偏好设置...)
@@ -24,9 +28,14 @@ struct SettingsView: View {
     @ObservedObject private var tabSettings: TabSettings = .shared
     @ObservedObject private var themeSettings: ThemeSettings = .shared
     @ObservedObject private var nav = SettingsNavigation.shared
+    @ObservedObject private var quotaSettings: RateLimitSettings = .shared
+    @ObservedObject private var quotaStore: RateLimitStore = .shared
     @State private var draggingTab: String?
     @State private var dataSourceExpanded = true
+    @State private var quotaExpanded = true
     @State private var tabsExpanded = true
+    /// 正在展示引导 sheet 的逻辑开关（claude-code / qoder）；nil = 不展示
+    @State private var guideFor: String?
     /// 价目表新鲜度（打开设置时取一次，避免每次重绘都去读磁盘）
     @State private var pricingFreshness: RemotePricing.Freshness?
 
@@ -48,6 +57,8 @@ struct SettingsView: View {
                         Divider()
                         dataSourceSection
                         Divider()
+                        quotaSection.id("quota")
+                        Divider()
                         timeTabsSection.id("timeTabs")
                     }
                     .padding(.horizontal, 16)
@@ -58,9 +69,13 @@ struct SettingsView: View {
                 .onChange(of: nav.pendingFocusTimeTabs) { _, focus in
                     if focus { focusTimeTabs(proxy) }
                 }
+                .onChange(of: nav.pendingFocusQuota) { _, focus in
+                    if focus { focusQuota(proxy) }
+                }
                 .onAppear {
                     // 窗口首次创建：SettingsView 才 appear，此时消费待聚焦请求
                     if nav.pendingFocusTimeTabs { focusTimeTabs(proxy) }
+                    if nav.pendingFocusQuota { focusQuota(proxy) }
                 }
             }
             Divider()
@@ -72,6 +87,29 @@ struct SettingsView: View {
             qoderStatus.refresh()
             pricingFreshness = RemotePricing.shared.freshness()
         }
+        .sheet(isPresented: Binding(get: { guideFor != nil }, set: { if !$0 { guideFor = nil } })) {
+            if let id = guideFor {
+                RateLimitGuideSheet(
+                    logicalId: id,
+                    initialSource: quotaSettings.dataSource(for: id),
+                    onConfirm: { source in confirmGuide(id, source: source) },
+                    onCancel: { guideFor = nil }
+                )
+            }
+        }
+    }
+
+    /// 引导 sheet 确认：Claude 落数据源 +（statusline 时）注入脚本；两者都开启开关并立即采一次。
+    private func confirmGuide(_ id: String, source: String) {
+        if id == "claude-code" {
+            quotaSettings.setDataSource(for: "claude-code", source)
+            if source == "statusline" { _ = StatuslineConfigurator.configure() }
+            else { StatuslineConfigurator.deconfigure() }   // 换到别的源就撤掉注入，别留脏
+        }
+        quotaSettings.markConfigured(id)   // 记住已配置 → 下次开启不再弹引导
+        quotaSettings.setEnabled(id, true)
+        Task { await RateLimitCoordinator.refreshOne(id) }
+        guideFor = nil
     }
 
     // MARK: - Header / Footer
@@ -133,6 +171,15 @@ struct SettingsView: View {
             withAnimation { proxy.scrollTo("timeTabs", anchor: .top) }
         }
         nav.pendingFocusTimeTabs = false
+    }
+
+    /// 额度「去授权/去开启」入口触发：展开账号额度段并滚动到它，然后复位信号。
+    private func focusQuota(_ proxy: ScrollViewProxy) {
+        quotaExpanded = true
+        DispatchQueue.main.async {
+            withAnimation { proxy.scrollTo("quota", anchor: .top) }
+        }
+        nav.pendingFocusQuota = false
     }
 
     // MARK: - 折叠段通用
@@ -273,6 +320,129 @@ struct SettingsView: View {
         .frame(height: 30)
     }
 
+    // MARK: - 账号额度（监测开关折叠段，v0.3.24）
+
+    /// 4 个逻辑开关：Codex 默认开（纯本地），Claude / Qoder / Cursor 默认关（联网 + 读钥匙串）。
+    /// 每行下挂说明——尤其 Claude 那条必须预告「会弹钥匙串授权框」，否则用户被突然弹框吓到会点拒绝。
+    private var quotaSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionHeader("账号额度", count: "已开启 \(quotaSettings.enabled.count) 个", expanded: quotaExpanded) {
+                quotaExpanded.toggle()
+            }
+            if quotaExpanded {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Self.quotaRows, id: \.id) { row in
+                        quotaRow(id: row.id, iconProvider: row.icon, name: row.name, desc: row.desc)
+                    }
+                }
+                .padding(.leading, 2)
+            }
+        }
+    }
+
+    private struct QuotaRowSpec { let id: String; let icon: String; let name: String; let desc: String }
+    private static let quotaRows: [QuotaRowSpec] = [
+        .init(id: "codex", icon: "codex", name: "Codex",
+              desc: "纯本地读日志，零联网。"),
+        .init(id: "claude-code", icon: "claude-code", name: "Claude Code",
+              desc: "开启后随每次刷新向 api.anthropic.com 查询。首次会弹一次系统钥匙串授权框（读取 Claude Code 自己保存的登录凭证），选「始终允许」后不再弹。"),
+        .init(id: "qoder", icon: "qoder-work", name: "Qoder",
+              desc: "读取本机 Qoder 登录凭证并请求 qoder.com（首次同样弹一次钥匙串授权框）。额度是账号级的，CLI / Work / IDE 共用一份。"),
+        .init(id: "cursor", icon: "cursor", name: "Cursor",
+              desc: "读取本机 Cursor 登录凭证并请求 cursor.com。与「数据源 → Cursor」用同一份凭证。"),
+        .init(id: "workbuddy", icon: "workbuddy", name: "WorkBuddy",
+              desc: "读本机明文登录文件（零钥匙串授权）并请求 codebuddy.cn，拿信用点余额。"),
+    ]
+
+    private func quotaRow(id: String, iconProvider: String, name: String, desc: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 10) {
+                ProviderIcon(providerId: iconProvider)
+                    .frame(width: 22, height: 22)
+                Text(name)
+                    .font(.system(size: 11, weight: .medium))
+                // 开启后外显：选了哪个数据源 + 授权/连接状态点（绿=有数据 / 橙=授权失败 / 灰=加载中）
+                if let chip = quotaChip(id: id) {
+                    HStack(spacing: 3) {
+                        Circle().fill(chip.dot).frame(width: 5, height: 5)
+                        Text(chip.text).font(.system(size: 8.5, weight: .medium)).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(Capsule().fill(Color.primary.opacity(0.06)))
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { quotaSettings.isEnabled(id) },
+                    set: { on in
+                        // Claude / Qoder 首次开启弹引导 sheet（选数据源 / 预告钥匙串授权）；
+                        // 已配置过的（曾确认过一次）直接开，不重弹——复用上次数据源，避免"关了再开又弹"的怪感。
+                        if on, id == "claude-code" || id == "qoder", !quotaSettings.isConfigured(id) {
+                            guideFor = id
+                            return   // 先不开，等 sheet 确认；toggle 视觉回弹到关
+                        }
+                        guard quotaSettings.setEnabled(id, on) else { return }
+                        if on {
+                            Task { await RateLimitCoordinator.refreshOne(id) }   // 立即采一次，免得干等 10 分钟
+                        } else {
+                            if id == "claude-code" { StatuslineConfigurator.deconfigure() }  // 关 Claude 时撤 statusline 注入
+                            RateLimitCoordinator.clear(id)                        // 关掉即清快照
+                        }
+                    }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .tint(Color(hex: "#007AFF"))
+            }
+            Text(desc)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 32)
+            // 已配置过的（Claude/Qoder）显示操作区：Claude 可「切换数据源」（重开引导选另一个）；两者都可「重置授权」
+            if quotaSettings.isConfigured(id) {
+                HStack(spacing: 12) {
+                    if id == "claude-code" {
+                        Button("切换数据源") { guideFor = "claude-code" }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Color(hex: "#007AFF"))
+                    }
+                    Button("重置授权") { RateLimitCoordinator.revoke(id) }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Color(hex: "#D97706"))
+                    Spacer()
+                }
+                .padding(.leading, 32)
+            }
+        }
+    }
+
+    /// 设置行状态标签：数据源 + 连接状态点。只对需引导配置的 Claude / Qoder、且已开启时显示。
+    private func quotaChip(id: String) -> (text: String, dot: Color)? {
+        guard id == "claude-code" || id == "qoder", quotaSettings.isEnabled(id) else { return nil }
+        let pid = id == "qoder" ? "qoder-work" : id
+        let snap = quotaStore.snapshot(for: pid)
+        let dot: Color
+        if let snap {
+            if !snap.windows.isEmpty { dot = Color(hex: "#1F8A54") }                       // 有数据 = 绿
+            else if snap.error == .credentialUnavailable || snap.error == .authDenied { dot = Color(hex: "#D97706") }  // 授权失败 = 橙
+            else { dot = .secondary }                                                        // noQuotaData / 加载中 = 灰
+        } else { dot = .secondary }
+        let text: String
+        switch id {
+        case "claude-code":
+            switch quotaSettings.dataSource(for: "claude-code") {
+            case "cli": text = "/usage"
+            case "oauth": text = "联网 API"
+            default: text = "statusline"
+            }
+        default: text = "联网 API"
+        }
+        return (text, dot)
+    }
+
     // MARK: - 时间标签（popover tab 栏配置，折叠段）
 
     /// 时间标签折叠段：展开后勾选哪些周期作为 popover tab + 拖拽排序 + 本周周起始 + 自定义区间。
@@ -387,6 +557,7 @@ struct SettingsView: View {
     private func tabLabel(_ id: String) -> String {
         switch id {
         case "today": return "今日"
+        case "yesterday": return "昨日"
         case "thisWeek": return "本周"
         case "last7Days": return "近 7 天"
         case "thisMonth": return "本月"

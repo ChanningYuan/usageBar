@@ -269,6 +269,8 @@ struct UsageRootView: View {
     @ObservedObject var settings: ProviderVisibilitySettings = .shared
     @ObservedObject var qoderStatus: QoderUsageStatus = .shared
     @ObservedObject var tabSettings: TabSettings = .shared
+    @ObservedObject var quotaSettings: RateLimitSettings = .shared
+    @ObservedObject var quotaStore: RateLimitStore = .shared   // 快照到达时重算弹窗高度
 
     /// GitHub mark(模板图,跟随明暗主题色),给 footer 的"去 GitHub"入口用
     private static let githubIcon: NSImage? = {
@@ -297,9 +299,19 @@ struct UsageRootView: View {
     /// 26pt 行高 + 5pt 间距,加 16pt 上下 padding。header/footer 各约 28pt。
     private var contentHeight: CGFloat {
         let n = max(displayedProviderIds.count, 1)
-        var h = CGFloat(n) * 32 + CGFloat(max(0, n - 1)) * 5 + 16   // 两行行高（名称+细进度条）
-        h += CGFloat(qoderHintCount) * 23   // 每条未开启提示行(18) + 间距(5)
+        // 每块 = 行 32 + 块内上下 padding 6；块间距 5；content 上下 padding 16
+        var h = CGFloat(n) * 38 + CGFloat(max(0, n - 1)) * 5 + 16
+        h += CGFloat(qoderHintCount) * 23    // 未开启提示行(18) + 间距(5)，在块之外
+        h += CGFloat(quotaPillRowCount) * 22 // 额度药丸子行（约 19pt + 块内 VStack 间距 3）
         return h
+    }
+
+    /// 今日 tab 下、已开启监测且有快照的 provider 数量——每个会多挂一行药丸，需计入高度。
+    private var quotaPillRowCount: Int {
+        guard viewModel.window == .today else { return 0 }
+        return displayedProviderIds.filter { pid in
+            quotaSettings.isEnabled(forProvider: pid) && quotaStore.snapshot(for: pid) != nil
+        }.count
     }
 
     private var totalHeight: CGFloat {
@@ -319,7 +331,7 @@ struct UsageRootView: View {
                     Divider()
                     footer
                 }
-                .frame(width: 400, height: totalHeight)
+                .frame(width: 440, height: totalHeight)
                 .background(Color(nsColor: .windowBackgroundColor))
             }
         }
@@ -362,7 +374,7 @@ struct UsageRootView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 220)
+                .frame(width: 260)
                 .controlSize(.small)
                 .labelsHidden()
             }
@@ -414,13 +426,16 @@ struct UsageRootView: View {
                 VStack(spacing: 5) {
                     ForEach(displayed, id: \.self) { pid in
                         let stat = viewModel.stats.first { $0.provider == pid } ?? StatRecord(provider: pid, time: viewModel.window.id, token: 0)
-                        ProviderRowView(
+                        // 整块（provider 行 + 额度药丸）作为一个可选中单元：悬浮高亮包住整块，点击进详情。
+                        // 额度药丸只在「今日 tab + 已开启监测」时挂（额度是"此刻"状态，只属于今日；见 spec §2.3）。
+                        ProviderBlockView(
                             stat: stat,
                             maxToken: maxT,
-                            // 门禁由 provider 声明表决定（有 spec 才能 drill-in），
-                            // 不再手写白名单——加详情页时漏改这里就是「点不进去」。
+                            // 门禁由 provider 声明表决定（有 spec 才能 drill-in）；加详情页时漏改这里就是「点不进去」。
                             expandable: ProviderDetailRegistry.isDrillable(pid),
-                            onExpand: { viewModel.openDetail(pid) }
+                            onExpand: { viewModel.openDetail(pid) },
+                            showsPills: viewModel.window == .today && quotaSettings.isEnabled(forProvider: pid),
+                            providerId: pid
                         )
                         if showsQoderHint(for: pid) {
                             qoderHintRow
@@ -451,6 +466,7 @@ struct UsageRootView: View {
     private var noUsageMessage: String {
         switch viewModel.window {
         case .today:      return "今天还没烧 token —— 快去蹬两下 AI 🚀"
+        case .yesterday:  return "昨天没有用量记录 🚀"
         case .thisWeek:   return "本周还没有用量 —— 去用用 AI 吧 🚀"
         case .last7Days:  return "近 7 天还没有用量 —— 去用用 AI 吧 🚀"
         case .thisMonth:  return "本月还没有用量 —— 去用用 AI 吧 🚀"
@@ -582,14 +598,42 @@ struct UsageRootView: View {
 
 // MARK: - Provider 单行
 
+/// 「provider 行 + 额度药丸」作为一个可选中块：悬浮高亮整块、点击进详情。
+/// 高亮包住行与药丸（此前只高亮行、药丸露在外面）；不再显示悬浮右箭头（每次悬浮都推一下、抖）。
+struct ProviderBlockView: View {
+    let stat: StatRecord
+    let maxToken: Int
+    let expandable: Bool
+    let onExpand: (() -> Void)?
+    let showsPills: Bool
+    let providerId: String
+    @State private var hoveringRow = false
+
+    var body: some View {
+        VStack(spacing: 3) {
+            ProviderRowView(stat: stat, maxToken: maxToken)
+            if showsPills { QuotaPillsRow(providerId: providerId) }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.primary.opacity(expandable && hoveringRow ? 0.05 : 0))
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            if expandable { withAnimation(.easeInOut(duration: 0.12)) { hoveringRow = hovering } }
+        }
+        .onTapGesture { if expandable { onExpand?() } }
+    }
+}
+
+// MARK: - Provider 单行（纯内容：icon + 名称 + 缓存率 + 进度条 + 数字。选中/点击交给外层 ProviderBlockView）
+
 struct ProviderRowView: View {
     let stat: StatRecord
     let maxToken: Int
-    /// 可展开（v1 只有 Claude 订阅 / API）→ 悬浮浮现 › 导航箭头 + 行高亮，点击进详情页
-    var expandable: Bool = false
-    var onExpand: (() -> Void)? = nil
     @State private var hoveringCache = false
-    @State private var hoveringRow = false
 
     private var meta: ProviderMeta { ProviderMetaLookup.meta(for: stat.provider) }
     private var cached: Int { max(0, min(stat.cachedToken, stat.token)) }
@@ -634,25 +678,8 @@ struct ProviderRowView: View {
                 }
                 .frame(width: 66, height: 32, alignment: .trailing)
                 .copyableExact(stat.token)
-
-            // 悬浮才浮现的 › 导航箭头（drill-in「点进详情」指示，不常驻）
-            if expandable && hoveringRow {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .transition(.opacity)
-            }
         }
         .frame(height: 32)
-        .background(
-            RoundedRectangle(cornerRadius: 7)
-                .fill(Color.primary.opacity(expandable && hoveringRow ? 0.05 : 0))
-        )
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            if expandable { withAnimation(.easeInOut(duration: 0.12)) { hoveringRow = hovering } }
-        }
-        .onTapGesture { if expandable { onExpand?() } }
     }
 
     // 悬浮气泡：缓存/非缓存绝对值（白卡片样式，与数字/合计的复制浮层一致）
