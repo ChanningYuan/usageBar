@@ -112,26 +112,45 @@ public struct QoderRateLimitReader {
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 return fail(.network)
             }
-            let plan = obj["userType"] as? String   // API 响应自带 userType，无需本地兜底
-            let quota = obj["userQuota"] as? [String: Any]
-            let total = (quota?["total"] as? NSNumber)?.doubleValue ?? 0
-            if total <= 0 {
-                // 免费版（Community）无信用点额度概念
-                return fail(.noQuotaData)
-            }
-            let used = (quota?["used"] as? NSNumber)?.doubleValue ?? 0
-            let pct = (quota?["percentage"] as? NSNumber)?.doubleValue
-                ?? (obj["totalUsagePercentage"] as? NSNumber)?.doubleValue ?? 0
-            let unit = (quota?["unit"] as? String) ?? "credits"
-            let resets = Self.parseExpiresAt(obj["expiresAt"])
-            let detail = String(format: "%.0f / %.0f %@", used, total, unit)
-            let win = RateLimitWindow(kind: "monthly", label: "月", usedPercent: pct,
-                                      resetsAt: resets, detail: detail)
-            return RateLimitSnapshot(providerId: "qoder-work", windows: [win],
-                                     planType: plan, capturedAt: now, error: nil)
+            return Self.snapshot(fromQuota: obj, now: now)
         } catch {
             return fail(.network)
         }
+    }
+
+    /// 200 响应体 → 快照。静态纯函数，单测直接喂 personal / teams 两种账号的真实返回。
+    /// 字段语义与坑（percentage 双量纲 / orgResourcePackage / expiresAt 归属）
+    /// 见 KB `docs/0715-QoderTeams额度修复/Qoder额度API实录.md`。
+    static func snapshot(fromQuota obj: [String: Any], now: Date) -> RateLimitSnapshot {
+        let plan = obj["userType"] as? String   // API 响应自带 userType，无需本地兜底
+        let quota = obj["userQuota"] as? [String: Any]
+        let total = (quota?["total"] as? NSNumber)?.doubleValue ?? 0
+        if total <= 0 {
+            // 免费版（Community）无信用点额度概念
+            return RateLimitSnapshot(providerId: "qoder-work", windows: [],
+                                     capturedAt: now, error: .noQuotaData)
+        }
+        let used = (quota?["used"] as? NSNumber)?.doubleValue ?? 0
+        // ⚠️ 不能信 API 的 percentage 字段——同一字段两种量纲：personal 账号回 0–100（37 = 37%），
+        // teams 账号回 0–1（1.0 = 100%，2026-07-15 同事 teams 实测，用满的席位显示成了 1%）。
+        // used/total 两种账号语义一致，自己算。
+        let pct = min(100, max(0, used / total * 100))
+        let resets = parseExpiresAt(obj["expiresAt"])   // 顶层唯一，归属套餐的月度刷新
+        // teams 席位配额随组织套餐走，标「套餐」和 Qoder 官方文案对齐；personal 仍叫「月」
+        let seatLabel = plan == "teams" ? "套餐" : "月"
+        var windows = [RateLimitWindow(kind: "monthly", label: seatLabel, usedPercent: pct,
+                                       resetsAt: resets,
+                                       detail: RateLimitWindow.usedOfTotal(used, total))]
+        // teams 独有：组织资源包（购买制点数池，无重置时间，Qoder 官方界面也不给刷新日期）
+        if let pack = obj["orgResourcePackage"] as? [String: Any],
+           let cap = (pack["cap"] as? NSNumber)?.doubleValue, cap > 0 {
+            let pUsed = (pack["used"] as? NSNumber)?.doubleValue ?? 0
+            windows.append(RateLimitWindow(kind: "pack", label: "资源包",
+                                           usedPercent: min(100, max(0, pUsed / cap * 100)),
+                                           detail: RateLimitWindow.usedOfTotal(pUsed, cap)))
+        }
+        return RateLimitSnapshot(providerId: "qoder-work", windows: windows,
+                                 planType: plan, capturedAt: now, error: nil)
     }
 
     /// expiresAt 是 ms epoch；253402214400000（year 9999）等哨兵值当作"无重置"→ nil

@@ -34,7 +34,35 @@ public struct ClaudeStatuslineReader {
         let windows = Self.parseRateLimits(obj)
         if windows.isEmpty { return fail(.noQuotaData) }
         return RateLimitSnapshot(providerId: Self.providerId, windows: windows,
-                                 planType: nil, capturedAt: captured, error: nil)
+                                 planType: Self.planLabel(), capturedAt: captured, error: nil)
+    }
+
+    /// 付费档标签（零钥匙串）：statusline 载荷里**没有** plan 字段（2026-07-15 全量抓包实证），
+    /// 从 `~/.claude.json` 的 `oauthAccount` 明文推导（"default_claude_max_5x" → "Max 5x"）。
+    /// 文件几 MB 且档位极少变 → 进程内缓存一次。
+    nonisolated(unsafe) private static var cachedPlan: String??
+    static func planLabel() -> String? {
+        if let p = cachedPlan { return p }
+        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json")
+        var plan: String?
+        if let data = try? Data(contentsOf: url),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            plan = Self.planLabel(fromConfig: obj)
+        }
+        cachedPlan = plan
+        return plan
+    }
+
+    /// "default_claude_max_5x" → "Max 5x"；"claude_pro" → "Pro"；认不出 → nil（宁缺别乱标）
+    static func planLabel(fromConfig obj: [String: Any]) -> String? {
+        guard let acct = obj["oauthAccount"] as? [String: Any] else { return nil }
+        let tier = (acct["userRateLimitTier"] as? String)
+            ?? (acct["organizationRateLimitTier"] as? String)
+            ?? (acct["organizationType"] as? String) ?? ""
+        guard let r = tier.range(of: "claude_(pro|max)(_[0-9]+x)?", options: .regularExpression) else { return nil }
+        let parts = tier[r].split(separator: "_").dropFirst()   // ["max","5x"] / ["pro"]
+        guard let name = parts.first else { return nil }
+        return parts.count > 1 ? "\(name.capitalized) \(parts.last!)" : name.capitalized
     }
 
     /// 解析 `.rate_limits` 对象：`five_hour`/`seven_day`（+ 可能的分模型 `seven_day_*`）。

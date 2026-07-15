@@ -148,6 +148,7 @@ struct ProviderDetailView: View {
                 }
             } else if let snap, !snap.windows.isEmpty {
                 let stale = QuotaFormat.isStale(snap.capturedAt)
+                let hoisted = QuotaFormat.hoistedReset(snap.windows)
                 // 头行按设计稿 bafX0 复原：「账号额度」标签 + plan 标签（Max/prolite…）。
                 // 设计里「账号级·不随周期切换」那句是关掉的，故不显示。
                 quotaBox {
@@ -161,9 +162,17 @@ struct ProviderDetailView: View {
                                 .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.08)))
                         }
                         Spacer()
+                        // 区头右槽：陈旧说明优先（解释「为什么灰」），否则放上提的重置时间（0715 定稿 B3）
+                        if stale {
+                            Text(QuotaFormat.staleNote(snap.capturedAt) + Self.staleHint(for: snap.providerId))
+                                .font(.system(size: 9)).foregroundStyle(pal.text3)
+                        } else if let t = QuotaFormat.resetTextLong(hoisted) {
+                            Text(t)
+                                .font(.system(size: 9)).foregroundStyle(pal.text3)
+                        }
                     }
                     ForEach(Array(snap.windows.enumerated()), id: \.offset) { _, w in
-                        quotaWindowRow(w, stale: stale)
+                        quotaWindowRow(w, stale: stale, hideReset: hoisted != nil)
                     }
                 }
             } else if let err = snap?.error {
@@ -199,8 +208,10 @@ struct ProviderDetailView: View {
     }
 
     /// 像素对齐设计稿 p8ma3 的额度行（q-5 小时 / q-7 天 / q-Fable）：
-    /// 中文窗口标签(52w) + 轨道 + 百分比(34w) + 「X 后重置」(92w)。
-    private func quotaWindowRow(_ w: RateLimitWindow, stale: Bool) -> some View {
+    /// 中文窗口标签(52w) + 轨道 + 百分比(34w) + 数字列(86w，有 detail 才有) + 「X 后重置」(92w)。
+    /// hideReset = 重置已上提区头（0715 定稿 B3），整列不渲染、轨道加长。
+    private func quotaWindowRow(_ w: RateLimitWindow, stale: Bool, hideReset: Bool = false) -> some View {
+        let w = QuotaFormat.displayWindow(w)   // 重置点已过 → 按已用 0% 展示（空条 + 「已重置」）
         let color = stale ? Color.secondary : QuotaFormat.color(w, scheme: scheme)
         return HStack(spacing: 8) {
             Text(Self.detailWindowLabel(w))
@@ -219,11 +230,28 @@ struct ProviderDetailView: View {
                 .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(color)
                 .frame(width: 34, alignment: .trailing)
-            Text(QuotaFormat.resetTextLong(w.resetsAt, stale: stale) ?? "")
-                .font(.system(size: 9))
-                .foregroundStyle(pal.text3)
-                .frame(width: 92, alignment: .trailing)
+            // used/total 数字列（Qoder 有 detail，Claude/Codex 无 → 列整体缺席，不占宽）
+            // 0715 对焦稿定稿 B1：行内一列、mono 右对齐；进度条变短的代价已过目拍板
+            if let d = w.detail {
+                Text(d)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(pal.text)
+                    .frame(width: 86, alignment: .trailing)
+            }
+            if !hideReset {
+                Text(QuotaFormat.resetTextLong(w.resetsAt) ?? "")
+                    .font(.system(size: 9))
+                    .foregroundStyle(pal.text3)
+                    .frame(width: 92, alignment: .trailing)
+            }
         }
+    }
+
+    /// 陈旧说明的补救提示：statusline 源只在 Claude 会话开着时写数据，指条明路；其余源等自动重试即可
+    private static func staleHint(for providerId: String) -> String {
+        guard providerId == "claude-code",
+              RateLimitSettings.shared.dataSources["claude-code"] == "statusline" else { return "" }
+        return " · 打开 Claude 会话后自动更新"
     }
 
     /// 详情页额度行的中文窗口标签（主列表药丸仍用 5h/7d 缩写；模型名如 Fable 原样）。

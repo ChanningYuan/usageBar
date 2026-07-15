@@ -51,7 +51,8 @@ public struct ClaudeCLIReader {
         let windows = Self.parseUsageText(text)
         if windows.isEmpty { return fail(.noQuotaData) }
         return RateLimitSnapshot(providerId: Self.providerId, windows: windows,
-                                 planType: nil, capturedAt: now, error: nil)
+                                 planType: ClaudeStatuslineReader.planLabel(),   // 零钥匙串，来源同 statusline
+                                 capturedAt: now, error: nil)
     }
 
     /// 解析 `/usage` 文本输出：

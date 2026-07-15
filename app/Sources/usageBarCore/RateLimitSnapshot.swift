@@ -26,7 +26,8 @@ public struct RateLimitWindow: Codable, Sendable, Equatable {
     public let severity: String?
     /// 分模型限额的模型名（如 "Fable"），非分模型窗口为 nil
     public let scopeModel: String?
-    /// 附注，如 "1,234 / 5,000 Credits"（Qoder 月配额用）
+    /// used/total 附注，如 "1,234/5,000"（Qoder / WorkBuddy 信用点配额用；统一走 `usedOfTotal`）。
+    /// v0.3.25 起详情页额度行与主列表药丸都会渲染它（0715 对焦稿 B1/P1 定稿），保持紧凑。
     public let detail: String?
 
     public init(kind: String, label: String, windowMinutes: Int? = nil, usedPercent: Double,
@@ -40,6 +41,16 @@ public struct RateLimitWindow: Codable, Sendable, Equatable {
         self.severity = severity
         self.scopeModel = scopeModel
         self.detail = detail
+    }
+
+    /// "6,000/6,000" —— `detail` 字段的统一紧凑格式（千分位、无单位；单位在信用点语境下自明）
+    public static func usedOfTotal(_ used: Double, _ total: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        let u = f.string(from: NSNumber(value: used)) ?? String(Int(used))
+        let t = f.string(from: NSNumber(value: total)) ?? String(Int(total))
+        return "\(u)/\(t)"
     }
 
     /// 由 `windowMinutes` 推导展示 label（探针铁律：别按窗口名写死）。
