@@ -5,29 +5,32 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.24</h3>
+<h3>usageBar 0.3.25</h3>
+<p><b>修复</b></p>
+<ul>
+<li><b>Qoder Teams 账号额度显示错误</b>：Teams 账号「用满 100%」被显示成 1%——官方接口的百分比字段在 Teams 账号是 0–1 小数、个人账号是 0–100，两种刻度混用。现改为用「已用/总量」自己计算，不再受该字段影响。</li>
+<li><b>Claude Code 额度的重置倒计时在数据陈旧时被隐藏</b>：重置时间是绝对时间点，即使数据是几小时前采的、倒计时依然准确，现改为始终实时显示；已过重置点则显示「已重置」，并在额度区标注「更新于 x 前」（statusline 来源还会提示&quot;打开 Claude 会话后自动更新&quot;），不再无解释地置灰。</li>
+</ul>
 <p><b>新增</b></p>
 <ul>
-<li><b>账号额度显示</b>：主列表「今日」标签下、开启监测的工具会多显示一行额度（如 `5h 42% ｜ 3h15min 重置`、`7d 52%`），进详情页顶部还有更完整的账号额度模块（各时间窗的用量条 + 重置倒计时 + 付费档标签）。覆盖 5 个工具：Codex、Claude Code、Qoder、Cursor、WorkBuddy。额度只在「今日」标签显示——它是「此刻」的状态，不随周期变。</li>
-<li><b>数据获取方式可选（Claude Code）</b>：开启 Claude 额度时可三选一——<b>statusline 搭便车</b>（推荐，往你的 statusline.sh 自动加一行、Claude 刷新状态栏就把额度写到本地文件，零钥匙串、零起进程）、<b>跑 /usage</b>（后台跑 `claude -p /usage` 读取，零钥匙串）、<b>联网 API</b>（读系统钥匙串里的登录凭证直连 api.anthropic.com，数据最全含分模型限额）。设置里可随时切换 / 重置。</li>
-<li><b>「昨日」时间标签</b>：时间周期标签新增「昨日」，默认标签变为 今日 / 昨日 / 本周 / 本月 / 累计 五个（老用户若改过配置则保持原样、只多一个「昨日」候选）。</li>
+<li><b>Qoder Teams 显示组织资源包</b>：Teams 账号在席位套餐之外多显示一行「资源包」（组织共享的购买制点数池），额度一目了然。</li>
+<li><b>额度显示 used/total 数字</b>：详情页额度行与主列表药丸不再只有百分比，同时显示「6,000/6,000」这样的原始数字（Qoder / WorkBuddy 信用点类额度）。</li>
+<li><b>价格表拉取兜底</b>：公司安全软件按进程拦截 app 网络请求时（token 统计不受影响、但价格表停更），自动改用系统 curl 再试一次；拉取失败的具体原因会写入系统日志（Console.app 搜 `com.yuanchenyu.usageBar` 可查），便于排查。</li>
 </ul>
 <p><b>变化</b></p>
 <ul>
-<li><b>额度默认开的三个是零钥匙串的</b>：Codex（读本地日志）、WorkBuddy（读明文登录文件）、Cursor（读明文凭证）默认开启；Claude、Qoder 涉及系统钥匙串授权，默认关，需你主动开并走一次引导。全程只在你打开弹层 / 手动刷新 / 主动开启时才会读钥匙串，app 启动本身不会弹授权框。</li>
-<li><b>Qoder 额度自动降级</b>：额度是账号级的、CLI / Work / IDE 共用一份；哪个产品登录了就用哪个的凭证去查，只对用到的那个授权一次。</li>
-<li><b>时间标签上限从 4 个提到 5 个</b>。</li>
+<li><b>重置时间显示精简</b>：只有一个重置时间的工具（Qoder / Codex / WorkBuddy 等），重置时间上提到额度区头部 / 药丸行尾，只写一遍；主列表药丸的倒计时只保留最高位（如 `6d 重置` 而非 `6d22h 重置`），精确值看详情页。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.24</title>
-            <pubDate>Wed, 15 Jul 2026 03:15:54 +0800</pubDate>
-            <sparkle:version>0.3.24</sparkle:version>
-            <sparkle:shortVersionString>0.3.24</sparkle:shortVersionString>
+            <title>0.3.25</title>
+            <pubDate>Wed, 15 Jul 2026 12:28:33 +0800</pubDate>
+            <sparkle:version>0.3.25</sparkle:version>
+            <sparkle:shortVersionString>0.3.25</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/download/v0.3.24/usageBar.zip" length="2356659" type="application/octet-stream" sparkle:edSignature="9Yyd6qE59/pbL9fALSb0l/FSXc6PkrLZ+bBM060ZvgYAGeU6GphvFWTYDIVYdkKNftADvVkeHuCKA32y3xUHCQ=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/download/v0.3.25/usageBar.zip" length="2371466" type="application/octet-stream" sparkle:edSignature="Nj7qlLpfo22NasT5RjjYgfCQtCz6aKiJROD/VuVf1n9sE5el/e3M9ExaxMQhH7DqXIdoVWrWH1uwd6o0b9RWBw=="/>
         </item>
     </channel>
 </rss>
