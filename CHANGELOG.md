@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.26] - 2026-07-17
+
+### 新增
+- **会话列表跟随手动改名**：在 Claude Code 里用 `/rename` 改过名的会话，会话列表现在优先显示你改的名字（此前只认自动生成的标题，改名后列表纹丝不动）。优先级：手动改名 > 自动标题 > 首句输入；复用同一列表的 Cowork / Qoder CLI / Qoder Work 一并生效。
+- **账号额度历史记录**：额度数据变化时自动追加一条到 `quota-history.jsonl`（应用支持目录，纯本地文件），覆盖所有工具的额度池——信用点类（Qoder / WorkBuddy）记原始已用/总量，百分比类（Claude / Codex / Cursor）记百分比——为后续消耗分析积累数据。只在数值变化时写入，体积可忽略；界面无变化。
+
 ## [0.3.25] - 2026-07-15
 
 ### 修复

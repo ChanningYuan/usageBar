@@ -140,14 +140,16 @@ public struct QoderRateLimitReader {
         let seatLabel = plan == "teams" ? "套餐" : "月"
         var windows = [RateLimitWindow(kind: "monthly", label: seatLabel, usedPercent: pct,
                                        resetsAt: resets,
-                                       detail: RateLimitWindow.usedOfTotal(used, total))]
+                                       detail: RateLimitWindow.usedOfTotal(used, total),
+                                       used: used, total: total)]
         // teams 独有：组织资源包（购买制点数池，无重置时间，Qoder 官方界面也不给刷新日期）
         if let pack = obj["orgResourcePackage"] as? [String: Any],
            let cap = (pack["cap"] as? NSNumber)?.doubleValue, cap > 0 {
             let pUsed = (pack["used"] as? NSNumber)?.doubleValue ?? 0
             windows.append(RateLimitWindow(kind: "pack", label: "资源包",
                                            usedPercent: min(100, max(0, pUsed / cap * 100)),
-                                           detail: RateLimitWindow.usedOfTotal(pUsed, cap)))
+                                           detail: RateLimitWindow.usedOfTotal(pUsed, cap),
+                                           used: pUsed, total: cap))
         }
         return RateLimitSnapshot(providerId: "qoder-work", windows: windows,
                                  planType: plan, capturedAt: now, error: nil)

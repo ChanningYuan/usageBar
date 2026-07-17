@@ -73,7 +73,8 @@ public struct WorkBuddyRateLimitReader {
             let pct = cycleSize > 0 ? (used / cycleSize) * 100 : 0
             let win = RateLimitWindow(kind: "monthly", label: "月", usedPercent: pct,
                                       resetsAt: cycleEnd,
-                                      detail: RateLimitWindow.usedOfTotal(used, cycleSize))
+                                      detail: RateLimitWindow.usedOfTotal(used, cycleSize),
+                                      used: used, total: cycleSize)
             return RateLimitSnapshot(providerId: Self.providerId, windows: [win],
                                      planType: pkgName, capturedAt: now, error: nil)
         } catch {

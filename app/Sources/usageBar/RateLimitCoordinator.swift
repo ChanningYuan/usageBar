@@ -121,12 +121,23 @@ enum RateLimitCoordinator {
 
     /// Qoder 的快照复制到三个实例；其余原样写入。
     private static func store(_ snap: RateLimitSnapshot) {
+        recordHistory(snap)
         if snap.providerId.hasPrefix("qoder") {
             for id in QoderRateLimitReader.providerIds {
                 RateLimitStore.shared.put(snap.with(providerId: id))
             }
         } else {
             RateLimitStore.shared.put(snap)
+        }
+    }
+
+    /// 额度历史流水（v0.3.26）：所有 provider 的额度池，变化才落一行（0717 定稿）。
+    /// ⚠️ 必须在 Qoder 三份复制**前**、以账号级逻辑 id 记一次，否则一次变化写 3 行重复。
+    /// 失败快照（error != nil）由 QuotaHistoryStore 内部拦截，不记陈旧数据。
+    private static func recordHistory(_ snap: RateLimitSnapshot) {
+        let logicalId = snap.providerId.hasPrefix("qoder") ? "qoder" : snap.providerId
+        Task.detached {
+            await QuotaHistoryStore.shared.record(provider: logicalId, snapshot: snap)
         }
     }
 }

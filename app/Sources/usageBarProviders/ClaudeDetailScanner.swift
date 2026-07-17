@@ -24,6 +24,7 @@ public actor ClaudeDetailScanner {
     }
 
     private struct SessionMeta {
+        var customTitle: String? = nil
         var aiTitle: String?
         var firstUserText: String?
         var cwd: String?
@@ -79,6 +80,7 @@ public actor ClaudeDetailScanner {
             units.append(contentsOf: fp.units)
             for (sid, m) in fp.metas {
                 if var existing = metas[sid] {
+                    existing.customTitle = m.customTitle ?? existing.customTitle
                     existing.aiTitle = m.aiTitle ?? existing.aiTitle
                     existing.firstUserText = existing.firstUserText ?? m.firstUserText
                     existing.cwd = existing.cwd ?? m.cwd
@@ -180,6 +182,17 @@ public actor ClaudeDetailScanner {
                     metas[sid] = m
                 }
 
+            case "custom-title":
+                // 用户 /rename 手动改名（`{"type":"custom-title","customTitle":"...","sessionId":"..."}`，
+                // 无 timestamp）。优先级最高——手动命名是用户明确意图，压过 ai-title 自动标题。
+                // 同版 rename 还会写一条 `agent-name`，此处不解析它：subagent 场景也用该类型，会误伤。
+                if let t = (obj["customTitle"] as? String), !t.isEmpty {
+                    let ts = metas[sid]?.lastActivity ?? .distantPast
+                    var m = metas[sid] ?? SessionMeta(aiTitle: nil, firstUserText: nil, cwd: nil, lastActivity: ts)
+                    m.customTitle = t      // 取最后一条（多次 rename 后写覆盖前写）
+                    metas[sid] = m
+                }
+
             case "user":
                 if metas[sid]?.firstUserText == nil,
                    (obj["isMeta"] as? Bool) != true,
@@ -263,7 +276,8 @@ public actor ClaudeDetailScanner {
 
         let sessions = bySession.map { (sid, tb) -> SessionDetailRecord in
             let m = metas[sid]
-            let title = m?.aiTitle
+            let title = m?.customTitle
+                ?? m?.aiTitle
                 ?? m?.firstUserText
                 ?? m?.cwd.map { ($0 as NSString).lastPathComponent }
                 ?? "(无标题会话)"

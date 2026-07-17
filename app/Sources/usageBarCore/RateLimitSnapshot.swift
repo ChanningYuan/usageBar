@@ -29,10 +29,15 @@ public struct RateLimitWindow: Codable, Sendable, Equatable {
     /// used/total 附注，如 "1,234/5,000"（Qoder / WorkBuddy 信用点配额用；统一走 `usedOfTotal`）。
     /// v0.3.25 起详情页额度行与主列表药丸都会渲染它（0715 对焦稿 B1/P1 定稿），保持紧凑。
     public let detail: String?
+    /// 原始已用数（信用点池用；`detail` 只是它的展示格式化）。v0.3.26 供额度历史记录做变化判断与分析，
+    /// 百分比型窗口（Claude/Codex）为 nil。可选字段，老快照 JSON 解码自动得 nil，向后兼容。
+    public let used: Double?
+    /// 原始总额（同上）
+    public let total: Double?
 
     public init(kind: String, label: String, windowMinutes: Int? = nil, usedPercent: Double,
                 resetsAt: Date? = nil, severity: String? = nil, scopeModel: String? = nil,
-                detail: String? = nil) {
+                detail: String? = nil, used: Double? = nil, total: Double? = nil) {
         self.kind = kind
         self.label = label
         self.windowMinutes = windowMinutes
@@ -41,6 +46,8 @@ public struct RateLimitWindow: Codable, Sendable, Equatable {
         self.severity = severity
         self.scopeModel = scopeModel
         self.detail = detail
+        self.used = used
+        self.total = total
     }
 
     /// "6,000/6,000" —— `detail` 字段的统一紧凑格式（千分位、无单位；单位在信用点语境下自明）

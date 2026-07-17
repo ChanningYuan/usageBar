@@ -35,6 +35,52 @@ final class SessionTitleTests: XCTestCase {
                      "全是尖括号包裹的系统块时应返回 nil，让上层退到下一档标题源")
     }
 
+    // MARK: - /rename 手动改名（custom-title）
+
+    /// v0.3.26：Claude Code `/rename` 写入的是 `{"type":"custom-title","customTitle":"..."}`，
+    /// 与 AI 自动标题（`ai-title`）是**两个字段**。此前扫描器只认 ai-title → 用户改名后
+    /// usageBar 会话列表纹丝不动。手动命名是用户明确意图，优先级必须压过自动标题。
+    func testCustomTitleFromRenameBeatsAiTitle() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("usageBar-title-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let lines = [
+            #"{"type":"user","sessionId":"S1","timestamp":"2026-07-16T03:00:00.000Z","message":{"role":"user","content":"第一句用户输入"}}"#,
+            #"{"type":"assistant","sessionId":"S1","timestamp":"2026-07-16T03:00:05.000Z","message":{"id":"msg_t1","model":"claude-fable-5","usage":{"input_tokens":10,"output_tokens":5}}}"#,
+            #"{"type":"ai-title","aiTitle":"AI 自动起的标题","sessionId":"S1","timestamp":"2026-07-16T03:00:10.000Z"}"#,
+            #"{"type":"custom-title","customTitle":"第一次改名","sessionId":"S1"}"#,
+            #"{"type":"custom-title","customTitle":"第二次改名","sessionId":"S1"}"#,
+        ]
+        try lines.joined(separator: "\n")
+            .write(to: dir.appendingPathComponent("s1.jsonl"), atomically: true, encoding: .utf8)
+
+        let detail = await ClaudeDetailScanner().detail(providerId: "claude-code", root: dir, window: .all)
+        XCTAssertEqual(detail.sessions.count, 1)
+        XCTAssertEqual(detail.sessions.first?.title, "第二次改名",
+                       "⛔ 回归：/rename 的 custom-title 没生效（应压过 ai-title，且多次改名取最后一条）")
+    }
+
+    /// 没有 rename 时行为不变：ai-title → 首条用户输入 的旧优先级不受影响。
+    func testAiTitleStillWinsWithoutCustomTitle() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("usageBar-title-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let lines = [
+            #"{"type":"user","sessionId":"S2","timestamp":"2026-07-16T03:00:00.000Z","message":{"role":"user","content":"第一句用户输入"}}"#,
+            #"{"type":"assistant","sessionId":"S2","timestamp":"2026-07-16T03:00:05.000Z","message":{"id":"msg_t2","model":"claude-fable-5","usage":{"input_tokens":10,"output_tokens":5}}}"#,
+            #"{"type":"ai-title","aiTitle":"AI 自动起的标题","sessionId":"S2","timestamp":"2026-07-16T03:00:10.000Z"}"#,
+        ]
+        try lines.joined(separator: "\n")
+            .write(to: dir.appendingPathComponent("s2.jsonl"), atomically: true, encoding: .utf8)
+
+        let detail = await ClaudeDetailScanner().detail(providerId: "claude-code", root: dir, window: .all)
+        XCTAssertEqual(detail.sessions.first?.title, "AI 自动起的标题")
+    }
+
     // MARK: - ClaudeDetailScanner 已是「通用」扫描器
 
     /// ⛔ 最严重的那个：`aggregate` 里曾硬判 `providerId == "claude-code"`，其余一律返回空。
