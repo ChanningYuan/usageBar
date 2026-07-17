@@ -5,32 +5,22 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.25</h3>
-<p><b>修复</b></p>
-<ul>
-<li><b>Qoder Teams 账号额度显示错误</b>：Teams 账号「用满 100%」被显示成 1%——官方接口的百分比字段在 Teams 账号是 0–1 小数、个人账号是 0–100，两种刻度混用。现改为用「已用/总量」自己计算，不再受该字段影响。</li>
-<li><b>Claude Code 额度的重置倒计时在数据陈旧时被隐藏</b>：重置时间是绝对时间点，即使数据是几小时前采的、倒计时依然准确，现改为始终实时显示；已过重置点则显示「已重置」，并在额度区标注「更新于 x 前」（statusline 来源还会提示&quot;打开 Claude 会话后自动更新&quot;），不再无解释地置灰。</li>
-</ul>
+<h3>usageBar 0.3.26</h3>
 <p><b>新增</b></p>
 <ul>
-<li><b>Qoder Teams 显示组织资源包</b>：Teams 账号在席位套餐之外多显示一行「资源包」（组织共享的购买制点数池），额度一目了然。</li>
-<li><b>额度显示 used/total 数字</b>：详情页额度行与主列表药丸不再只有百分比，同时显示「6,000/6,000」这样的原始数字（Qoder / WorkBuddy 信用点类额度）。</li>
-<li><b>价格表拉取兜底</b>：公司安全软件按进程拦截 app 网络请求时（token 统计不受影响、但价格表停更），自动改用系统 curl 再试一次；拉取失败的具体原因会写入系统日志（Console.app 搜 `com.yuanchenyu.usageBar` 可查），便于排查。</li>
-</ul>
-<p><b>变化</b></p>
-<ul>
-<li><b>重置时间显示精简</b>：只有一个重置时间的工具（Qoder / Codex / WorkBuddy 等），重置时间上提到额度区头部 / 药丸行尾，只写一遍；主列表药丸的倒计时只保留最高位（如 `6d 重置` 而非 `6d22h 重置`），精确值看详情页。</li>
+<li><b>会话列表跟随手动改名</b>：在 Claude Code 里用 `/rename` 改过名的会话，会话列表现在优先显示你改的名字（此前只认自动生成的标题，改名后列表纹丝不动）。优先级：手动改名 &gt; 自动标题 &gt; 首句输入；复用同一列表的 Cowork / Qoder CLI / Qoder Work 一并生效。</li>
+<li><b>账号额度历史记录</b>：额度数据变化时自动追加一条到 `quota-history.jsonl`（应用支持目录，纯本地文件），覆盖所有工具的额度池——信用点类（Qoder / WorkBuddy）记原始已用/总量，百分比类（Claude / Codex / Cursor）记百分比——为后续消耗分析积累数据。只在数值变化时写入，体积可忽略；界面无变化。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.25</title>
-            <pubDate>Wed, 15 Jul 2026 12:28:33 +0800</pubDate>
-            <sparkle:version>0.3.25</sparkle:version>
-            <sparkle:shortVersionString>0.3.25</sparkle:shortVersionString>
+            <title>0.3.26</title>
+            <pubDate>Fri, 17 Jul 2026 12:55:54 +0800</pubDate>
+            <sparkle:version>0.3.26</sparkle:version>
+            <sparkle:shortVersionString>0.3.26</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/download/v0.3.25/usageBar.zip" length="2371466" type="application/octet-stream" sparkle:edSignature="Nj7qlLpfo22NasT5RjjYgfCQtCz6aKiJROD/VuVf1n9sE5el/e3M9ExaxMQhH7DqXIdoVWrWH1uwd6o0b9RWBw=="/>
+            <enclosure url="https://github.com/ChanningYuan/usageBar/releases/download/v0.3.26/usageBar.zip" length="2387994" type="application/octet-stream" sparkle:edSignature="ZdjDshoIJ6EyJpWpQt+dU1C1Y8wpU38H+pBbVQkxxzm1E2DhAs9eZUoRtlPOkK5+hRdBzGv1rRz9tK3zilLXDQ=="/>
         </item>
     </channel>
 </rss>
