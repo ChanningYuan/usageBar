@@ -606,9 +606,9 @@ private extension View {
     }
 }
 
-// MARK: - Qoder SDK token 统计开关横幅（CLI / Work / 千问办公共用）
+// MARK: - Qoder SDK token 统计开关横幅（统一管理 CLI / Work / 千问办公）
 
-/// Qoder CLI、QoderWork、千问办公共用同一个 env gate。
+/// 一键同时管理 Qoder 的 `QODER_` gate 与千问办公的 `QODERCN_` gate。
 ///
 /// - `isAnyGatedPresent==false`（三个产品都没用过）→ 整条不出现。
 /// - 未开启 → 橙底警告文案 + [一键开启]。
@@ -637,7 +637,7 @@ private struct QoderUsageBanner: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(.orange)
-                Text("Qoder CLI / QoderWork / 千问办公默认不记录本地 token 真值。需把环境变量 \(status.envName) 设为 1，才能统计之后的新请求。")
+                Text("Qoder CLI / QoderWork 需开启 QODER_EXPOSE_TOKEN_USAGE；千问办公需开启 QODERCN_EXPOSE_TOKEN_USAGE。两者都只统计开启后的新请求。")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -669,7 +669,7 @@ private struct QoderUsageBanner: View {
             Text("首次开启后 CLI 新开终端；QoderWork / 千问办公需重启 app")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("已写入 \(status.profileDisplayName)：export \(status.envName)=1")
+            Text("已写入 \(status.profileDisplayName)：\n\(status.envExports)")
                 .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)

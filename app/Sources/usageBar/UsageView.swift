@@ -292,13 +292,16 @@ struct UsageRootView: View {
     }()
 
     /// 某个受 gate 的产品是否该在它行下挂"未开启"提示。
-    /// 三者各自挂一条（同一个 env，点任一跳设置页都能看到是共享开关）。
+    /// Qoder 两条产品线看 QODER_ gate；千问办公单独看 QODERCN_ gate。
     private func showsQoderHint(for pid: String) -> Bool {
-        guard !qoderStatus.isEnabled, visibleProviderIds.contains(pid) else { return false }
+        guard visibleProviderIds.contains(pid) else { return false }
         switch pid {
-        case "qoder-cli":  return qoderStatus.isCliPresent
-        case "qoder-work": return qoderStatus.isWorkPresent
-        case "qwen-work":  return qoderStatus.isQwenWorkPresent
+        case "qoder-cli":
+            return qoderStatus.isCliPresent && !qoderStatus.isQoderEnabled
+        case "qoder-work":
+            return qoderStatus.isWorkPresent && !qoderStatus.isQoderEnabled
+        case "qwen-work":
+            return qoderStatus.isQwenWorkPresent && !qoderStatus.isQwenWorkEnabled
         default:           return false
         }
     }

@@ -29,7 +29,7 @@
 
 > 🥇 标记的三行 = **Qoder 全家桶**：CLI、Work、IDE 三条线全部覆盖，目前 GitHub 上仅此一家做到全部可计量。
 >
-> Qoder CLI / Work / 千问办公默认把 token 真值关闭。usageBar 会在检测到本地会话后提示一键设置 `QODER_EXPOSE_TOKEN_USAGE=1`；只对开启后的新请求生效，两个桌面 app 需重启。
+> Qoder CLI / Work / 千问办公默认把 token 真值关闭。usageBar 会在检测到本地会话后提示一键设置 `QODER_EXPOSE_TOKEN_USAGE=1`（Qoder）与 `QODERCN_EXPOSE_TOKEN_USAGE=1`（千问办公）；只对开启后的新请求生效，两个桌面 app 需重启。
 >
 > 各工具的 "token" 口径不完全一致（有的含 cache 拆分、有的只有 input/output），所以条形图长度是**量级参考**，不是严格同口径对比。
 

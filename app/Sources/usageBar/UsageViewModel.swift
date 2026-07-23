@@ -102,7 +102,7 @@ final class UsageViewModel: ObservableObject {
         // 2) 第一阶段聚合(本地数据,秒回)。Cursor 此刻读的是已有 mirror(可能是旧值)。
         await commitAggregation(providerIds: providerIds, log: log)
         // 首次运行智能默认：只保留「用过」的 provider（有用量 ∪ 有本地数据），其余自动隐藏（仅一次）。
-        // Qoder CLI / Work / 千问办公特例：没开 QODER_EXPOSE_TOKEN_USAGE 时本地日志零 token，仍按会话文件算
+        // Qoder CLI / Work / 千问办公特例：没开各自 EXPOSE_TOKEN_USAGE gate 时日志零 token，仍按会话文件算
         // 「用过」，否则会被自动隐藏 → 连「去开启」横幅都看不到（见 docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md）。
         // （IDE 不受 gate，用过必有 token>0，本就进 keep，无需特判。）
         var keep = Set(allStats.filter { $0.token > 0 }.map { $0.provider })

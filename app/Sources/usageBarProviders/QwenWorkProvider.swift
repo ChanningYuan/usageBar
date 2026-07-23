@@ -51,7 +51,7 @@ enum QwenWorkSegmentParser {
                 cacheCreate1h: 0,
                 cacheRead: nonNegativeInt(data["cache_read_input_tokens"])
             )
-            // 未打开 QODER_EXPOSE_TOKEN_USAGE 时事件仍存在，但四列全 0；不写入账本噪声。
+            // 未打开 QODERCN_EXPOSE_TOKEN_USAGE 时事件仍存在，但四列全 0；不写入账本噪声。
             guard tokens.total > 0 else { return }
 
             // segment 理论上一请求只写一次 completed；仍按 request_id 防御性去重，
@@ -134,7 +134,7 @@ actor QwenWorkEventStore {
 /// - segment 的 `model.response.completed` 是逐模型请求事件，直接给出 input / output /
 ///   cache_creation / cache_read 四列，还有 request_id、模型和时间，能稳定去重和拆详情。
 ///
-/// token 真值受 Qoder SDK 共用的 `QODER_EXPOSE_TOKEN_USAGE=1` gate 控制。未开启时历史事件
+/// token 真值受 CN SDK 的 `QODERCN_EXPOSE_TOKEN_USAGE=1` gate 控制。未开启时历史事件
 /// 四列为 0，无法事后恢复；usageBar 的设置页会提示开启，只对之后的新请求生效。
 public struct QwenWorkProvider: UsageProvider {
     public let id = "qwen-work"
