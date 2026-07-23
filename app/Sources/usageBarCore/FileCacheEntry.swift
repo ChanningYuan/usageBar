@@ -24,7 +24,7 @@ public struct FileCacheEntry: Codable, Sendable, Equatable {
 
 /// 单文件内"某 provider 在某天的总 token"
 public struct FileDailyRecord: Codable, Sendable, Equatable {
-    /// "claude-code" / "cowork" / "qoder-cli" / "qoder-work" / "qoder-ide" / "codex" / "wukong"
+    /// "claude-code" / "cowork" / "qoder-cli" / "qoder-work" / "qoder-ide" / "qwen-work" / "codex" / "wukong"
     public let provider: String
     /// "2026-05-20" 本地日期（按 Asia/Shanghai）
     public let date: String

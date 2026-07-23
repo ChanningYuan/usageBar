@@ -36,6 +36,7 @@ enum ProviderMetaLookup {
         "qoder-work": .init(id: "qoder-work", displayName: "Qoder (Work)", brandColor: "#0E7A5F"),
         "qoder-ide": .init(id: "qoder-ide", displayName: "Qoder (IDE)", brandColor: "#0E5F7A"),
         // 独立
+        "qwen-work": .init(id: "qwen-work", displayName: "千问办公", brandColor: "#39D98A"),
         "codex": .init(id: "codex", displayName: "Codex (OpenAI)", brandColor: "#10A37F"),
         "wukong": .init(id: "wukong", displayName: "悟空", brandColor: "#1677FF"),
         "workbuddy": .init(id: "workbuddy", displayName: "WorkBuddy", brandColor: "#5B5BD6"),
@@ -163,6 +164,17 @@ struct ProviderIcon: View {
             }
         } else {
             switch providerId {
+            case "qwen-work":
+                if let img = BundleIconLoader.load(name: "qwenwork", ext: "png") {
+                    Image(nsImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: size, height: size)
+                } else {
+                    roundedBox(bg: "#173B2A") {
+                        Text("千问").font(.system(size: 7, weight: .semibold)).foregroundStyle(.white)
+                    }
+                }
             case "codex":
                 roundedBoxWithBundleImage(bg: "#10A37F", name: "codex", ext: "svg")
             case "workbuddy":
@@ -279,20 +291,23 @@ struct UsageRootView: View {
         return img
     }()
 
-    /// 某个受 gate 的 qoder 产品(cli/work)是否该在它行下挂"未开启"提示。
-    /// CLI 与 Work 各自挂一条（同一个 env，点任一跳设置页都能看到是共享开关）。
+    /// 某个受 gate 的产品是否该在它行下挂"未开启"提示。
+    /// 三者各自挂一条（同一个 env，点任一跳设置页都能看到是共享开关）。
     private func showsQoderHint(for pid: String) -> Bool {
         guard !qoderStatus.isEnabled, visibleProviderIds.contains(pid) else { return false }
         switch pid {
         case "qoder-cli":  return qoderStatus.isCliPresent
         case "qoder-work": return qoderStatus.isWorkPresent
+        case "qwen-work":  return qoderStatus.isQwenWorkPresent
         default:           return false
         }
     }
 
-    /// 当前要显示的 qoder 未开启提示行条数(0~2),用于算高度。
+    /// 当前要显示的未开启提示行条数(0~3),用于算高度。
     private var qoderHintCount: Int {
-        (showsQoderHint(for: "qoder-cli") ? 1 : 0) + (showsQoderHint(for: "qoder-work") ? 1 : 0)
+        (showsQoderHint(for: "qoder-cli") ? 1 : 0)
+            + (showsQoderHint(for: "qoder-work") ? 1 : 0)
+            + (showsQoderHint(for: "qwen-work") ? 1 : 0)
     }
 
     /// 按行数动态算 popover 内容区高度,空状态(0 行)给个最小占位
@@ -476,7 +491,7 @@ struct UsageRootView: View {
         }
     }
 
-    /// Qoder CLI / Work 用过但没开 token 统计 → 弹层在对应行下挂引导行(点「去开启」跳设置页)
+    /// 受 gate 产品用过但没开 token 统计 → 弹层在对应行下挂引导行(点「去开启」跳设置页)
     private var qoderHintRow: some View {
         HStack(spacing: 4) {
             Image(systemName: "exclamationmark.triangle.fill")

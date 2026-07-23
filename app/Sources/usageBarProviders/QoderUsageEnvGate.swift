@@ -2,10 +2,10 @@ import Foundation
 
 /// Qoder token 用量开关（env gate）的检测 / 写入 / 撤销。
 ///
-/// 背景：Qoder CLI 与 QoderWork **共用同一个** `EMPTY_USAGE` gate —— 默认不往 transcript 写
-/// token 用量，须设环境变量 `QODER_EXPOSE_TOKEN_USAGE=1` 才吐真值。usageBar 帮用户把这行
-/// export 幂等地写进 shell profile（+ launchctl），可一键撤销。CLI 新开终端生效；QoderWork
-/// 是 GUI app，启动时用 `zsh -ilc` 抓登录 shell env 继承它，改完须重启 app 才生效。
+/// 背景：Qoder CLI、QoderWork 与千问办公（QwenWorkCN）共用 Qoder Agent SDK 的
+/// `EMPTY_USAGE` gate —— 默认不往本地日志写 token 真值，须设环境变量
+/// `QODER_EXPOSE_TOKEN_USAGE=1`。usageBar 帮用户把这行 export 幂等地写进 shell profile
+///（+ launchctl），可一键撤销。CLI 新开终端生效；两个 GUI app 都须重启才生效。
 /// （Qoder IDE 不受此 gate，token 直写 SQLite，无需开关。）
 /// 详见 docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md（CLI 前身见 docs/0625-Qoder全家桶token计量/qoder-cli-usage-gate-fix.md）。
 ///
@@ -21,8 +21,8 @@ public enum QoderUsageEnvGate {
     private static var block: String {
         """
         \(beginMarker)
-        # 让 qodercli / QoderWork 把真实 token 用量写进 transcript(message.usage 四列),供 usageBar 统计。
-        # 默认不记录(EMPTY_USAGE gate),设此变量=1 才吐真值;只对设后新建的会话生效(QoderWork 需重启 app)。
+        # 让 qodercli / QoderWork / 千问办公把真实 token 用量写进本地日志,供 usageBar 统计。
+        # 默认不记录(EMPTY_USAGE gate),设此变量=1 才吐真值;只对之后的新请求生效(两个 GUI app 需重启)。
         export \(envName)=1
         \(endMarker)
         """
@@ -63,6 +63,16 @@ public enum QoderUsageEnvGate {
     /// first-run keep-set 判定 + 横幅是否出现的开关。
     public static func isQoderWorkPresent() -> Bool {
         let projects = home.appendingPathComponent(".qoderwork/projects")
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: projects.path) else {
+            return false
+        }
+        return !entries.isEmpty
+    }
+
+    /// 千问办公是否「用过」：`~/.qwenworkcn/projects` 下有会话条目即算。
+    /// 千问办公内置同源 Qoder Agent SDK，也受 `QODER_EXPOSE_TOKEN_USAGE` gate 控制。
+    public static func isQwenWorkPresent() -> Bool {
+        let projects = home.appendingPathComponent(".qwenworkcn/projects")
         guard let entries = try? FileManager.default.contentsOfDirectory(atPath: projects.path) else {
             return false
         }

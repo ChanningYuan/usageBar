@@ -171,6 +171,7 @@ enum DetailScannerKind {
     case cursor
     case workBuddy
     case qoderIde
+    case qwenWork
     /// 悟空：**双源合并**（旧 requests.jsonl 占 99.96% + 新 codex rollout）。见 `WukongDetailScanner`。
     case wukong
 }
@@ -331,6 +332,15 @@ enum ProviderDetailRegistry {
             hasSources: false, hasSessions: true, ring: .ofTotal, costUnit: .unavailable,
             accentDark: "#35A8CE", accentLight: "#0B5266",
             scanner: .qoderIde),
+
+        // 千问办公：segment 的 model.response.completed 明确暴露四列 token。
+        // 模型名是 qwork-ultimate 等套餐/路由别名，无法映射到真实模型价目 → 金额诚实显示 `—`。
+        "qwen-work": ProviderDetailSpec(
+            metricRows: [[.tile(.input), .tile(.output)],
+                         [.tile(.cacheRead), .tile(.cacheCreate)]],
+            hasSources: false, hasSessions: true, ring: .ofTotal, costUnit: .unavailable,
+            accentDark: "#45E59A", accentLight: "#147A52",
+            scanner: .qwenWork),
 
         // WorkBuddy：净输入 + 输出⊃思考 + 缓存读。**无缓存写**（prompt_tokens 已含缓存，主行口径如此）。
         // 金额走「信用点」——模型名是 auto（打码），等效美元算不出来，但数据自带 rawUsage.credit。

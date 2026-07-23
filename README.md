@@ -1,6 +1,6 @@
 # usageBar
 
-> macOS 菜单栏工具，聚合显示多个 AI 编程工具（Claude Code / Codex / Qoder / 悟空 等）的 token 用量，全本地直读、零配置。
+> macOS 菜单栏工具，聚合显示多个 AI 工具（Claude Code / Codex / Qoder / 千问办公 / 悟空 等）的 token 用量，全本地直读。
 
 **Swift 6 · macOS 14+ · Apple Silicon**
 
@@ -19,6 +19,7 @@
 | **Qoder（CLI）** 🥇 | `~/.qoder/projects/**/*.jsonl` | npm `qodercli` 1.0.x+ transcript，完整 4 列 |
 | **Qoder（Work）** 🥇 | `~/Library/Application Support/QoderWork/logs/<ts>/main.log` | 增量 mirror 到本地 jsonl，精确 input/output 两列 |
 | **Qoder（IDE）** 🥇 | `~/Library/Application Support/Qoder/SharedClientCache/.../local.db` | 直读 SQLite `chat_message.token_info` |
+| **千问办公** | `~/.qwenworkcn/logs/sessions/**/segments/*.jsonl` | 逐请求 `model.response.completed`，按 `request_id` 去重，完整 input/output/cache 四列 |
 | Codex（OpenAI） | rollout jsonl | **累计值**，跨窗口做差分 |
 | 悟空 | 本地 jsonl | flat 结构，毫秒时间戳 |
 | WorkBuddy | `~/.workbuddy/projects/**/*.jsonl` | Claude Code 风格会话记录 |
@@ -27,6 +28,8 @@
 | Hermes | `~/.hermes/state.db` | Hermes Agent（NousResearch），SQLite |
 
 > 🥇 标记的三行 = **Qoder 全家桶**：CLI、Work、IDE 三条线全部覆盖，目前 GitHub 上仅此一家做到全部可计量。
+>
+> Qoder CLI / Work / 千问办公默认把 token 真值关闭。usageBar 会在检测到本地会话后提示一键设置 `QODER_EXPOSE_TOKEN_USAGE=1`；只对开启后的新请求生效，两个桌面 app 需重启。
 >
 > 各工具的 "token" 口径不完全一致（有的含 cache 拆分、有的只有 input/output），所以条形图长度是**量级参考**，不是严格同口径对比。
 

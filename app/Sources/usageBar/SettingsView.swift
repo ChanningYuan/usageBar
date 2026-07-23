@@ -187,8 +187,10 @@ struct SettingsView: View {
     private var visibleProviderCount: Int {
         ProviderRegistry.all.filter { settings.isProviderToggleOn($0.id) }.count
     }
-    private var lastQoderId: String? {
-        ProviderRegistry.all.last { $0.family == "qoder" }?.id
+    private var lastGatedProviderId: String? {
+        ProviderRegistry.all.last {
+            $0.id == "qoder-cli" || $0.id == "qoder-work" || $0.id == "qwen-work"
+        }?.id
     }
 
     /// 折叠段标题行：chevron（收起▸ / 展开▾）+ 标题 + 右侧计数；整行可点击折叠。
@@ -250,8 +252,8 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(ProviderRegistry.all, id: \.id) { p in
                         providerRow(p)
-                        // Qoder gate banner 挂在 Qoder 系列**最后一行之后**（挂在最前会紧贴 Claude、被误认成 Claude 的）
-                        if p.id == lastQoderId {
+                        // 共享 gate banner 挂在三个受控产品的最后一行之后。
+                        if p.id == lastGatedProviderId {
                             QoderUsageBanner(status: qoderStatus)
                         }
                         if p.id == "cursor" {
@@ -604,11 +606,11 @@ private extension View {
     }
 }
 
-// MARK: - Qoder token 统计开关横幅（CLI / Work 共用）
+// MARK: - Qoder SDK token 统计开关横幅（CLI / Work / 千问办公共用）
 
-/// 设置页 qoder 框顶的 token 统计开关横幅（三态）。CLI 与 QoderWork 共用同一个 env gate。
+/// Qoder CLI、QoderWork、千问办公共用同一个 env gate。
 ///
-/// - `isAnyGatedPresent==false`（CLI / Work 都没用过）→ 整条不出现。
+/// - `isAnyGatedPresent==false`（三个产品都没用过）→ 整条不出现。
 /// - 未开启 → 橙底警告文案 + [一键开启]。
 /// - 已开启 → 绿底「✓ 已开启」+ 生效说明 + 撤销（开启后唯一样式）。
 /// 详见 docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md。
@@ -635,7 +637,7 @@ private struct QoderUsageBanner: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(.orange)
-                Text("Qoder CLI / QoderWork 默认不记录本地 token 消耗。需把环境变量 \(status.envName) 从 0 改为 1 开启记录，才能统计。")
+                Text("Qoder CLI / QoderWork / 千问办公默认不记录本地 token 真值。需把环境变量 \(status.envName) 设为 1，才能统计之后的新请求。")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -660,11 +662,11 @@ private struct QoderUsageBanner: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.circle.fill").font(.system(size: 10)).foregroundStyle(.green)
-                Text("已开启 token 统计（CLI 和 QoderWork 都生效）").font(.system(size: 10, weight: .medium))
+                Text("已开启 token 统计（Qoder CLI / Work / 千问办公）").font(.system(size: 10, weight: .medium))
                 Spacer()
                 Button("撤销") { status.disable() }.controlSize(.mini).buttonStyle(.link)
             }
-            Text("首次开启后 CLI 新开终端 / QoderWork 重启 app 后才能开始记录")
+            Text("首次开启后 CLI 新开终端；QoderWork / 千问办公需重启 app")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Text("已写入 \(status.profileDisplayName)：export \(status.envName)=1")

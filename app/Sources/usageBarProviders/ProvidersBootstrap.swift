@@ -11,9 +11,10 @@ import usageBarCore
 ///       - CLI 读 ~/.qoder/projects/.../*.jsonl(transcript)
 ///       - Work 读 ~/.qoderwork/projects transcript(0.6.3 起) + 旧 main.log mirror(历史,冻结)
 ///       - IDE 读 SharedClientCache SQLite(chat_message.token_info)
-///   3. Codex(独立)
-///   4. 悟空(独立)
-///   5. WorkBuddy(独立,读 ~/.workbuddy/projects/.../*.jsonl 的 providerData.rawUsage)
+///   3. 千问办公(独立,读 ~/.qwenworkcn/logs/sessions/**/segments/*.jsonl)
+///   4. Codex(独立)
+///   5. 悟空(独立)
+///   6. WorkBuddy(独立,读 ~/.workbuddy/projects/.../*.jsonl 的 providerData.rawUsage)
 ///
 /// 固定 provider 列表，避免运行时动态发现的复杂度。
 public enum UsageBarProviders {
@@ -28,6 +29,7 @@ public enum UsageBarProviders {
             QoderWorkProvider(),
             QoderIdeProvider(),
             // 独立 provider
+            QwenWorkProvider(),
             CodexProvider(),
             WukongProvider(),
             WorkBuddyProvider(),
@@ -35,7 +37,6 @@ public enum UsageBarProviders {
             OpenClawProvider(),
             HermesProvider(),
             OpenCodeProvider(),
-            // TODO: TongyiProvider(IndexedDB,无法解析)
         ]
 
         ProviderRegistry.register(providers)
