@@ -143,17 +143,51 @@ public struct QwenWorkProvider: UsageProvider {
     public let brandColor = "#39D98A"
 
     private let sessionsRoot: URL
+    private let ledger: FileMtimeCache
 
     public init(
         sessionsRoot: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".qwenworkcn/logs/sessions")
+            .appendingPathComponent(".qwenworkcn/logs/sessions"),
+        ledger: FileMtimeCache = .shared
     ) {
         self.sessionsRoot = sessionsRoot
+        self.ledger = ledger
     }
 
     public func fetchDailyRecords() async throws -> [FileDailyRecord] {
         let events = await QwenWorkEventStore.shared.events(under: sessionsRoot)
+        // UsageViewModel 的主列表以 FileMtimeCache.allEntries() 为持久账本，
+        // provider 返回值只用于调试计时。因此每个真实请求必须同时写入账本。
+        //
+        // 一请求一 key 有两个好处：
+        // 1. 同一 request 被多个 segment 重放时覆盖同一条，不会翻倍；
+        // 2. 原始 segment 轮转/删除后，已经发生的历史消耗仍保留。
+        for event in events {
+            await ledger.store(Self.ledgerEntry(from: event, sessionsRoot: sessionsRoot))
+        }
         return Self.dailyRecords(from: events)
+    }
+
+    private static func ledgerEntry(
+        from event: QwenWorkUsageEvent,
+        sessionsRoot: URL
+    ) -> FileCacheEntry {
+        let key = sessionsRoot
+            .appendingPathComponent(".usagebar-request-ledger", isDirectory: true)
+            .appendingPathComponent(event.sessionId, isDirectory: true)
+            .appendingPathComponent(event.requestId)
+            .path
+        return FileCacheEntry(
+            filePath: key,
+            mtime: event.timestamp,
+            size: event.tokens.total,
+            records: [FileDailyRecord(
+                provider: "qwen-work",
+                date: event.date,
+                token: event.tokens.total,
+                cachedToken: event.tokens.cacheRead
+            )]
+        )
     }
 
     static func dailyRecords(from events: [QwenWorkUsageEvent]) -> [FileDailyRecord] {

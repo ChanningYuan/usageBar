@@ -1,15 +1,15 @@
 import Foundation
 
-/// 单个 jsonl 文件的解析结果缓存
+/// 单个源文件的解析结果缓存，或 provider 写入持久账本的稳定合成条目。
 ///
-/// 每个 jsonl 文件对应一条 FileCacheEntry，存 mtime + size + 按日按 provider 聚合的 records。
-/// 下次扫盘时对比 mtime/size，没变就直接复用 records，避免重复 JSON parse。
+/// 常规 provider 每个源文件对应一条 FileCacheEntry，存 mtime + size + 按日按 provider 聚合的
+/// records；千问办公因需跨 segment 按 request_id 去重，改为每个请求一个稳定合成 key。
 public struct FileCacheEntry: Codable, Sendable, Equatable {
-    /// 文件绝对路径（同时是缓存 key）
+    /// 源文件绝对路径或稳定合成 key（同时是缓存 key）
     public let filePath: String
-    /// 上次扫描时的修改时间
+    /// 源文件修改时间；合成条目使用事件时间
     public let mtime: Date
-    /// 上次扫描时的字节数
+    /// 源文件字节数；合成条目使用稳定的内容量
     public let size: Int
     /// 按 (provider, date) 聚合后的 token 数
     public let records: [FileDailyRecord]

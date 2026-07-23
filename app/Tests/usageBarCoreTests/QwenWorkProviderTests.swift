@@ -33,23 +33,48 @@ final class QwenWorkProviderTests: XCTestCase {
             "第二个 segment 故意重放 request-2，用于证明跨文件去重实际发生"
         )
 
-        let mainRecords = try await QwenWorkProvider(
-            sessionsRoot: fixture.sessionsRoot
-        ).fetchDailyRecords()
+        let ledger = FileMtimeCache()
+        let provider = QwenWorkProvider(
+            sessionsRoot: fixture.sessionsRoot,
+            ledger: ledger
+        )
+        let mainRecords = try await provider.fetchDailyRecords()
         let detail = await QwenWorkDetailScanner(
             sessionsRoot: fixture.sessionsRoot,
             projectsRoot: fixture.projectsRoot,
             databasePath: nil
         ).detail(window: .all)
 
+        // UsageViewModel 的真实主列表只聚合 FileMtimeCache.allEntries()；
+        // 锁住 provider 必须写账本的副作用，不能只验证 fetch 返回值。
+        let ledgerDaily = await ledger.allEntries().flatMap(\.records)
+        let ledgerStats = DailyAggregator.aggregate(
+            allDailyRecords: ledgerDaily,
+            providerIds: ["qwen-work"]
+        )
+        let ledgerAll = ledgerStats.first {
+            $0.provider == "qwen-work" && $0.time == TimeWindow.all.id
+        }
+        let ledgerEntryCount = await ledger.count()
+
         XCTAssertEqual(mainRecords.reduce(0) { $0 + $1.token }, 200)
         XCTAssertEqual(mainRecords.reduce(0) { $0 + $1.cachedToken }, 40)
+        XCTAssertEqual(ledgerEntryCount, 2, "两次真实请求应对应两条持久账本记录")
+        XCTAssertEqual(ledgerAll?.token, 200, "UsageViewModel 主聚合路径必须拿到千问办公用量")
+        XCTAssertEqual(ledgerAll?.cachedToken, 40)
         XCTAssertEqual(detail.tokens.total, 200, "详情 Hero 必须与主列表合计完全一致")
         XCTAssertEqual(detail.tokens.cacheRead, 40)
         XCTAssertEqual(detail.tokens.cacheCreate, 30)
         XCTAssertEqual(detail.models.map(\.modelId), ["qwork-ultimate", "qwork-lite"])
         XCTAssertEqual(detail.sessions.count, 1)
         XCTAssertEqual(detail.sessions.first?.title, "分析千问办公统计")
+
+        // 重复刷新只覆盖同一 request key，账本不得增长或翻倍。
+        _ = try await provider.fetchDailyRecords()
+        let refreshedDaily = await ledger.allEntries().flatMap(\.records)
+        let refreshedEntryCount = await ledger.count()
+        XCTAssertEqual(refreshedEntryCount, 2)
+        XCTAssertEqual(refreshedDaily.reduce(0) { $0 + $1.token }, 200)
     }
 
     func testDatabaseSidebarTitleHasHighestPriority() throws {
