@@ -3,9 +3,9 @@ import SwiftUI
 
 /// 账号额度监测开关（v0.3.24，持久化 UserDefaults）。
 ///
-/// 逻辑开关 4 个：`codex` / `claude-code` / `qoder` / `cursor`。
+/// 逻辑开关：`codex` / `claude-code` / `qoder` / `qwen-work` / `cursor` / `workbuddy`。
 /// - Codex **默认开**（纯本地读日志，零联网、零风险）。
-/// - Claude / Qoder / Cursor **默认关**——首次开启涉及联网 + 读系统钥匙串（会弹授权框），
+/// - Claude / Qoder / 千问办公 **默认关**——首次开启涉及联网和/或读系统钥匙串，
 ///   让用户主动开、并预告代价（见设置说明文案）。
 ///
 /// Qoder 是一个逻辑开关，但覆盖三个 provider 实例（CLI / Work / IDE 共享账号额度）。
@@ -14,9 +14,9 @@ final class RateLimitSettings: ObservableObject {
     static let shared = RateLimitSettings()
 
     /// 逻辑开关 id（≠ provider 实例 id：qoder 覆盖三实例）
-    static let logicalIds = ["codex", "claude-code", "qoder", "cursor", "workbuddy"]
+    static let logicalIds = ["codex", "claude-code", "qoder", "qwen-work", "cursor", "workbuddy"]
     /// 默认开：零钥匙串的三个（Codex 读日志、WorkBuddy 读明文文件、Cursor 读明文 SQLite）。
-    /// Claude / Qoder 涉及钥匙串授权，默认关，让用户主动开 + 走引导。
+    /// Claude / Qoder / 千问办公涉及钥匙串授权，默认关，让用户主动开 + 走引导。
     static let defaultEnabled: Set<String> = ["codex", "workbuddy", "cursor"]
 
     @Published private(set) var enabled: Set<String> {
@@ -78,6 +78,8 @@ final class RateLimitSettings: ObservableObject {
 
     /// 某 provider 实例对应的逻辑额度开关 id（qoder-* → "qoder"）；无额度数据源返回 nil。
     static func logicalKey(forProvider pid: String) -> String? {
+        // 千问办公开关控制的是“积分账单缓存”，不是当前额度窗口；不要让详情页误画账号额度模块。
+        if pid == "qwen-work" { return nil }
         if pid.hasPrefix("qoder-") { return "qoder" }
         if logicalIds.contains(pid) { return pid }
         return nil

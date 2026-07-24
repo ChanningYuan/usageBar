@@ -240,6 +240,10 @@ final class UsageViewModel: ObservableObject {
             d = await QoderIdeDetailScanner.shared.detail(
                 window: win, weekStartMonday: weekStartMonday)
         case .qwenWork:
+            // 积分账单是联网数据：只在用户明确开启后刷新；无网/未开启时 scanner 仍读持久缓存。
+            if RateLimitSettings.shared.isEnabled("qwen-work") {
+                _ = await QwenWorkBillingStore.shared.refresh()
+            }
             d = await QwenWorkDetailScanner.shared.detail(
                 window: win, weekStartMonday: weekStartMonday)
         case .wukong:

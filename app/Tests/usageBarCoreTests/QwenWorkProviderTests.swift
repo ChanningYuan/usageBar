@@ -14,10 +14,11 @@ final class QwenWorkProviderTests: XCTestCase {
 
         XCTAssertEqual(events.count, 2, "重复 completed、turn.finished、零 token 事件都不应入账")
         XCTAssertEqual(events.map(\.requestId), ["request-1", "request-2"])
-        XCTAssertEqual(events.reduce(0) { $0 + $1.tokens.total }, 200)
-        XCTAssertEqual(events.reduce(0) { $0 + $1.tokens.input }, 107)
+        XCTAssertEqual(events.reduce(0) { $0 + $1.tokens.total }, 130)
+        XCTAssertEqual(events.reduce(0) { $0 + $1.tokens.input }, 67)
         XCTAssertEqual(events.reduce(0) { $0 + $1.tokens.output }, 23)
-        XCTAssertEqual(events.reduce(0) { $0 + $1.tokens.cacheCreate }, 30)
+        XCTAssertEqual(events.reduce(0) { $0 + $1.tokens.cacheCreate }, 0,
+                       "千问办公当前 OpenAI usage 转换不提供缓存写")
         XCTAssertEqual(events.reduce(0) { $0 + $1.tokens.cacheRead }, 40)
     }
 
@@ -29,7 +30,7 @@ final class QwenWorkProviderTests: XCTestCase {
             .flatMap { try QwenWorkSegmentParser.parseFile(url: $0) }
         XCTAssertEqual(
             rawEvents.reduce(0) { $0 + $1.tokens.total },
-            210,
+            140,
             "第二个 segment 故意重放 request-2，用于证明跨文件去重实际发生"
         )
 
@@ -39,10 +40,32 @@ final class QwenWorkProviderTests: XCTestCase {
             ledger: ledger
         )
         let mainRecords = try await provider.fetchDailyRecords()
+        let billingStore = QwenWorkBillingStore(
+            fileURL: fixture.root.appendingPathComponent("qwen-work-billings.json")
+        )
+        await billingStore.replace(origin: .billings, with: [
+            QwenWorkBillingRecord(
+                amount: -14.1835,
+                createdAt: ISODateParser.parse("2026-07-23T10:00:00.000+08:00")!,
+                source: "网页版",
+                detail: "—",
+                origin: .billings,
+                serverId: nil
+            ),
+            QwenWorkBillingRecord(
+                amount: 100,
+                createdAt: ISODateParser.parse("2026-07-23T08:24:41.000+08:00")!,
+                source: "—",
+                detail: "每日奖励",
+                origin: .billings,
+                serverId: nil
+            ),
+        ])
         let detail = await QwenWorkDetailScanner(
             sessionsRoot: fixture.sessionsRoot,
             projectsRoot: fixture.projectsRoot,
-            databasePath: nil
+            databasePath: nil,
+            billingStore: billingStore
         ).detail(window: .all)
 
         // UsageViewModel 的真实主列表只聚合 FileMtimeCache.allEntries()；
@@ -57,14 +80,16 @@ final class QwenWorkProviderTests: XCTestCase {
         }
         let ledgerEntryCount = await ledger.count()
 
-        XCTAssertEqual(mainRecords.reduce(0) { $0 + $1.token }, 200)
+        XCTAssertEqual(mainRecords.reduce(0) { $0 + $1.token }, 130)
         XCTAssertEqual(mainRecords.reduce(0) { $0 + $1.cachedToken }, 40)
         XCTAssertEqual(ledgerEntryCount, 2, "两次真实请求应对应两条持久账本记录")
-        XCTAssertEqual(ledgerAll?.token, 200, "UsageViewModel 主聚合路径必须拿到千问办公用量")
+        XCTAssertEqual(ledgerAll?.token, 130, "UsageViewModel 主聚合路径必须拿到千问办公用量")
         XCTAssertEqual(ledgerAll?.cachedToken, 40)
-        XCTAssertEqual(detail.tokens.total, 200, "详情 Hero 必须与主列表合计完全一致")
+        XCTAssertEqual(detail.tokens.total, 130, "详情 Hero 必须与主列表合计完全一致")
         XCTAssertEqual(detail.tokens.cacheRead, 40)
-        XCTAssertEqual(detail.tokens.cacheCreate, 30)
+        XCTAssertEqual(detail.tokens.cacheCreate, 0)
+        XCTAssertEqual(detail.cost, 14.1835, accuracy: 0.0001,
+                       "周期积分只汇总真实扣减；每日奖励不能抵扣消耗")
         XCTAssertEqual(detail.models.map(\.modelId), ["qwork-ultimate", "qwork-lite"])
         XCTAssertEqual(detail.sessions.count, 1)
         XCTAssertEqual(detail.sessions.first?.title, "分析千问办公统计")
@@ -74,7 +99,7 @@ final class QwenWorkProviderTests: XCTestCase {
         let refreshedDaily = await ledger.allEntries().flatMap(\.records)
         let refreshedEntryCount = await ledger.count()
         XCTAssertEqual(refreshedEntryCount, 2)
-        XCTAssertEqual(refreshedDaily.reduce(0) { $0 + $1.token }, 200)
+        XCTAssertEqual(refreshedDaily.reduce(0) { $0 + $1.token }, 130)
     }
 
     func testDatabaseSidebarTitleHasHighestPriority() throws {

@@ -4,7 +4,7 @@ import usageBarCore
 /// 千问办公（QwenWorkCN）单次模型请求的真实 token 记录。
 ///
 /// 来源：`~/.qwenworkcn/logs/sessions/**/segments/*.jsonl` 中的
-/// `type == "model.response.completed"` 事件。`turn.finished` 也带四列 token，
+/// `type == "model.response.completed"` 事件。`turn.finished` 也带 token 汇总，
 /// 但它是整轮汇总，和逐请求事件同时相加会重复统计，所以明确忽略。
 struct QwenWorkUsageEvent: Sendable, Equatable {
     let sessionId: String
@@ -44,14 +44,20 @@ enum QwenWorkSegmentParser {
                   let data = obj["data"] as? [String: Any]
             else { return }
 
+            let promptTokens = nonNegativeInt(data["input_tokens"])
+            let cacheRead = nonNegativeInt(data["cache_read_input_tokens"])
             let tokens = TokenBreakdown(
-                input: nonNegativeInt(data["input_tokens"]),
+                // 千问办公当前走 OpenAI usage 转换：
+                // input_tokens = prompt_tokens（已包含 cached_tokens），cache_read = cached_tokens。
+                // usageBar 的 TokenBreakdown.input 语义是“净输入”，必须做差，否则一旦命中缓存会双算。
+                input: max(0, promptTokens - cacheRead),
                 output: nonNegativeInt(data["output_tokens"]),
-                cacheCreate5m: nonNegativeInt(data["cache_creation_input_tokens"]),
+                // 当前转换器不提供 cache creation；日志字段存在但恒为 0，不能把它当成可用指标。
+                cacheCreate5m: 0,
                 cacheCreate1h: 0,
-                cacheRead: nonNegativeInt(data["cache_read_input_tokens"])
+                cacheRead: cacheRead
             )
-            // 未打开 QODERCN_EXPOSE_TOKEN_USAGE 时事件仍存在，但四列全 0；不写入账本噪声。
+            // 未打开 QODERCN_EXPOSE_TOKEN_USAGE 时事件仍存在，但各列全 0；不写入账本噪声。
             guard tokens.total > 0 else { return }
 
             // segment 理论上一请求只写一次 completed；仍按 request_id 防御性去重，
@@ -131,11 +137,11 @@ actor QwenWorkEventStore {
 /// - `agents.db.sub_chats.ext.contextUsageSnapshot` 是会被覆盖的「当前上下文窗口快照」，
 ///   不是逐轮历史账本，跨会话求和会漏算且语义错误。
 /// - `projects/**/*.jsonl` 的 assistant 行是流式分片，同一 `message.id` 会重复；默认还没有 usage。
-/// - segment 的 `model.response.completed` 是逐模型请求事件，直接给出 input / output /
-///   cache_creation / cache_read 四列，还有 request_id、模型和时间，能稳定去重和拆详情。
+/// - segment 的 `model.response.completed` 是逐模型请求事件，给出 prompt / output / cache_read，
+///   还有 request_id、模型和时间，能稳定去重和拆详情。当前 OpenAI usage 转换不提供缓存写。
 ///
 /// token 真值受 CN SDK 的 `QODERCN_EXPOSE_TOKEN_USAGE=1` gate 控制。未开启时历史事件
-/// 四列为 0，无法事后恢复；usageBar 的设置页会提示开启，只对之后的新请求生效。
+/// 各列为 0，无法事后恢复；usageBar 的设置页会提示开启，只对之后的新请求生效。
 public struct QwenWorkProvider: UsageProvider {
     public let id = "qwen-work"
     public let displayName = "千问办公"

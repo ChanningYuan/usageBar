@@ -4,7 +4,7 @@
 
 **Swift 6 · macOS 14+ · Apple Silicon**
 
-在 macOS 状态栏一眼看到你今天 / 近 7 天 / 近 30 天 / 累计在各个 AI 编程工具上烧了多少 token。除 Cursor 外，所有数据都从各工具落在本地的会话记录（jsonl / SQLite）直接读取，**不联网、不抓包、装上即用**。
+在 macOS 状态栏一眼看到你今天 / 近 7 天 / 近 30 天 / 累计在各个 AI 编程工具上烧了多少 token。token 统计除 Cursor 外都直接读取各工具落在本地的会话记录（jsonl / SQLite）；账号额度和千问办公积分历史属于可选联网能力，首次开启会明确提示授权。
 
 > 🥇 **GitHub 上唯一一个把 Qoder 全家桶（CLI / Work / IDE）token 全部打通可计量的项目。** 三条产品线各自落盘的格式完全不同（npm transcript jsonl / 应用日志 mirror / SQLite），usageBar 把它们统一读出来，一个菜单栏就能看全。
 
@@ -19,7 +19,7 @@
 | **Qoder（CLI）** 🥇 | `~/.qoder/projects/**/*.jsonl` | npm `qodercli` 1.0.x+ transcript，完整 4 列 |
 | **Qoder（Work）** 🥇 | `~/Library/Application Support/QoderWork/logs/<ts>/main.log` | 增量 mirror 到本地 jsonl，精确 input/output 两列 |
 | **Qoder（IDE）** 🥇 | `~/Library/Application Support/Qoder/SharedClientCache/.../local.db` | 直读 SQLite `chat_message.token_info` |
-| **千问办公** | `~/.qwenworkcn/logs/sessions/**/segments/*.jsonl` | 逐请求 `model.response.completed`，按 `request_id` 去重，完整 input/output/cache 四列 |
+| **千问办公** | 本地 segment + 可选 `qwenwork.cn/user/billings` | 逐请求去重；精确 input/output/cache read（当前协议无 cache write）；账单缓存支持按周期查看真实积分消耗 |
 | Codex（OpenAI） | rollout jsonl | **累计值**，跨窗口做差分 |
 | 悟空 | 本地 jsonl | flat 结构，毫秒时间戳 |
 | WorkBuddy | `~/.workbuddy/projects/**/*.jsonl` | Claude Code 风格会话记录 |
@@ -39,6 +39,7 @@
 
 - **Codex 跨窗口差分**：Codex 的 rollout 是 session 累计值，按相邻事件差分归到日期桶，避免跨天 session 被重复计算（否则会虚报十几倍）。
 - **持久账本**：会话文件被删 / 轮转后，其历史 token 仍计入累计——消耗发生过就保留，不会因源文件消失而丢失。
+- **千问办公积分历史**：缓存官网 `/user/billings` 与 `/user/billings/computer` 的真实扣减；同一会话账单增长时按新旧金额做差，把增量归到本次观察周期，既不重复计费，也不把跨周新消耗算回旧周。缓存位于 `~/Library/Application Support/usageBar/qwen-work-billings.json`，只保存规范化账单、账号哈希与差分流水，不保存登录凭证。
 - **mtime/size 增量缓存**：只重读发生变化的文件，刷新快、CPU 占用低。
 
 ## 安装

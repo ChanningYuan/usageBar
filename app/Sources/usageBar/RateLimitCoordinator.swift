@@ -7,7 +7,8 @@ import usageBarCore
 /// **跟随现有 token 刷新**（自动 10 分钟 + ⌘R），不新增节拍器——`UsageViewModel.refresh()` 末尾
 /// detached 调 `refreshEnabled()`，与 token 聚合并发、互不阻塞（额度是网络/钥匙串 IO，token 是扫盘）。
 ///
-/// 只跑「已开启」的 provider（`RateLimitSettings`）。Qoder 一次 read → 复制到三个实例快照。
+/// 只跑「已开启」的 provider（`RateLimitSettings`）。Qoder 一次 read → 复制到三个实例快照；
+/// 千问办公同轮刷新积分账单缓存（不是额度快照）。
 @MainActor
 enum RateLimitCoordinator {
 
@@ -25,7 +26,7 @@ enum RateLimitCoordinator {
     /// - 其余（Codex 读日志 / Cursor·WorkBuddy 明文）都不需要。
     static func needsKeychain(_ logicalId: String) -> Bool {
         switch logicalId {
-        case "qoder": return true
+        case "qoder", "qwen-work": return true
         case "claude-code": return RateLimitSettings.shared.dataSource(for: "claude-code") == "oauth"
         default: return false
         }
@@ -57,6 +58,12 @@ enum RateLimitCoordinator {
             if canRun("qoder") {
                 group.addTask { await QoderRateLimitReader().read(now: now) }
             }
+            if canRun("qwen-work") {
+                group.addTask {
+                    _ = await QwenWorkBillingStore.shared.refresh(now: now)
+                    return nil
+                }
+            }
             if canRun("workbuddy") {
                 group.addTask { await WorkBuddyRateLimitReader().read(now: now) }
             }
@@ -71,6 +78,10 @@ enum RateLimitCoordinator {
     /// 这是用户主动动作 → 允许碰钥匙串。
     static func refreshOne(_ logicalId: String, now: Date = Date()) async {
         allowsKeychainAccess = true
+        if logicalId == "qwen-work" {
+            _ = await QwenWorkBillingStore.shared.refresh(now: now, force: true)
+            return
+        }
         let snap: RateLimitSnapshot?
         switch logicalId {
         case "codex":       snap = CodexRateLimitReader().read(now: now)
@@ -115,6 +126,8 @@ enum RateLimitCoordinator {
             StatuslineConfigurator.deconfigure()
         case "qoder":
             QoderRateLimitReader.clearCache()
+        case "qwen-work":
+            Task { await QwenWorkBillingStore.shared.clearAuthCache() }
         default: break
         }
     }

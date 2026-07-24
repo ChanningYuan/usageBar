@@ -39,6 +39,7 @@ public actor QwenWorkDetailScanner {
     private let sessionsRoot: URL
     private let projectsRoot: URL
     private let databasePath: String?
+    private let billingStore: QwenWorkBillingStore
 
     private struct MetaCacheEntry {
         let mtime: Date
@@ -55,11 +56,13 @@ public actor QwenWorkDetailScanner {
         projectsRoot: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".qwenworkcn/projects"),
         databasePath: String? = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/QwenWorkCN/data/agents.db").path
+            .appendingPathComponent("Library/Application Support/QwenWorkCN/data/agents.db").path,
+        billingStore: QwenWorkBillingStore = .shared
     ) {
         self.sessionsRoot = sessionsRoot
         self.projectsRoot = projectsRoot
         self.databasePath = databasePath
+        self.billingStore = billingStore
     }
 
     public func detail(
@@ -68,6 +71,7 @@ public actor QwenWorkDetailScanner {
         now: Date = Date()
     ) async -> ProviderDetail {
         let events = await QwenWorkEventStore.shared.events(under: sessionsRoot)
+        let creditHistory = await billingStore.cachedHistory()
         var metas = loadTranscriptMetas()
         for (sessionId, databaseMeta) in loadDatabaseMetas() {
             if var current = metas[sessionId] {
@@ -79,6 +83,8 @@ public actor QwenWorkDetailScanner {
         }
         return Self.compose(
             events: events,
+            creditLedger: creditHistory.ledger,
+            creditsAvailable: creditHistory.isAvailable,
             metas: metas,
             window: window,
             weekStartMonday: weekStartMonday,
@@ -94,6 +100,8 @@ public actor QwenWorkDetailScanner {
 
     static func compose(
         events: [QwenWorkUsageEvent],
+        creditLedger: [QwenWorkCreditLedgerEntry],
+        creditsAvailable: Bool = true,
         metas: [String: QwenWorkSessionMeta],
         window: TimeWindow,
         weekStartMonday: Bool,
@@ -104,6 +112,7 @@ public actor QwenWorkDetailScanner {
         )
 
         var total = TokenBreakdown()
+        var totalCredits = 0.0
         var byModel: [String: TokenBreakdown] = [:]
         var bySession: [String: (tokens: TokenBreakdown, last: Date)] = [:]
 
@@ -114,6 +123,14 @@ public actor QwenWorkDetailScanner {
             session.tokens.add(event.tokens)
             session.last = max(session.last, event.timestamp)
             bySession[event.sessionId] = session
+        }
+
+        // 流水由服务端真实扣减行差分而来；奖励/充值为正数，不会进入“消耗”。
+        // `/user/billings` 没有 request_id / session_id / model，故只给周期总额，
+        // 不把积分猜摊到模型或会话行，避免看似精确、实则编造。
+        for entry in creditLedger
+        where inWindow(DailyAggregator.dateString(for: entry.occurredAt)) {
+            totalCredits += entry.credits
         }
 
         // qwork-ultimate 等是套餐/路由别名，不是真实模型 id，无法诚实折算 API 价格。
@@ -137,7 +154,8 @@ public actor QwenWorkDetailScanner {
             providerId: "qwen-work",
             windowId: window.id,
             tokens: total,
-            cost: 0,
+            cost: totalCredits,
+            costAvailable: creditsAvailable,
             models: models,
             sessions: sessions
         )
