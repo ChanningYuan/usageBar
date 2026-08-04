@@ -59,10 +59,7 @@ enum RateLimitCoordinator {
                 group.addTask { await QoderRateLimitReader().read(now: now) }
             }
             if canRun("qwen-work") {
-                group.addTask {
-                    _ = await QwenWorkBillingStore.shared.refresh(now: now)
-                    return nil
-                }
+                group.addTask { await readQwenWork(now: now) }
             }
             if canRun("workbuddy") {
                 group.addTask { await WorkBuddyRateLimitReader().read(now: now) }
@@ -78,21 +75,49 @@ enum RateLimitCoordinator {
     /// 这是用户主动动作 → 允许碰钥匙串。
     static func refreshOne(_ logicalId: String, now: Date = Date()) async {
         allowsKeychainAccess = true
-        if logicalId == "qwen-work" {
-            _ = await QwenWorkBillingStore.shared.refresh(now: now, force: true)
-            return
-        }
         let snap: RateLimitSnapshot?
         switch logicalId {
         case "codex":       snap = CodexRateLimitReader().read(now: now)
         case "claude-code": snap = await readClaude(source: RateLimitSettings.shared.dataSource(for: "claude-code"), now: now)
         case "cursor":      snap = await CursorRateLimitReader().read(now: now)
         case "qoder":       snap = await QoderRateLimitReader().read(now: now)
+        case "qwen-work":   snap = await readQwenWork(now: now, force: true)
         case "workbuddy":   snap = await WorkBuddyRateLimitReader().read(now: now)
         default:            snap = nil
         }
         if let snap { store(snap) }
     }
+
+    /// 千问办公额度快照：剩余可用（`/user/balance`）+ 当日真实消耗（账单里 `type == 对话` 的合计）。
+    ///
+    /// ⚠️ 这里给的是**金额不是百分比**（走 `RateLimitWindow.valueText`）：官方「我的积分」页没有「总额」
+    /// 这个概念，分母只能从流水反推、而且每天都在变（平时每日赠 100、搞活动 500），显示百分比会跳得
+    /// 没道理、也和官方页面对不上账。详见 spec §2a 里百分比方案的否决理由。
+    private static func readQwenWork(now: Date = Date(), force: Bool = false) async -> RateLimitSnapshot {
+        let store = QwenWorkBillingStore.shared
+        _ = await store.refresh(now: now, force: force)
+        let quota = await store.quota(now: now)
+        var windows: [RateLimitWindow] = []
+        if let balance = quota.balance {
+            windows.append(RateLimitWindow(
+                kind: "balance", label: "剩余", usedPercent: 0,
+                severity: neutralSeverity, detail: "积分",
+                valueText: QwenWorkBillingStore.formatCredits(balance)))
+        }
+        // 余额读不到时也把「今日已用」显示出来——它来自账单缓存，离线照样有值。
+        if quota.balance != nil || quota.error == nil {
+            windows.append(RateLimitWindow(
+                kind: "spent_today", label: "今日已用", usedPercent: 0,
+                severity: neutralSeverity, detail: "积分",
+                valueText: QwenWorkBillingStore.formatCredits(quota.todaySpent)))
+        }
+        return RateLimitSnapshot(
+            providerId: "qwen-work", windows: windows, capturedAt: now,
+            error: windows.isEmpty ? (quota.error ?? .network) : nil)
+    }
+
+    /// 金额型窗口用的中性色档：没有分母就没有「用了多少比例」，套绿/黄/红是无中生有。
+    static let neutralSeverity = "neutral"
 
     /// Claude 按用户选中的数据源分派——**严格按选择走，绝不跨线路回落**：
     /// - `statusline`（默认）：只读注入产生的额度文件，**零钥匙串、零起进程**。读不到就读不到

@@ -12,14 +12,45 @@ final class QwenWorkProviderTests: XCTestCase {
 
         let events = try QwenWorkSegmentParser.parseFile(url: fixture.segment)
 
-        XCTAssertEqual(events.count, 2, "重复 completed、turn.finished、零 token 事件都不应入账")
-        XCTAssertEqual(events.map(\.requestId), ["request-1", "request-2"])
-        XCTAssertEqual(events.reduce(0) { $0 + $1.tokens.total }, 130)
-        XCTAssertEqual(events.reduce(0) { $0 + $1.tokens.input }, 67)
-        XCTAssertEqual(events.reduce(0) { $0 + $1.tokens.output }, 23)
-        XCTAssertEqual(events.reduce(0) { $0 + $1.tokens.cacheCreate }, 0,
-                       "千问办公当前 OpenAI usage 转换不提供缓存写")
-        XCTAssertEqual(events.reduce(0) { $0 + $1.tokens.cacheRead }, 40)
+        XCTAssertEqual(events.count, 3, "重复 completed 与 turn.finished 不入账；零 token 事件要保留")
+        XCTAssertEqual(events.map(\.requestId), ["request-1", "request-2", "request-zero"])
+
+        // ⚠️ 零 token 事件**保留但不计量**：gate 没开时事件就长这样。
+        // 留着是因为详情页要靠它的时间戳算会话区间，才能把服务端账单挂回会话
+        // （0804 踩过：丢掉它 → gate 开启前那次对话的积分永远匹配不上，Hero 与「按会话」之和对不上）。
+        let counted = events.filter { $0.tokens.total > 0 }
+        XCTAssertEqual(counted.map(\.requestId), ["request-1", "request-2"])
+        XCTAssertEqual(counted.reduce(0) { $0 + $1.tokens.total }, 130)
+        XCTAssertEqual(counted.reduce(0) { $0 + $1.tokens.input }, 67)
+        XCTAssertEqual(counted.reduce(0) { $0 + $1.tokens.output }, 23)
+        XCTAssertEqual(counted.reduce(0) { $0 + $1.tokens.cacheCreate }, 0,
+                       "厂商当前不填 cache_creation_input_tokens（2026-08-04 全量扫描实测恒 0）")
+        XCTAssertEqual(counted.reduce(0) { $0 + $1.tokens.cacheRead }, 40)
+    }
+
+    /// 缓存写要**读真值**，不能写死 0。
+    ///
+    /// `cache_creation_input_tokens` 字段是**存在**的，只是厂商目前没往里填（本机全量扫描恒 0）。
+    /// 写死 0 的话，哪天他们开始填就会静默漏算——这个测试就是那道闸。
+    /// 🔸 真的出现非 0 值时，详情页指标区要从 3 块补成 4 块（`ProviderDetailSpec` 的 "qwen-work"），
+    ///    否则「总量」不等于三块之和，看起来就是算错了。
+    func testCacheCreationIsReadFromLogNotHardcodedToZero() throws {
+        let dir = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let segmentDir = dir.appendingPathComponent("s").appendingPathComponent(sessionId)
+            .appendingPathComponent("segments")
+        try FileManager.default.createDirectory(at: segmentDir, withIntermediateDirectories: true)
+        let segment = segmentDir.appendingPathComponent("segment.jsonl")
+        try completed(
+            requestId: "req-cc", ts: "2026-08-04T13:08:21.000+08:00",
+            model: "qmodel_latest", input: 100, output: 10, cacheCreate: 25, cacheRead: 40
+        ).write(to: segment, atomically: true, encoding: .utf8)
+
+        let events = try QwenWorkSegmentParser.parseFile(url: segment)
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events[0].tokens.cacheCreate, 25, "日志里有值就必须读进来")
+        XCTAssertEqual(events[0].tokens.input, 60, "净输入仍是 input − cache_read")
+        XCTAssertEqual(events[0].tokens.total, 60 + 10 + 25 + 40)
     }
 
     func testMainAndDetailUseExactlyTheSameTokenTotal() async throws {
@@ -50,7 +81,8 @@ final class QwenWorkProviderTests: XCTestCase {
                 source: "网页版",
                 detail: "—",
                 origin: .billings,
-                serverId: nil
+                serverId: nil,
+                type: "对话"
             ),
             QwenWorkBillingRecord(
                 amount: 100,
@@ -58,7 +90,8 @@ final class QwenWorkProviderTests: XCTestCase {
                 source: "—",
                 detail: "每日奖励",
                 origin: .billings,
-                serverId: nil
+                serverId: nil,
+                type: "奖励"
             ),
         ])
         let detail = await QwenWorkDetailScanner(
@@ -175,15 +208,15 @@ final class QwenWorkProviderTests: XCTestCase {
         let segmentLines = [
             completed(
                 requestId: "request-1", ts: "2026-07-23T10:00:00.000+08:00",
-                model: "qwork-ultimate", input: 100, output: 20, cacheCreate: 30, cacheRead: 40
+                model: "qwork-ultimate", input: 100, output: 20, cacheCreate: 0, cacheRead: 40
             ),
             // 同一 request_id 重复 append：只能计一次。
             completed(
                 requestId: "request-1", ts: "2026-07-23T10:00:00.000+08:00",
-                model: "qwork-ultimate", input: 100, output: 20, cacheCreate: 30, cacheRead: 40
+                model: "qwork-ultimate", input: 100, output: 20, cacheCreate: 0, cacheRead: 40
             ),
             // 整轮汇总副本：与 completed 同算会翻倍。
-            #"{"ts":"2026-07-23T10:00:01.000+08:00","type":"turn.finished","request_id":"request-1","data":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":30,"cache_read_input_tokens":40}}"#,
+            #"{"ts":"2026-07-23T10:00:01.000+08:00","type":"turn.finished","request_id":"request-1","data":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":40}}"#,
             completed(
                 requestId: "request-2", ts: "2026-07-23T10:01:00.000+08:00",
                 model: "qwork-lite", input: 7, output: 3, cacheCreate: 0, cacheRead: 0

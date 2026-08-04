@@ -350,8 +350,8 @@ struct SettingsView: View {
               desc: "开启后随每次刷新向 api.anthropic.com 查询。首次会弹一次系统钥匙串授权框（读取 Claude Code 自己保存的登录凭证），选「始终允许」后不再弹。"),
         .init(id: "qoder", icon: "qoder-work", name: "Qoder",
               desc: "读取本机 Qoder 登录凭证并请求 qoder.com（首次同样弹一次钥匙串授权框）。额度是账号级的，CLI / Work / IDE 共用一份。"),
-        .init(id: "qwen-work", icon: "qwen-work", name: "千问办公积分",
-              desc: "读取千问办公登录凭证并请求 qwenwork.cn 的积分历史接口；缓存真实账单后，可在详情页按今日、本周、近 7 天、本月等周期查看消耗。"),
+        .init(id: "qwen-work", icon: "qwen-work", name: "千问办公额度与积分",
+              desc: "读取千问办公登录凭证并请求 qwenwork.cn：查当前剩余可用积分（显示在主列表药丸），并缓存历史消耗流水（详情页按今日、本周、本月等周期查看）。"),
         .init(id: "cursor", icon: "cursor", name: "Cursor",
               desc: "读取本机 Cursor 登录凭证并请求 cursor.com。与「数据源 → Cursor」用同一份凭证。"),
         .init(id: "workbuddy", icon: "workbuddy", name: "WorkBuddy",
@@ -424,10 +424,11 @@ struct SettingsView: View {
         }
     }
 
-    /// 设置行状态标签：数据源 + 连接状态点。额度快照目前只对 Claude / Qoder 显示；
-    /// 千问办公是账单缓存，不拿不存在的“当前窗口”伪装连接状态。
+    /// 设置行状态标签：数据源 + 连接状态点。
+    /// 千问办公也算——它有 `/user/balance` 这个真实的「当前状态」数据源（0804 起）。
     private func quotaChip(id: String) -> (text: String, dot: Color)? {
-        guard id == "claude-code" || id == "qoder", quotaSettings.isEnabled(id) else { return nil }
+        guard ["claude-code", "qoder", "qwen-work"].contains(id),
+              quotaSettings.isEnabled(id) else { return nil }
         let pid = id == "qoder" ? "qoder-work" : id
         let snap = quotaStore.snapshot(for: pid)
         let dot: Color

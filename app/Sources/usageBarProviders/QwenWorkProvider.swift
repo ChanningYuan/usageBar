@@ -52,13 +52,21 @@ enum QwenWorkSegmentParser {
                 // usageBar 的 TokenBreakdown.input 语义是“净输入”，必须做差，否则一旦命中缓存会双算。
                 input: max(0, promptTokens - cacheRead),
                 output: nonNegativeInt(data["output_tokens"]),
-                // 当前转换器不提供 cache creation；日志字段存在但恒为 0，不能把它当成可用指标。
-                cacheCreate5m: 0,
+                // ⚠️ 读真值，别写死 0。`cache_creation_input_tokens` 这个字段**是存在的**，
+                // 只是本机 2026-08-04 实测的样本里厂商还没往里填（全 0）。写死 0 的话，
+                // 哪天他们开始填就会静默漏算。
+                // 🔸 一旦这里真出现非 0 值：详情页指标区要从 3 块补成 4 块
+                //    （`ProviderDetailSpec` 里 "qwen-work" 的 metricRows），否则
+                //    「总量」会不等于三块之和，用户会以为是算错了。
+                cacheCreate5m: nonNegativeInt(data["cache_creation_input_tokens"]),
                 cacheCreate1h: 0,
                 cacheRead: cacheRead
             )
-            // 未打开 QODERCN_EXPOSE_TOKEN_USAGE 时事件仍存在，但各列全 0；不写入账本噪声。
-            guard tokens.total > 0 else { return }
+            // ⚠️ token 全 0 的事件**照样保留**（没开 QODERCN_EXPOSE_TOKEN_USAGE 时就是这样）。
+            // 它不进 token 统计（写账本前另行过滤），但它证明「这个会话在这个时刻确实发过请求」——
+            // 详情页要靠这些时间点算出会话区间，才能把服务端账单挂回会话。
+            // 2026-08-04 踩过：丢掉 0-token 事件 → gate 开启前那次对话的积分永远匹配不上，
+            // Hero 总额与「按会话」之和差了 1.2329，看起来就是"数字对不上"。
 
             // segment 理论上一请求只写一次 completed；仍按 request_id 防御性去重，
             // 避免日志重放/重复 append 导致永久虚高。
@@ -133,6 +141,13 @@ actor QwenWorkEventStore {
 
 /// 千问办公 provider。
 ///
+/// ## 日志里到底有哪些 token 字段（2026-08-04 全量扫描实测）
+/// `model.response.completed` 与 `turn.finished` 的 data 各自只有这 4 个计量字段：
+/// `input_tokens`（**含 cached**）/ `output_tokens` / `cache_read_input_tokens` /
+/// `cache_creation_input_tokens`（字段在，本机样本恒 0）。
+/// **没有 reasoning / thinking 字段**——Codex、OpenCode 那套"输出⊃思考"的拆分在千问这里不存在，
+/// 别照搬。指标区因此只有 3 块。
+///
 /// ## 为什么读 segment，而不是 agents.db / transcript
 /// - `agents.db.sub_chats.ext.contextUsageSnapshot` 是会被覆盖的「当前上下文窗口快照」，
 ///   不是逐轮历史账本，跨会话求和会漏算且语义错误。
@@ -168,10 +183,11 @@ public struct QwenWorkProvider: UsageProvider {
         // 一请求一 key 有两个好处：
         // 1. 同一 request 被多个 segment 重放时覆盖同一条，不会翻倍；
         // 2. 原始 segment 轮转/删除后，已经发生的历史消耗仍保留。
-        for event in events {
+        // 只有真的记到了 token 才写账本；0-token 事件仅用于会话区间（见 parseFile 的注释）。
+        for event in events where event.tokens.total > 0 {
             await ledger.store(Self.ledgerEntry(from: event, sessionsRoot: sessionsRoot))
         }
-        return Self.dailyRecords(from: events)
+        return Self.dailyRecords(from: events.filter { $0.tokens.total > 0 })
     }
 
     private static func ledgerEntry(

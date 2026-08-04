@@ -291,26 +291,62 @@ struct UsageRootView: View {
         return img
     }()
 
-    /// 某个受 gate 的产品是否该在它行下挂"未开启"提示。
+    /// 受 gate 产品该挂哪种提示。三态判定是 `GateHintState`（纯逻辑 + 单测锁住），
+    /// 这里只负责把当前的四个输入喂给它。
     /// Qoder 两条产品线看 QODER_ gate；千问办公单独看 QODERCN_ gate。
-    private func showsQoderHint(for pid: String) -> Bool {
-        guard visibleProviderIds.contains(pid) else { return false }
+    private func gateHint(for pid: String) -> GateHintState {
+        guard visibleProviderIds.contains(pid) else { return .none }
+        let present: Bool, gateEnabled: Bool
         switch pid {
         case "qoder-cli":
-            return qoderStatus.isCliPresent && !qoderStatus.isQoderEnabled
+            (present, gateEnabled) = (qoderStatus.isCliPresent, qoderStatus.isQoderEnabled)
         case "qoder-work":
-            return qoderStatus.isWorkPresent && !qoderStatus.isQoderEnabled
+            (present, gateEnabled) = (qoderStatus.isWorkPresent, qoderStatus.isQoderEnabled)
         case "qwen-work":
-            return qoderStatus.isQwenWorkPresent && !qoderStatus.isQwenWorkEnabled
-        default:           return false
+            (present, gateEnabled) = (qoderStatus.isQwenWorkPresent, qoderStatus.isQwenWorkEnabled)
+        default:
+            return .none
+        }
+        return GateHintState.evaluate(
+            present: present,
+            gateEnabled: gateEnabled,
+            windowToken: tokenOf(pid),
+            hasLogActivityInWindow: qoderStatus.latestActivity[pid].map(inCurrentWindow) ?? false
+        )
+    }
+
+    private func showsQoderHint(for pid: String) -> Bool { gateHint(for: pid) == .notEnabled }
+
+    private func showsRestartHint(for pid: String) -> Bool { gateHint(for: pid) == .needsRestart }
+
+    /// 某个时间点是否落在当前选中的周期内（复用聚合层的窗口判定，避免另写一套日期逻辑）。
+    private func inCurrentWindow(_ date: Date) -> Bool {
+        DailyAggregator.windowPredicate(
+            viewModel.window,
+            weekStartMonday: TabSettings.shared.weekStartMonday,
+            now: Date()
+        )(DailyAggregator.dateString(for: date))
+    }
+
+    /// 重启提示的措辞按产品分：CLI 是新开终端，两个 GUI app 要重启自己。
+    private func restartHintText(for pid: String) -> String {
+        switch pid {
+        case "qoder-cli":  return "已开启统计，新开终端后开始记录"
+        case "qoder-work": return "已开启统计，重启 QoderWork 后开始记录"
+        case "qwen-work":  return "已开启统计，重启千问办公后开始记录"
+        default:           return "已开启统计，重启后开始记录"
         }
     }
 
-    /// 当前要显示的未开启提示行条数(0~3),用于算高度。
+    private func tokenOf(_ pid: String) -> Int {
+        viewModel.stats.first { $0.provider == pid }?.token ?? 0
+    }
+
+    /// 当前要显示的提示行条数,用于算高度。
     private var qoderHintCount: Int {
-        (showsQoderHint(for: "qoder-cli") ? 1 : 0)
-            + (showsQoderHint(for: "qoder-work") ? 1 : 0)
-            + (showsQoderHint(for: "qwen-work") ? 1 : 0)
+        ["qoder-cli", "qoder-work", "qwen-work"]
+            .filter { showsQoderHint(for: $0) || showsRestartHint(for: $0) }
+            .count
     }
 
     /// 按行数动态算 popover 内容区高度,空状态(0 行)给个最小占位
@@ -419,9 +455,16 @@ struct UsageRootView: View {
     /// - 一般 provider / Cursor / gate 开的 Qoder：该周期 `token>0` 才显示（没用就隐藏）。
     /// - gate 关的 Qoder（CLI/Work）：装了就显示（`showsQoderHint` = gate 关 + present，不分周期），
     ///   token=0 也保留并挂「去开启」——否则用户永远看不到开启引导。
+    /// - **gate 开了但目标 app 没重启**：token 恒为 0，同样保留并挂「重启后开始记录」
+    ///   （`showsRestartHint`）——否则整行消失、界面上零解释（0804 验收踩到）。
+    ///
+    /// ⚠️ 别加「已开额度监测就常驻显示」这一条：0804 试过，副作用是今日没用量的 Codex / WorkBuddy /
+    /// Cursor 全被放出来，今日 tab 变成一堆 `—` 行。额度想常驻看就去设置页，主列表按用量走。
     private var displayedProviderIds: [String] {
         func token(_ pid: String) -> Int { viewModel.stats.first { $0.provider == pid }?.token ?? 0 }
-        let filtered = visibleProviderIds.filter { token($0) > 0 || showsQoderHint(for: $0) }
+        let filtered = visibleProviderIds.filter {
+            token($0) > 0 || showsQoderHint(for: $0) || showsRestartHint(for: $0)
+        }
         // 按当前周期用量降序；token 相同（如多个 Qoder「去开启」0 行）保持原注册顺序（稳定排序）
         return filtered.enumerated()
             .sorted { a, b in
@@ -457,6 +500,8 @@ struct UsageRootView: View {
                         )
                         if showsQoderHint(for: pid) {
                             qoderHintRow
+                        } else if showsRestartHint(for: pid) {
+                            restartHintRow(restartHintText(for: pid))
                         }
                     }
                 }
@@ -515,6 +560,21 @@ struct UsageRootView: View {
             Spacer()
         }
         .padding(.leading, 32)   // 对齐 provider 名(icon 22 + spacing 10)
+        .frame(height: 18)
+    }
+
+    /// gate 已开、但目标 app 还没重启 → 数据会一直是 0。给一句解释，别让用户对着空行猜。
+    private func restartHintRow(_ text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "arrow.clockwise.circle.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.leading, 32)
         .frame(height: 18)
     }
 

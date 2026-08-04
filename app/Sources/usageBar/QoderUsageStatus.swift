@@ -29,10 +29,16 @@ final class QoderUsageStatus: ObservableObject {
     @Published private(set) var isEnabled: Bool = false
     /// 写入 / 撤销失败时的错误提示。
     @Published var lastError: String?
+    /// providerId → 最近一次写会话日志的时间（不看 token 是否为 0）。
+    ///
+    /// 用来区分「今天没用过」和「用了但 gate 没生效」——见 `QoderUsageEnvGate.latestSessionActivity`。
+    /// 在这里缓存是因为它要扫盘，**不能**在 SwiftUI body 里按需调用。
+    @Published private(set) var latestActivity: [String: Date] = [:]
 
     private init() { refresh() }
 
-    /// 重新从 gate 读状态（presence + profile/launchctl 开关）。视图 onAppear / 每次 refresh 调。
+    /// 重新从 gate 读状态（presence + profile/launchctl 开关 + 日志活动时间）。
+    /// 视图 onAppear / 每次 refresh 调。
     func refresh() {
         isCliPresent = QoderUsageEnvGate.isQoderCliPresent()
         isWorkPresent = QoderUsageEnvGate.isQoderWorkPresent()
@@ -40,6 +46,10 @@ final class QoderUsageStatus: ObservableObject {
         isQoderEnabled = QoderUsageEnvGate.isQoderEnabled()
         isQwenWorkEnabled = QoderUsageEnvGate.isQwenWorkEnabled()
         isEnabled = QoderUsageEnvGate.isEnabled()
+        latestActivity = ["qoder-cli", "qoder-work", "qwen-work"]
+            .reduce(into: [:]) { result, pid in
+                result[pid] = QoderUsageEnvGate.latestSessionActivity(for: pid)
+            }
     }
 
     /// 任一受 gate 的产品用过 → 才需要展示开关横幅。

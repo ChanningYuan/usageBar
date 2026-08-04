@@ -189,11 +189,31 @@ struct ProviderDetailSpec {
     let hasSources: Bool
     /// 是否有「按会话」区块。Cursor = false（本地 mirror 无 conversationId，拆不出会话）
     let hasSessions: Bool
+    /// 是否在详情页顶部画「账号额度」模块。默认 true。
+    ///
+    /// 千问办公 = false：它的额度就是「剩余可用」一个数，主列表药丸已经显示过，详情页再画一遍是重复
+    /// （0804 对焦拍板 4b）。⚠️ 别改回用 `RateLimitSettings.logicalKey` 返回 nil 来关——那会把
+    /// 主列表药丸和设置页状态一起关掉（初版就是这么错的）。
+    let hasQuotaModule: Bool
     let ring: RingMode
     let costUnit: CostUnit
     let accentDark: String
     let accentLight: String
     let scanner: DetailScannerKind
+
+    init(metricRows: [[MetricBlock]], hasSources: Bool, hasSessions: Bool,
+         hasQuotaModule: Bool = true, ring: RingMode, costUnit: CostUnit,
+         accentDark: String, accentLight: String, scanner: DetailScannerKind) {
+        self.metricRows = metricRows
+        self.hasSources = hasSources
+        self.hasSessions = hasSessions
+        self.hasQuotaModule = hasQuotaModule
+        self.ring = ring
+        self.costUnit = costUnit
+        self.accentDark = accentDark
+        self.accentLight = accentLight
+        self.scanner = scanner
+    }
 
     func accent(_ scheme: ColorScheme) -> Color {
         Color(hex: scheme == .dark ? accentDark : accentLight)
@@ -341,9 +361,15 @@ enum ProviderDetailRegistry {
         // 当前转换器不提供缓存写 → 3 块。积分总额来自账户账单，但账单无 request/session/model id，
         // 因此只在 Hero 展示所选周期精确积分，绝不猜摊到下面各行。
         "qwen-work": ProviderDetailSpec(
+            // 4 块而不是 3 块：日志里 `cache_creation_input_tokens` **字段是存在的**，
+            // 只是厂商目前没往里填（2026-08-04 全量扫描恒 0）。解析器读的是真值，
+            // 所以这里也照四列摊开——「总量 = 四块之和」这个不变量才永远成立，
+            // 厂商哪天开始填也不用再改稿改码。
+            // （对比 WorkBuddy：那是协议里**根本没有**缓存写字段，所以它只有 3 块。）
             metricRows: [[.tile(.input), .tile(.output)],
-                         [.tile(.cacheRead)]],
-            hasSources: false, hasSessions: true, ring: .ofTotal, costUnit: .creditsTotalOnly,
+                         [.tile(.cacheRead), .tile(.cacheCreate)]],
+            hasSources: false, hasSessions: true, hasQuotaModule: false,
+            ring: .ofTotal, costUnit: .creditsTotalOnly,
             accentDark: "#45E59A", accentLight: "#147A52",
             scanner: .qwenWork),
 

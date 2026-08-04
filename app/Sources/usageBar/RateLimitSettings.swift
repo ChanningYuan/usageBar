@@ -77,9 +77,11 @@ final class RateLimitSettings: ObservableObject {
     func isEnabled(_ logicalId: String) -> Bool { enabled.contains(logicalId) }
 
     /// 某 provider 实例对应的逻辑额度开关 id（qoder-* → "qoder"）；无额度数据源返回 nil。
+    ///
+    /// ⚠️ 千问办公**返回自身**（初版在这里返回 nil，副作用是主列表药丸永远不出现）。它确实有「当前状态」
+    /// 数据源——`/user/balance` 的剩余可用。详情页要不要画额度模块由 `ProviderDetailSpec.hasQuotaModule`
+    /// 单独声明，不靠这里返回 nil 间接关掉——那会把药丸和设置页状态一并关掉。
     static func logicalKey(forProvider pid: String) -> String? {
-        // 千问办公开关控制的是“积分账单缓存”，不是当前额度窗口；不要让详情页误画账号额度模块。
-        if pid == "qwen-work" { return nil }
         if pid.hasPrefix("qoder-") { return "qoder" }
         if logicalIds.contains(pid) { return pid }
         return nil

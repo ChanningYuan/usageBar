@@ -138,9 +138,11 @@ struct ProviderDetailView: View {
     // MARK: - M0 账号额度模块 + 周期切换栏 + footer（v0.3.24）
 
     /// M0 账号额度：Hero 之上、周期切换器之上。三态——正常 / 未开启引导 / 错误态说明。
-    /// 只对「有额度数据源」的 provider 显示（Cowork/OpenCode/悟空/WorkBuddy 无，整块不出现）。
+    /// 只对「有额度数据源」**且声明要画这块**的 provider 显示
+    /// （Cowork/OpenCode/悟空/WorkBuddy 无数据源；千问办公有数据源但声明 `hasQuotaModule: false`，
+    /// 因为它的额度就一个「剩余可用」、主列表药丸已经显示过）。
     @ViewBuilder private var accountQuotaModule: some View {
-        if RateLimitSettings.logicalKey(forProvider: providerId) != nil {
+        if spec.hasQuotaModule, RateLimitSettings.logicalKey(forProvider: providerId) != nil {
             let snap = quotaStore.snapshot(for: providerId)
             if !quotaSettings.isEnabled(forProvider: providerId) {
                 quotaBox {
@@ -636,7 +638,7 @@ struct ProviderDetailView: View {
             // （`m.hitRate`）**同口径**，避免同一页两个药丸算法不同。
             // （Codex 的 Hero 环用的是另一套 cached/输入，是重构前就有的口径分歧，本版不动。）
             hitPill(s.tokens.hitRate)
-            Text(fmtCost(s.cost))
+            Text(sessionCost(s.cost))
                 .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(pal.text)
                 .frame(width: 46, alignment: .trailing)
@@ -708,6 +710,20 @@ struct ProviderDetailView: View {
         case .credits, .creditsTotalOnly: return "—"
         default: return fmtCost(c)
         }
+    }
+
+    /// 「按会话」行的金额。
+    ///
+    /// `.creditsTotalOnly`（千问办公）在**模型行**仍是 `—`（账单没有 model 字段，分摊 = 编造），
+    /// 但**会话行**能给出真实积分：账单每行就是一个会话，按时间区间匹配挂回本地会话
+    /// （见 `QwenWorkDetailScanner.matchCreditsToSessions`）。没匹配上的会话为 0 → 显示 `—`，
+    /// 不显示 "0.00 积分"（那会被读成"这个会话没花钱"，实际是"没匹配上"）。
+    private func sessionCost(_ c: Double) -> String {
+        guard spec.costUnit == .creditsTotalOnly else { return fmtCost(c) }
+        guard c > 0 else { return "—" }
+        return c >= 100 ? String(format: "%.0f 积分", c)
+             : c >= 1   ? String(format: "%.2f 积分", c)
+                        : String(format: "%.4f 积分", c)
     }
 
     /// 纯 $ 金额（无 ≈ 前缀），Hero 副行金额段自带 ≈ 时用

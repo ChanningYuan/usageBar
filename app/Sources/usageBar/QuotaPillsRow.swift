@@ -52,7 +52,8 @@ struct QuotaPillsRow: View {
             Text(w.label)
                 .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(labelColor)
-            Text("\(Int(w.usedPercent.rounded()))%")
+            // 金额型窗口（千问办公积分）直接展示数值；没有分母就不编百分比出来
+            Text(w.valueText ?? "\(Int(w.usedPercent.rounded()))%")
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(color)
             // used/total 数字（0715 对焦稿定稿 P1）：Qoder 双药丸带数字实测 ~325pt < 可用 340pt
@@ -119,6 +120,8 @@ enum QuotaFormat {
             switch sev {
             case "warning": return yellow
             case "critical", "exceeded", "reached", "error": return red
+            // 金额型窗口（千问办公）：没有分母 → 没有「用了多少比例」，套色档等于无中生有
+            case "neutral": return Color(hex: scheme == .dark ? "#F5F5F7" : "#1D1D1F")
             default: return green
             }
         }
@@ -167,6 +170,8 @@ enum QuotaFormat {
     /// detail（used/total）一并清掉——那是旧窗口的数字；resetsAt 保留让「(已重置)」文案照常出。
     static func displayWindow(_ w: RateLimitWindow, now: Date = Date()) -> RateLimitWindow {
         guard let r = w.resetsAt, r.timeIntervalSince(now) <= 0 else { return w }
+        // 金额型窗口（valueText）不适用「归零」语义：余额不会因为窗口翻篇就变 0，原样保留。
+        guard w.valueText == nil else { return w }
         return RateLimitWindow(kind: w.kind, label: w.label, windowMinutes: w.windowMinutes,
                                usedPercent: 0, resetsAt: w.resetsAt, scopeModel: w.scopeModel)
     }

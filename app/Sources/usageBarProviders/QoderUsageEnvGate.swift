@@ -12,6 +12,44 @@ import Foundation
 /// （Qoder IDE 不受此 gate，token 直写 SQLite，无需开关。）
 /// 详见 docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md（CLI 前身见 docs/0625-Qoder全家桶token计量/qoder-cli-usage-gate-fix.md）。
 ///
+/// 受 gate 产品在主列表该挂哪种提示（纯逻辑，抽出来是为了能被测试锁住）。
+///
+/// 三态很容易顾此失彼——2026-08-04 就在这里翻过两次车：
+/// 1. 先是「gate 已开但 app 没重启」完全静默：token=0 让整行被过滤掉，用户什么都看不到；
+/// 2. 补提示时判据只写了「gate 已开 + 装过 + token=0」，于是**当天没用过**的产品也被提示重启。
+///
+/// 所以判据必须同时看四个输入，缺一个就会误报或漏报。
+public enum GateHintState: Equatable {
+    /// 不需要任何提示
+    case none
+    /// gate 没开 → 「token 统计未开启 · 去开启」
+    case notEnabled
+    /// gate 开了、这个周期也确实用过，但 token 仍是 0 → 目标 app 没重启，环境变量没被继承
+    case needsRestart
+
+    /// - Parameters:
+    ///   - present: 这个产品在本机用过（有会话目录）
+    ///   - gateEnabled: 对应的环境变量已写进 profile / launchctl
+    ///   - windowToken: 当前周期该 provider 统计到的 token
+    ///   - hasLogActivityInWindow: 当前周期内有没有写过会话日志（**不看 token 是否为 0**）
+    public static func evaluate(
+        present: Bool,
+        gateEnabled: Bool,
+        windowToken: Int,
+        hasLogActivityInWindow: Bool
+    ) -> GateHintState {
+        // 没装/没用过 → 与用户无关，别拿开关去打扰他
+        guard present else { return .none }
+        // gate 没开 → 无论有没有用量都要给开启引导（否则用户永远不知道能开）
+        guard gateEnabled else { return .notEnabled }
+        // gate 开了且有 token → 一切正常
+        guard windowToken == 0 else { return .none }
+        // gate 开了、token 却是 0：只有「这个周期确实用过」才是没重启；
+        // 没有日志活动 = 今天单纯没用它，属于正常，不提示。
+        return hasLogActivityInWindow ? .needsRestart : .none
+    }
+}
+
 /// ⚠️ 只读检测会 spawn `launchctl getenv`（仅当 profile 标记块不存在时），
 /// 调用方应在 UI 出现时（onAppear）触发，不要放进高频循环。
 public enum QoderUsageEnvGate {
@@ -84,6 +122,48 @@ public enum QoderUsageEnvGate {
             return false
         }
         return !entries.isEmpty
+    }
+
+    /// 受 gate 产品**最近一次产生会话日志**的时间（只看有没有写日志，不看 token 是不是 0）。
+    ///
+    /// 用来区分两种「token = 0」——它们长得一样，但只有后者该提示重启：
+    /// - **今天根本没用过这个工具** → 本周期没有日志活动 → 0 是正常的，什么都不该提示；
+    /// - **用了，但 gate 没在目标进程里生效** → 本周期有日志活动、token 却全是 0 → 提示「重启后开始记录」。
+    ///
+    /// ⚠️ 别退回成「gate 已开 + 装过 + token=0」就提示：那会对**今天没用过**的产品误报
+    /// （2026-08-04 验收现场：用户当天没开 QoderWork，却被提示「重启 QoderWork」）。
+    ///
+    /// 只取最新 mtime、不解析内容。调用方应在每次刷新时取一次缓存起来（见 `QoderUsageStatus`），
+    /// **别放进 SwiftUI body 里按需调用**——那会每次重绘都扫盘。
+    public static func latestSessionActivity(for productId: String) -> Date? {
+        let root: URL
+        switch productId {
+        case "qoder-cli":  root = home.appendingPathComponent(".qoder/projects")
+        case "qoder-work": root = home.appendingPathComponent(".qoderwork/projects")
+        case "qwen-work":  root = home.appendingPathComponent(".qwenworkcn/logs/sessions")
+        default: return nil
+        }
+        return newestLogDate(under: root)
+    }
+
+    private static func newestLogDate(under root: URL) -> Date? {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: root.path),
+              let walker = fm.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles])
+        else { return nil }
+        var newest: Date?
+        for case let url as URL in walker where url.pathExtension == "jsonl" {
+            guard let values = try? url.resourceValues(
+                    forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+                  values.isRegularFile == true,
+                  let modified = values.contentModificationDate
+            else { continue }
+            if newest == nil || modified > newest! { newest = modified }
+        }
+        return newest
     }
 
     /// Qoder CLI / QoderWork 的 gate 是否已开启。

@@ -34,10 +34,18 @@ public struct RateLimitWindow: Codable, Sendable, Equatable {
     public let used: Double?
     /// 原始总额（同上）
     public let total: Double?
+    /// **代替百分比展示的原样数值**（如千问办公的 "2,437.02"）。非 nil 时药丸/额度行显示它而不是 `usedPercent`。
+    ///
+    /// ⚠️ 为什么需要这个：千问办公的官方界面**根本没有「总额」概念**（只有「剩余可用」），
+    /// 分母只能从流水反推、且每天都在变（平时每日赠 100、搞活动 500）——显示百分比会跳得没道理、
+    /// 且与官方页面对不上账。所以这类 provider 直接展示余额/已用的绝对值。
+    /// 详见 `docs/0804-千问办公接入/千问办公接入-spec.md` §2a（含百分比方案的否决理由）。
+    public let valueText: String?
 
     public init(kind: String, label: String, windowMinutes: Int? = nil, usedPercent: Double,
                 resetsAt: Date? = nil, severity: String? = nil, scopeModel: String? = nil,
-                detail: String? = nil, used: Double? = nil, total: Double? = nil) {
+                detail: String? = nil, used: Double? = nil, total: Double? = nil,
+                valueText: String? = nil) {
         self.kind = kind
         self.label = label
         self.windowMinutes = windowMinutes
@@ -48,6 +56,7 @@ public struct RateLimitWindow: Codable, Sendable, Equatable {
         self.detail = detail
         self.used = used
         self.total = total
+        self.valueText = valueText
     }
 
     /// "6,000/6,000" —— `detail` 字段的统一紧凑格式（千分位、无单位；单位在信用点语境下自明）
