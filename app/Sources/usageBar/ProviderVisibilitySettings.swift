@@ -77,8 +77,8 @@ final class ProviderVisibilitySettings: ObservableObject {
 
     /// 首次运行智能默认：第一次拉到数据后，把**没用过**的 provider 自动关掉，只留用过的。
     ///
-    /// 「用过」= 有用量（token>0）∪ 有本地数据。后者为 qodercli 特例：装了但因没开
-    /// `QODER_EXPOSE_TOKEN_USAGE` 而 transcript 零 token 时，仍按会话文件判定为用过，
+    /// 「用过」= 有用量（token>0）∪ 有本地数据。后者为 Qoder/千问特例：装了但因没开
+    /// 各自 `EXPOSE_TOKEN_USAGE` gate 而日志零 token 时，仍按会话文件判定为用过，
     /// 否则会被自动隐藏 → 连「去开启」横幅都看不到（见 docs/0625-Qoder全家桶token计量/qoder-cli-usage-gate-fix.md）。
     ///
     /// **只执行一次**（用 `didAutoConfigure` 标记），之后用户手动的开关不会被覆盖。

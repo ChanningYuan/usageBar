@@ -34,7 +34,7 @@ struct SettingsView: View {
     @State private var dataSourceExpanded = true
     @State private var quotaExpanded = true
     @State private var tabsExpanded = true
-    /// 正在展示引导 sheet 的逻辑开关（claude-code / qoder）；nil = 不展示
+    /// 正在展示引导 sheet 的逻辑开关（claude-code / qoder / qwen-work）；nil = 不展示
     @State private var guideFor: String?
     /// 价目表新鲜度（打开设置时取一次，避免每次重绘都去读磁盘）
     @State private var pricingFreshness: RemotePricing.Freshness?
@@ -99,7 +99,7 @@ struct SettingsView: View {
         }
     }
 
-    /// 引导 sheet 确认：Claude 落数据源 +（statusline 时）注入脚本；两者都开启开关并立即采一次。
+    /// 引导 sheet 确认：Claude 落数据源 +（statusline 时）注入脚本；各来源都开启开关并立即采一次。
     private func confirmGuide(_ id: String, source: String) {
         if id == "claude-code" {
             quotaSettings.setDataSource(for: "claude-code", source)
@@ -187,8 +187,10 @@ struct SettingsView: View {
     private var visibleProviderCount: Int {
         ProviderRegistry.all.filter { settings.isProviderToggleOn($0.id) }.count
     }
-    private var lastQoderId: String? {
-        ProviderRegistry.all.last { $0.family == "qoder" }?.id
+    private var lastGatedProviderId: String? {
+        ProviderRegistry.all.last {
+            $0.id == "qoder-cli" || $0.id == "qoder-work" || $0.id == "qwen-work"
+        }?.id
     }
 
     /// 折叠段标题行：chevron（收起▸ / 展开▾）+ 标题 + 右侧计数；整行可点击折叠。
@@ -250,8 +252,8 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(ProviderRegistry.all, id: \.id) { p in
                         providerRow(p)
-                        // Qoder gate banner 挂在 Qoder 系列**最后一行之后**（挂在最前会紧贴 Claude、被误认成 Claude 的）
-                        if p.id == lastQoderId {
+                        // 共享 gate banner 挂在三个受控产品的最后一行之后。
+                        if p.id == lastGatedProviderId {
                             QoderUsageBanner(status: qoderStatus)
                         }
                         if p.id == "cursor" {
@@ -322,11 +324,11 @@ struct SettingsView: View {
 
     // MARK: - 账号额度（监测开关折叠段，v0.3.24）
 
-    /// 4 个逻辑开关：Codex 默认开（纯本地），Claude / Qoder / Cursor 默认关（联网 + 读钥匙串）。
+    /// Codex 默认开（纯本地）；Claude / Qoder / 千问办公默认关（联网 + 读钥匙串）。
     /// 每行下挂说明——尤其 Claude 那条必须预告「会弹钥匙串授权框」，否则用户被突然弹框吓到会点拒绝。
     private var quotaSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionHeader("账号额度", count: "已开启 \(quotaSettings.enabled.count) 个", expanded: quotaExpanded) {
+            sectionHeader("账号额度与积分", count: "已开启 \(quotaSettings.enabled.count) 个", expanded: quotaExpanded) {
                 quotaExpanded.toggle()
             }
             if quotaExpanded {
@@ -348,6 +350,8 @@ struct SettingsView: View {
               desc: "开启后随每次刷新向 api.anthropic.com 查询。首次会弹一次系统钥匙串授权框（读取 Claude Code 自己保存的登录凭证），选「始终允许」后不再弹。"),
         .init(id: "qoder", icon: "qoder-work", name: "Qoder",
               desc: "读取本机 Qoder 登录凭证并请求 qoder.com（首次同样弹一次钥匙串授权框）。额度是账号级的，CLI / Work / IDE 共用一份。"),
+        .init(id: "qwen-work", icon: "qwen-work", name: "千问办公积分",
+              desc: "读取千问办公登录凭证并请求 qwenwork.cn 的积分历史接口；缓存真实账单后，可在详情页按今日、本周、近 7 天、本月等周期查看消耗。"),
         .init(id: "cursor", icon: "cursor", name: "Cursor",
               desc: "读取本机 Cursor 登录凭证并请求 cursor.com。与「数据源 → Cursor」用同一份凭证。"),
         .init(id: "workbuddy", icon: "workbuddy", name: "WorkBuddy",
@@ -374,9 +378,10 @@ struct SettingsView: View {
                 Toggle("", isOn: Binding(
                     get: { quotaSettings.isEnabled(id) },
                     set: { on in
-                        // Claude / Qoder 首次开启弹引导 sheet（选数据源 / 预告钥匙串授权）；
+                        // Claude / Qoder / 千问办公首次开启弹引导 sheet（选数据源 / 预告钥匙串授权）；
                         // 已配置过的（曾确认过一次）直接开，不重弹——复用上次数据源，避免"关了再开又弹"的怪感。
-                        if on, id == "claude-code" || id == "qoder", !quotaSettings.isConfigured(id) {
+                        if on, ["claude-code", "qoder", "qwen-work"].contains(id),
+                           !quotaSettings.isConfigured(id) {
                             guideFor = id
                             return   // 先不开，等 sheet 确认；toggle 视觉回弹到关
                         }
@@ -399,7 +404,7 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.leading, 32)
-            // 已配置过的（Claude/Qoder）显示操作区：Claude 可「切换数据源」（重开引导选另一个）；两者都可「重置授权」
+            // 已配置过的（Claude/Qoder/千问办公）显示操作区；Claude 额外可切换数据源。
             if quotaSettings.isConfigured(id) {
                 HStack(spacing: 12) {
                     if id == "claude-code" {
@@ -419,7 +424,8 @@ struct SettingsView: View {
         }
     }
 
-    /// 设置行状态标签：数据源 + 连接状态点。只对需引导配置的 Claude / Qoder、且已开启时显示。
+    /// 设置行状态标签：数据源 + 连接状态点。额度快照目前只对 Claude / Qoder 显示；
+    /// 千问办公是账单缓存，不拿不存在的“当前窗口”伪装连接状态。
     private func quotaChip(id: String) -> (text: String, dot: Color)? {
         guard id == "claude-code" || id == "qoder", quotaSettings.isEnabled(id) else { return nil }
         let pid = id == "qoder" ? "qoder-work" : id
@@ -604,11 +610,11 @@ private extension View {
     }
 }
 
-// MARK: - Qoder token 统计开关横幅（CLI / Work 共用）
+// MARK: - Qoder SDK token 统计开关横幅（统一管理 CLI / Work / 千问办公）
 
-/// 设置页 qoder 框顶的 token 统计开关横幅（三态）。CLI 与 QoderWork 共用同一个 env gate。
+/// 一键同时管理 Qoder 的 `QODER_` gate 与千问办公的 `QODERCN_` gate。
 ///
-/// - `isAnyGatedPresent==false`（CLI / Work 都没用过）→ 整条不出现。
+/// - `isAnyGatedPresent==false`（三个产品都没用过）→ 整条不出现。
 /// - 未开启 → 橙底警告文案 + [一键开启]。
 /// - 已开启 → 绿底「✓ 已开启」+ 生效说明 + 撤销（开启后唯一样式）。
 /// 详见 docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md。
@@ -635,7 +641,7 @@ private struct QoderUsageBanner: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(.orange)
-                Text("Qoder CLI / QoderWork 默认不记录本地 token 消耗。需把环境变量 \(status.envName) 从 0 改为 1 开启记录，才能统计。")
+                Text("Qoder CLI / QoderWork 需开启 QODER_EXPOSE_TOKEN_USAGE；千问办公需开启 QODERCN_EXPOSE_TOKEN_USAGE。两者都只统计开启后的新请求。")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -660,14 +666,14 @@ private struct QoderUsageBanner: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.circle.fill").font(.system(size: 10)).foregroundStyle(.green)
-                Text("已开启 token 统计（CLI 和 QoderWork 都生效）").font(.system(size: 10, weight: .medium))
+                Text("已开启 token 统计（Qoder CLI / Work / 千问办公）").font(.system(size: 10, weight: .medium))
                 Spacer()
                 Button("撤销") { status.disable() }.controlSize(.mini).buttonStyle(.link)
             }
-            Text("首次开启后 CLI 新开终端 / QoderWork 重启 app 后才能开始记录")
+            Text("首次开启后 CLI 新开终端；QoderWork / 千问办公需重启 app")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text("已写入 \(status.profileDisplayName)：export \(status.envName)=1")
+            Text("已写入 \(status.profileDisplayName)：\n\(status.envExports)")
                 .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)

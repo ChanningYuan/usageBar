@@ -2,28 +2,35 @@ import Foundation
 
 /// Qoder token 用量开关（env gate）的检测 / 写入 / 撤销。
 ///
-/// 背景：Qoder CLI 与 QoderWork **共用同一个** `EMPTY_USAGE` gate —— 默认不往 transcript 写
-/// token 用量，须设环境变量 `QODER_EXPOSE_TOKEN_USAGE=1` 才吐真值。usageBar 帮用户把这行
-/// export 幂等地写进 shell profile（+ launchctl），可一键撤销。CLI 新开终端生效；QoderWork
-/// 是 GUI app，启动时用 `zsh -ilc` 抓登录 shell env 继承它，改完须重启 app 才生效。
+/// 背景：Qoder CLI / QoderWork 与千问办公（QwenWorkCN）都使用 Qoder Agent SDK 的
+/// `EMPTY_USAGE` gate，但 CN binary 会把变量前缀展开为 `QODERCN_`：
+/// - Qoder CLI / QoderWork：`QODER_EXPOSE_TOKEN_USAGE=1`
+/// - 千问办公：`QODERCN_EXPOSE_TOKEN_USAGE=1`
+///
+/// usageBar 把两行 export 幂等地写进 shell profile（+ launchctl），可一键撤销。CLI 新开终端
+/// 生效；两个 GUI app 都须重启才生效。
 /// （Qoder IDE 不受此 gate，token 直写 SQLite，无需开关。）
 /// 详见 docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md（CLI 前身见 docs/0625-Qoder全家桶token计量/qoder-cli-usage-gate-fix.md）。
 ///
 /// ⚠️ 只读检测会 spawn `launchctl getenv`（仅当 profile 标记块不存在时），
 /// 调用方应在 UI 出现时（onAppear）触发，不要放进高频循环。
 public enum QoderUsageEnvGate {
-    public static let envName = "QODER_EXPOSE_TOKEN_USAGE"
+    public static let qoderEnvName = "QODER_EXPOSE_TOKEN_USAGE"
+    public static let qwenWorkEnvName = "QODERCN_EXPOSE_TOKEN_USAGE"
+    public static let envNames = [qoderEnvName, qwenWorkEnvName]
 
     private static let beginMarker = "# BEGIN usageBar-qodercli-usage"
     private static let endMarker = "# END usageBar-qodercli-usage"
 
     /// 写进 profile 的完整标记块（幂等识别靠 BEGIN/END）
-    private static var block: String {
+    static var managedBlock: String {
         """
         \(beginMarker)
-        # 让 qodercli / QoderWork 把真实 token 用量写进 transcript(message.usage 四列),供 usageBar 统计。
-        # 默认不记录(EMPTY_USAGE gate),设此变量=1 才吐真值;只对设后新建的会话生效(QoderWork 需重启 app)。
-        export \(envName)=1
+        # 让 Qoder CLI / QoderWork 把真实 token 用量写进本地日志。
+        export \(qoderEnvName)=1
+        # 千问办公内置 CN binary，变量前缀是 QODERCN_。
+        export \(qwenWorkEnvName)=1
+        # 两个 gate 都只对之后的新请求生效；QoderWork / 千问办公需重启 app。
         \(endMarker)
         """
     }
@@ -69,19 +76,71 @@ public enum QoderUsageEnvGate {
         return !entries.isEmpty
     }
 
-    /// token 统计是否已开启：profile 标记块存在，或 launchctl 已 setenv=1。
+    /// 千问办公是否「用过」：`~/.qwenworkcn/projects` 下有会话条目即算。
+    /// 千问办公内置 CN 版 Qoder Agent SDK，受 `QODERCN_EXPOSE_TOKEN_USAGE` gate 控制。
+    public static func isQwenWorkPresent() -> Bool {
+        let projects = home.appendingPathComponent(".qwenworkcn/projects")
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: projects.path) else {
+            return false
+        }
+        return !entries.isEmpty
+    }
+
+    /// Qoder CLI / QoderWork 的 gate 是否已开启。
+    public static func isQoderEnabled() -> Bool {
+        isEnvEnabled(qoderEnvName)
+    }
+
+    /// 千问办公的 CN gate 是否已开启。
+    public static func isQwenWorkEnabled() -> Bool {
+        isEnvEnabled(qwenWorkEnvName)
+    }
+
+    /// 所有「已经用过」的受控产品都开启才算完成；未安装/未使用的产品不强制要求。
     public static func isEnabled() -> Bool {
-        if profileHasBlock() { return true }
-        if launchctlValue() == "1" { return true }
-        return false
+        allRequiredProductsEnabled(
+            qoderPresent: isQoderCliPresent() || isQoderWorkPresent(),
+            qwenWorkPresent: isQwenWorkPresent(),
+            enabledEnvNames: Set(envNames.filter(isEnvEnabled))
+        )
     }
 
-    private static func profileHasBlock() -> Bool {
-        guard let text = try? String(contentsOf: profilePath, encoding: .utf8) else { return false }
-        return text.contains(beginMarker) && text.contains("\(envName)=1")
+    static func allRequiredProductsEnabled(
+        qoderPresent: Bool,
+        qwenWorkPresent: Bool,
+        enabledEnvNames: Set<String>
+    ) -> Bool {
+        guard qoderPresent || qwenWorkPresent else { return false }
+        return (!qoderPresent || enabledEnvNames.contains(qoderEnvName))
+            && (!qwenWorkPresent || enabledEnvNames.contains(qwenWorkEnvName))
     }
 
-    private static func launchctlValue() -> String? {
+    private static func isEnvEnabled(_ name: String) -> Bool {
+        if let text = try? String(contentsOf: profilePath, encoding: .utf8),
+           enabledEnvNames(inProfileText: text).contains(name) {
+            return true
+        }
+        return launchctlValue(name) == "1"
+    }
+
+    /// 只解析 usageBar 自己管理的标记块，避免把用户注释或其它脚本误判成已开启。
+    static func enabledEnvNames(inProfileText text: String) -> Set<String> {
+        guard text.contains(beginMarker), text.contains(endMarker) else { return [] }
+        var inside = false
+        var enabled = Set<String>()
+        for rawLine in text.components(separatedBy: "\n") {
+            if rawLine.contains(beginMarker) { inside = true; continue }
+            if rawLine.contains(endMarker) { inside = false; continue }
+            guard inside else { continue }
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            for name in envNames where line == "export \(name)=1" || line == "\(name)=1" {
+                enabled.insert(name)
+            }
+        }
+        return enabled
+    }
+
+    private static func launchctlValue(_ envName: String) -> String? {
         let out = runProcess("/bin/launchctl", ["getenv", envName])?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return (out?.isEmpty == false) ? out : nil
@@ -95,7 +154,9 @@ public enum QoderUsageEnvGate {
     public static func enable() -> Bool {
         let ok = writeProfile(adding: true)
         // launchctl 让 GUI / 新登录会话也覆盖；失败不影响 profile 主路径
-        runProcess("/bin/launchctl", ["setenv", envName, "1"])
+        for envName in envNames {
+            runProcess("/bin/launchctl", ["setenv", envName, "1"])
+        }
         return ok
     }
 
@@ -103,7 +164,9 @@ public enum QoderUsageEnvGate {
     @discardableResult
     public static func disable() -> Bool {
         let ok = writeProfile(adding: false)
-        runProcess("/bin/launchctl", ["unsetenv", envName])
+        for envName in envNames {
+            runProcess("/bin/launchctl", ["unsetenv", envName])
+        }
         return ok
     }
 
@@ -124,7 +187,7 @@ public enum QoderUsageEnvGate {
         if adding {
             if !text.isEmpty && !text.hasSuffix("\n") { text += "\n" }
             if !text.isEmpty { text += "\n" }
-            text += block + "\n"
+            text += managedBlock + "\n"
         }
         do {
             try text.write(to: path, atomically: true, encoding: .utf8)

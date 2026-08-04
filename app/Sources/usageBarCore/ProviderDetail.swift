@@ -133,6 +133,8 @@ public struct ProviderDetail: Sendable, Equatable {
     public let tokens: TokenBreakdown
     /// ≈$ 等效 API 花费合计
     public let cost: Double
+    /// 金额数据是否已成功取得。默认 true；用于区分“真实为 0”和“尚未同步”（千问办公积分）。
+    public let costAvailable: Bool
     /// 分来源（固定顺序：官方直连 → 中转/代理；无流量来源不输出）
     public let sources: [SourceDetailRecord]
     /// 分模型（token 降序），已过滤 `<synthetic>`
@@ -146,12 +148,14 @@ public struct ProviderDetail: Sendable, Equatable {
     public var sessionCount: Int { sessions.count }
 
     public init(providerId: String, windowId: String, tokens: TokenBreakdown,
-                cost: Double, sources: [SourceDetailRecord] = [],
+                cost: Double, costAvailable: Bool = true,
+                sources: [SourceDetailRecord] = [],
                 models: [ModelDetailRecord], sessions: [SessionDetailRecord]) {
         self.providerId = providerId
         self.windowId = windowId
         self.tokens = tokens
         self.cost = cost
+        self.costAvailable = costAvailable
         self.sources = sources
         self.models = models
         self.sessions = sessions

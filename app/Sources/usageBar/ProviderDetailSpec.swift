@@ -13,12 +13,13 @@ import usageBarCore
 /// **加第 N 个 provider = 在 `specs` 里加一行声明，不碰 UI 代码。**
 /// 方案：`_notes/docs/0713-Cursor计数修复与详情页扩展/详情页模块化-spec.md`
 
-// MARK: - 金额口径（三档）
+// MARK: - 金额口径（四档）
 
 /// 详情页金额口径。**按「行（模型）」判定，不写死在 provider 上**（spec §1e）：
 /// 1. 该行模型名能查到价 → `.equivalentUSD`
 /// 2. 查不到价但有 credit → `.credits`
-/// 3. 都没有 → `.unavailable`
+/// 3. 只有周期总账单、不能归因到行 → `.creditsTotalOnly`
+/// 4. 都没有 → `.unavailable`
 ///
 /// 这里的 `costUnit` 是 provider 的**默认档**；将来 BYOK（自带 key）时单行可按真实模型名升级到
 /// `.equivalentUSD`，代码不用改结构。
@@ -28,6 +29,9 @@ enum CostUnit: Equatable {
     /// `≈ 6.78 Credits` —— 直接读数据自带的 credit，**绕开价目表**（WorkBuddy）。
     /// ⚠️ credit 是整条消息的标量，**拆不到四列** → 指标区金额位显示 `—`。
     case credits
+    /// 账户账单给出所选周期的**精确积分总额**，但没有 request/session/model 关联字段。
+    /// Hero 展示精确积分；指标、模型、会话行统一显示 `—`，不猜摊（千问办公）。
+    case creditsTotalOnly
     /// `—` —— 模型名被厂商打码（`qmodel`）且本地无任何 credit 字段（Qoder 全家桶）。
     case unavailable
 }
@@ -171,6 +175,7 @@ enum DetailScannerKind {
     case cursor
     case workBuddy
     case qoderIde
+    case qwenWork
     /// 悟空：**双源合并**（旧 requests.jsonl 占 99.96% + 新 codex rollout）。见 `WukongDetailScanner`。
     case wukong
 }
@@ -331,6 +336,16 @@ enum ProviderDetailRegistry {
             hasSources: false, hasSessions: true, ring: .ofTotal, costUnit: .unavailable,
             accentDark: "#35A8CE", accentLight: "#0B5266",
             scanner: .qoderIde),
+
+        // 千问办公：OpenAI usage 暴露 prompt/output/cache read；prompt 已包含 cached，parser 先做差得到净输入。
+        // 当前转换器不提供缓存写 → 3 块。积分总额来自账户账单，但账单无 request/session/model id，
+        // 因此只在 Hero 展示所选周期精确积分，绝不猜摊到下面各行。
+        "qwen-work": ProviderDetailSpec(
+            metricRows: [[.tile(.input), .tile(.output)],
+                         [.tile(.cacheRead)]],
+            hasSources: false, hasSessions: true, ring: .ofTotal, costUnit: .creditsTotalOnly,
+            accentDark: "#45E59A", accentLight: "#147A52",
+            scanner: .qwenWork),
 
         // WorkBuddy：净输入 + 输出⊃思考 + 缓存读。**无缓存写**（prompt_tokens 已含缓存，主行口径如此）。
         // 金额走「信用点」——模型名是 auto（打码），等效美元算不出来，但数据自带 rawUsage.credit。

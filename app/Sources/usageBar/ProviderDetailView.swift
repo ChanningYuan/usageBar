@@ -41,7 +41,7 @@ struct ProviderDetailView: View {
             ?? ProviderDetailRegistry.specs["claude-code"]!
     }
 
-    /// 是否展示「等效 API 费用」（≈$ 前缀）。三档金额口径见 `CostUnit`。
+    /// 是否展示「等效 API 费用」（≈$ 前缀）。四档金额口径见 `CostUnit`。
     private var usesEquivalentCost: Bool { spec.costUnit == .equivalentUSD }
 
     private var pal: DetailPalette { .of(scheme) }
@@ -90,7 +90,7 @@ struct ProviderDetailView: View {
     /// 内容区：有数据时按实测高度自适应（矮不留白、高封顶滚动）；加载/空态给固定高度撑住弹层。
     @ViewBuilder private var detailContent: some View {
         if let d = viewModel.detail, d.providerId == providerId {
-            if d.tokens.total == 0 {
+            if d.tokens.total == 0 && d.cost == 0 {
                 centered("该周期这个来源没有用量").frame(height: 220)
             } else {
                 ScrollView {
@@ -373,7 +373,7 @@ struct ProviderDetailView: View {
                 (
                     Text("\(periodLabel)总量").font(.system(size: 11)).foregroundStyle(pal.text2)
                     + Text(" · ").font(.system(size: 11)).foregroundStyle(pal.text3)
-                    + Text(heroCostLabel(d.cost))
+                    + Text(heroCostLabel(d))
                         .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                         .foregroundStyle(accent)
                 )
@@ -386,8 +386,12 @@ struct ProviderDetailView: View {
     /// 缓存命中率口径由声明表给（`.ofTotal` Claude 系 / `.ofInput` Codex 系）。
     private func ringRate(_ t: TokenBreakdown) -> Double { spec.ring.rate(t) }
 
-    /// Hero 副行金额段。三档各自的措辞。
-    private func heroCostLabel(_ c: Double) -> String {
+    /// Hero 副行金额段。四档各自的措辞。
+    private func heroCostLabel(_ detail: ProviderDetail) -> String {
+        if spec.costUnit == .creditsTotalOnly, !detail.costAvailable {
+            return "积分未同步"
+        }
+        let c = detail.cost
         switch spec.costUnit {
         case .equivalentUSD:
             return "≈ \(fmtDollar(c))"
@@ -397,6 +401,10 @@ struct ProviderDetailView: View {
                   : c >= 1  ? String(format: "%.1f", c)
                             : String(format: "%.2f", c)
             return "≈ \(n) Credits"
+        case .creditsTotalOnly:
+            // 账户账单直接给出的精确扣减总额，不加“≈”。
+            let n = c >= 1 ? String(format: "%.2f", c) : String(format: "%.4f", c)
+            return "\(n) 积分"
         case .unavailable:
             // 模型名被厂商打码（qmodel），价目表永远查不到；本地也没有 credit
             return "无价目"
@@ -542,7 +550,9 @@ struct ProviderDetailView: View {
                     .foregroundStyle(pal.text2)
                     .frame(width: 56, alignment: .trailing)
                 hitPill(m.hitRate)
-                if m.cost == 0, m.tokens.total > 0, UnifiedPricing.hasNoPricing(for: m.modelId) {
+                if spec.costUnit != .creditsTotalOnly,
+                   m.cost == 0, m.tokens.total > 0,
+                   UnifiedPricing.hasNoPricing(for: m.modelId) {
                     // 内置+远程价目都没有的模型：给反馈入口（预填 issue），感知长尾缺价
                     Button(action: { openPricingIssue(model: m.modelId) }) {
                         Text("无价目")
@@ -664,9 +674,10 @@ struct ProviderDetailView: View {
         return "\(n)"
     }
 
-    /// 金额三档（`CostUnit`）：
+    /// 金额四档（`CostUnit`）：
     /// - `.equivalentUSD` → `≈$12.3`（token × 价目表单价）
     /// - `.credits`       → `6.78 Cr`（数据自带的信用点；**不查价目表**）
+    /// - `.creditsTotalOnly` → `—`（只有周期总额，无法归因到当前行）
     /// - `.unavailable`   → `—`（模型名被厂商打码 + 本地无 credit，如 Qoder 全家桶）
     private func fmtCost(_ c: Double) -> String {
         switch spec.costUnit {
@@ -677,6 +688,8 @@ struct ProviderDetailView: View {
             if c >= 100 { return String(format: "%.0f Cr", c) }
             if c >= 1 { return String(format: "%.1f Cr", c) }
             return c > 0 ? String(format: "%.2f Cr", c) : "0 Cr"
+        case .creditsTotalOnly:
+            return "—"
         case .equivalentUSD:
             if c >= 10 { return String(format: "≈$%.0f", c) }
             if c >= 1 { return String(format: "≈$%.1f", c) }
@@ -691,7 +704,10 @@ struct ProviderDetailView: View {
     /// credit 是整条消息的一个标量，**拆不到「净输入/输出/缓存读/缓存写」四列**
     /// （等效美元能拆，是因为每列各有单价）。硬按四列摊会是编造。
     private func metricCost(_ c: Double) -> String {
-        spec.costUnit == .credits ? "—" : fmtCost(c)
+        switch spec.costUnit {
+        case .credits, .creditsTotalOnly: return "—"
+        default: return fmtCost(c)
+        }
     }
 
     /// 纯 $ 金额（无 ≈ 前缀），Hero 副行金额段自带 ≈ 时用

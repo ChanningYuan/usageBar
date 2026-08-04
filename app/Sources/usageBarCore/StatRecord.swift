@@ -6,7 +6,7 @@ import Foundation
 ///
 /// 切窗口纯走 filter：`allStats.filter { $0.time == "today" }`
 public struct StatRecord: Codable, Sendable, Equatable {
-    /// "claude-code" / "cowork" / "qoder-cli" / "qoder-work" / "qoder-ide" / "codex" / "wukong"
+    /// "claude-code" / "cowork" / "qoder-cli" / "qoder-work" / "qoder-ide" / "qwen-work" / "codex" / "wukong"
     public let provider: String
     /// "today" / "last7Days" / "last30Days" / "all"
     public let time: String

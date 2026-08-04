@@ -2,16 +2,17 @@ import AppKit
 import SwiftUI
 import usageBarProviders
 
-/// 开启 Claude / Qoder 额度监测前的引导 sheet（v0.3.24）。
+/// 开启 Claude / Qoder 额度或千问办公积分监测前的引导 sheet。
 ///
 /// - **Claude**：三选一数据源（statusline 推荐 / CLI 抄屏 / OAuth 接口），确认按钮文案跟随选中项
 ///   （需钥匙串的 OAuth → 「去授权并启用」；零弹窗的 statusline/CLI → 「启用」）。
 /// - **Qoder**：单方案（联网查额度，需一次钥匙串授权），按钮固定「去授权并启用」。
+/// - **千问办公**：单方案（联网缓存真实积分账单，需一次钥匙串授权）。
 /// - Codex / Cursor / WorkBuddy 不弹此 sheet（零选择、零钥匙串，直接开）。
 ///
 /// 需钥匙串的选项会亮出**强调色提醒**：选「始终允许」+「仅查额度、绝不外发」。
 struct RateLimitGuideSheet: View {
-    let logicalId: String                 // "claude-code" / "qoder"
+    let logicalId: String                 // "claude-code" / "qoder" / "qwen-work"
     @State private var selected: String   // Claude 的数据源选择；Qoder 恒为 ""
     let onConfirm: (_ source: String) -> Void
     let onCancel: () -> Void
@@ -25,6 +26,7 @@ struct RateLimitGuideSheet: View {
     }
 
     private var isClaude: Bool { logicalId == "claude-code" }
+    private var isQwenWork: Bool { logicalId == "qwen-work" }
 
     /// statusline 预览图（Icons/statusline-preview.png，随 app 打包）
     private static let statuslineShot: NSImage? = BundleIconLoader.load(name: "statusline-preview", ext: "png")
@@ -39,7 +41,7 @@ struct RateLimitGuideSheet: View {
                         optionRow(opt)
                     }
                 } else {
-                    optionRow(Self.qoderOption)  // 单方案：直接展开、不显 radio 选中圈
+                    optionRow(isQwenWork ? Self.qwenWorkOption : Self.qoderOption)
                 }
                 if selectedOption.needsKeychain { keychainWarning }
             }
@@ -55,12 +57,12 @@ struct RateLimitGuideSheet: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            ProviderIcon(providerId: isClaude ? "claude-code" : "qoder-work")
+            ProviderIcon(providerId: isClaude ? "claude-code" : (isQwenWork ? "qwen-work" : "qoder-work"))
                 .frame(width: 24, height: 24)
             VStack(alignment: .leading, spacing: 1) {
-                Text(isClaude ? "开启 Claude Code 额度监测" : "开启 Qoder 额度监测")
+                Text(headerTitle)
                     .font(.system(size: 13, weight: .semibold))
-                Text(isClaude ? "选一个获取额度的方式" : "确认后开始联网查询账号额度")
+                Text(headerSubtitle)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
@@ -134,7 +136,7 @@ struct RateLimitGuideSheet: View {
         .buttonStyle(.plain)
     }
 
-    /// 需钥匙串时的强调提醒：始终允许 + 仅查额度不外发。
+    /// 需钥匙串时的强调提醒：始终允许 + 仅查询账号数据、不外发。
     private var keychainWarning: some View {
         HStack(alignment: .top, spacing: 7) {
             Image(systemName: "key.fill")
@@ -146,7 +148,7 @@ struct RateLimitGuideSheet: View {
                  + Text("（点「允许」的话每次刷新都会再弹一次）。"))
                     .font(.system(size: 10))
                     .fixedSize(horizontal: false, vertical: true)
-                Text("usageBar 只用这份凭证查询你自己的额度，绝不外发、不上传任何服务器。")
+                Text("凭证只用于向对应服务查询你自己的账号额度或积分历史，绝不外发、不上传任何服务器。")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -186,9 +188,26 @@ struct RateLimitGuideSheet: View {
         desc: "读取本机 Qoder 登录凭证（QoderWork / Qoder IDE 谁登录用谁），向 qoder.com 查账号额度。额度是账号级的，CLI / Work / IDE 共用一份。",
         recommended: false, needsKeychain: true)
 
+    static let qwenWorkOption = Option(
+        source: "", title: "缓存真实积分账单",
+        desc: "读取本机千问办公登录凭证，向 qwenwork.cn 获取积分历史。usageBar 持久化最近一次成功结果，并按今日、本周、近 7 天、本月等周期汇总实际扣减；不会上传会话内容。",
+        recommended: false, needsKeychain: true)
+
     private var selectedOption: Option {
         if isClaude { return Self.claudeOptions.first { $0.source == selected } ?? Self.claudeOptions[0] }
-        return Self.qoderOption
+        return isQwenWork ? Self.qwenWorkOption : Self.qoderOption
+    }
+
+    private var headerTitle: String {
+        if isClaude { return "开启 Claude Code 额度监测" }
+        if isQwenWork { return "开启千问办公积分监测" }
+        return "开启 Qoder 额度监测"
+    }
+
+    private var headerSubtitle: String {
+        if isClaude { return "选一个获取额度的方式" }
+        if isQwenWork { return "确认后开始联网同步积分历史" }
+        return "确认后开始联网查询账号额度"
     }
 
     private var confirmTitle: String {
