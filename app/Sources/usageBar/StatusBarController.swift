@@ -21,9 +21,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     private var settingsSubscription: AnyCancellable?
     private var tabSettingsSubscription: AnyCancellable?
     private var themeSubscription: AnyCancellable?
-
-    /// 后台刷新间隔：10 分钟（mtime 增量后单次成本低，但仍避免高频）
-    private let refreshInterval: TimeInterval = 600
+    private var refreshIntervalSubscription: AnyCancellable?
 
     override init() {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -41,6 +39,7 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         installSettingsSubscription()
         installTabSettingsSubscription()
         installThemeSubscription()
+        installRefreshIntervalSubscription()
 
         Task {
             // 1. 先从磁盘读 mtime 缓存（< 100ms）
@@ -191,11 +190,20 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         }
     }
 
-    // MARK: - 10 分钟定时
+    // MARK: - 定时刷新（间隔可在 设置→通用 里调，1–15 分钟）
+
+    /// 用户拖滑轨改了频率 → 按新间隔重建定时器（下一次刷新从改动时刻重新起算）。
+    private func installRefreshIntervalSubscription() {
+        refreshIntervalSubscription = RefreshIntervalSettings.shared.$minutes
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.startRefreshTimer() }
+    }
 
     private func startRefreshTimer() {
         refreshTimer?.invalidate()
-        let timer = Timer(timeInterval: refreshInterval, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: RefreshIntervalSettings.shared.interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.viewModel.refresh()

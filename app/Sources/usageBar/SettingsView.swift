@@ -27,6 +27,8 @@ struct SettingsView: View {
     @ObservedObject private var qoderStatus: QoderUsageStatus = .shared
     @ObservedObject private var tabSettings: TabSettings = .shared
     @ObservedObject private var themeSettings: ThemeSettings = .shared
+    @ObservedObject private var launchAtLogin: LaunchAtLoginSettings = .shared
+    @ObservedObject private var refreshSettings: RefreshIntervalSettings = .shared
     @ObservedObject private var nav = SettingsNavigation.shared
     @ObservedObject private var quotaSettings: RateLimitSettings = .shared
     @ObservedObject private var quotaStore: RateLimitStore = .shared
@@ -53,7 +55,7 @@ struct SettingsView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        appearanceSection
+                        generalSection
                         Divider()
                         dataSourceSection
                         Divider()
@@ -85,6 +87,7 @@ struct SettingsView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
             qoderStatus.refresh()
+            launchAtLogin.refresh()   // 用户可能在 系统设置→登录项 里改过，回读真实状态
             pricingFreshness = RemotePricing.shared.freshness()
         }
         .sheet(isPresented: Binding(get: { guideFor != nil }, set: { if !$0 { guideFor = nil } })) {
@@ -213,27 +216,75 @@ struct SettingsView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - 外观（主题）
+    // MARK: - 通用（开机自启 / 外观主题 / 刷新频率）
 
-    /// 外观主题：深色 / 浅色 / 跟随系统（segmented，实时生效）
-    private var appearanceSection: some View {
+    private var generalSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: "circle.lefthalf.filled")
+                Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
-                Text("外观 · 主题")
+                Text("通用")
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
             }
-            Picker("", selection: $themeSettings.theme) {
-                ForEach(AppTheme.allCases, id: \.self) { t in
-                    Text(t.label).tag(t)
-                }
+
+            // 开机自启：真值在系统登录项登记表，开关直接 register/unregister
+            HStack(spacing: 10) {
+                Text("开机自启")
+                    .font(.system(size: 11, weight: .medium))
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { launchAtLogin.isEnabled },
+                    set: { launchAtLogin.setEnabled($0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .tint(Color(hex: "#007AFF"))
+                .disabled(!launchAtLogin.isAvailable)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 300)
+            .frame(height: 22)
+            .padding(.leading, 2)
+
+            // 外观主题：深色 / 浅色 / 跟随系统（segmented，实时生效）
+            HStack(spacing: 10) {
+                Text("外观主题")
+                    .font(.system(size: 11, weight: .medium))
+                Spacer()
+                Picker("", selection: $themeSettings.theme) {
+                    ForEach(AppTheme.allCases, id: \.self) { t in
+                        Text(t.label).tag(t)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 216)
+            }
+            .frame(height: 22)
+            .padding(.leading, 2)
+
+            // 自动刷新频率：1–15 分钟滑轨，默认 10；拖动即生效（定时器按新间隔重建）
+            HStack(spacing: 10) {
+                Text("自动刷新频率")
+                    .font(.system(size: 11, weight: .medium))
+                Spacer()
+                Slider(
+                    value: Binding(
+                        get: { Double(refreshSettings.minutes) },
+                        set: { refreshSettings.minutes = Int($0.rounded()) }
+                    ),
+                    in: Double(RefreshIntervalSettings.range.lowerBound)...Double(RefreshIntervalSettings.range.upperBound),
+                    step: 1
+                )
+                .controlSize(.small)
+                .frame(width: 150)
+                Text("\(refreshSettings.minutes) 分钟/次")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 56, alignment: .trailing)   // 定宽，1→15 位数变化不抖动
+            }
+            .frame(height: 22)
             .padding(.leading, 2)
         }
     }

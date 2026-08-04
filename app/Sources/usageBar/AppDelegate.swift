@@ -10,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         // 应用已保存的外观主题（深色 / 浅色 / 跟随系统）
         ThemeSettings.shared.applyToApp()
+        // 首次启动自动登记开机自启（仅一次，之后尊重用户开关）
+        LaunchAtLoginSettings.shared.autoEnableOnce()
         statusBarController = StatusBarController()
     }
 

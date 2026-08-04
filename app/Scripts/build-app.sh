@@ -188,11 +188,13 @@ if [ "$DO_SIGN" = "1" ]; then
     rm -rf "$APPCAST_STAGE"; mkdir -p "$APPCAST_STAGE"
     cp "$DIST_DIR/usageBar.zip" "$APPCAST_STAGE/"
     APP_VER=$(defaults read "$APP_DIR/Contents/Info" CFBundleShortVersionString)
-    # 下载地址钉死本版 release。⚠️ 别改回 latest/download——两版连发时「旧 appcast(缓存) +
-    # latest 已指新包」会错位,用户下到新 zip 验旧签名 → Sparkle 报"此更新未正确签名"
-    # (2026-07-09 v0.3.16/17 同晚连发实锤踩过);版本化 URL 让每份 appcast 钉死自己的资产,根治该族竞态
+    # 下载地址走 usagebar.cn 镜像（v0.3.28 起,国内用户直连 GitHub 基本不通;GitHub release 仍是
+    # 发布正本,镜像 zip 由 deploy-site.sh 从 release 拉取推送）。⚠️ URL 必须版本化、别改成无版本
+    # 路径——两版连发时「旧 appcast(缓存) + 无版本路径已指新包」会错位,用户下到新 zip 验旧签名 →
+    # Sparkle 报"此更新未正确签名"(2026-07-09 v0.3.16/17 latest/download 同晚连发实锤踩过);
+    # 版本化 URL 让每份 appcast 钉死自己的资产,根治该族竞态
     "$GEN_APPCAST" \
-      --download-url-prefix "https://github.com/ChanningYuan/usageBar/releases/download/v${APP_VER}/" \
+      --download-url-prefix "https://usagebar.cn/dl/v${APP_VER}/" \
       "$APPCAST_STAGE"
     # 把 CHANGELOG 当前版本段落**内联**进 appcast 的 <description>（更新弹窗直接显示，无需托管 html）
     python3 "$PROJECT_DIR/Scripts/inject-release-notes.py" "$APPCAST_STAGE/appcast.xml" "$PROJECT_DIR/../CHANGELOG.md" "$APP_VER" || true
