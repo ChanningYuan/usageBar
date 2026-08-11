@@ -5,30 +5,23 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.28</h3>
-<p><b>新增</b></p>
-<ul>
-<li><b>开机自启</b>：默认开启，登录 macOS 后自动出现在菜单栏。可在 设置 → 通用 或 系统设置 → 通用 → 登录项 里关闭，两边状态互通；只在首次启动自动开启一次，关掉后不会被悄悄开回。</li>
-<li><b>自动刷新频率可调</b>：设置 → 通用 新增滑轨，1–15 分钟任选（默认仍为 10 分钟），拖动即生效。</li>
-</ul>
+<h3>usageBar 0.3.29</h3>
 <p><b>修复</b></p>
 <ul>
-<li><b>国内网络「检查更新」一直转圈</b>：检查更新与安装包下载全面切换到 usagebar.cn（国内服务器），不再依赖对 GitHub 的直连可达性。此前不开代理基本无法完成更新检查。</li>
-</ul>
-<p><b>变化</b></p>
-<ul>
-<li>设置页「外观 · 主题」并入「通用」段。</li>
+<li><b>Codex 额度被新模型限额池覆盖</b>（[#6](https://github.com/ChanningYuan/usageBar/issues/6)）：GPT-5.3-Codex-Spark 等新模型有独立限额池，最近会话都在用它时，主套餐额度会被专属池的 0% 整个盖掉。现在分池展示：主套餐保持 `7d x%` 药丸，专属池单独一颗（如 `Spark 0%`）。兼容 Codex 客户端两代日志格式——0.147 起池的身份标签被移除，改用「窗口重置时间 + 会话模型」区分，并只显示每个池的最新窗口（手动重置后旧窗口的残留数据不再干扰）。</li>
+<li><b>Qoder 三行额度标签与数据来源不一致</b>（[#4](https://github.com/ChanningYuan/usageBar/issues/4)）：QoderWork 与 Qoder IDE 可以登录不同账号，此前一律把先解出的（通常是 QoderWork）账号额度标到 CLI / Work / IDE 三行，&quot;Qoder (IDE)&quot; 显示的实际是 Work 账号的数据。现在双端都登录时先比对账号：同账号仍共用一份；不同账号则各行显示各自账号的额度（CLI 跟随 QoderWork）。设置页与引导文案同步加了限定条件。感谢 @EaKal-7 反馈。</li>
+<li><b>QoderWork token 统计偶发静默归零的兜底</b>（[#3](https://github.com/ChanningYuan/usageBar/issues/3)）：QoderWork 启动时读取 shell 环境偶发超时，会回退到系统环境表（launchctl）——而那里的开关重启电脑就会清空，导致 token 不再落日志、统计静默归零。现在 usageBar 启动与每轮刷新都会自检，发现开关丢失就自动补写，超时回退也能接住。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.28</title>
-            <pubDate>Tue, 04 Aug 2026 15:28:59 +0800</pubDate>
-            <sparkle:version>0.3.28</sparkle:version>
-            <sparkle:shortVersionString>0.3.28</sparkle:shortVersionString>
+            <title>0.3.29</title>
+            <pubDate>Tue, 11 Aug 2026 21:58:34 +0800</pubDate>
+            <sparkle:version>0.3.29</sparkle:version>
+            <sparkle:shortVersionString>0.3.29</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.28/usageBar.zip" length="2527638" type="application/octet-stream" sparkle:edSignature="DcAHZUi7qTtjfbx5FkmiVFN8oxZf+KwwHDSqUxoGhoSAwMsGvczqDQH7ZNi3DP6XfkchOiJjcFF8OSVCCpppDg=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.29/usageBar.zip" length="2564557" type="application/octet-stream" sparkle:edSignature="zb/LX9UsrKvRpcQByJ1QWXa1Yhi2ORF0LByAAuSvr5hKRIpuKuEgRmSvhZnTDYujHyfQSEEk+vDUq8YpBt1nAw=="/>
         </item>
     </channel>
 </rss>
