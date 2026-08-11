@@ -40,6 +40,9 @@ final class QoderUsageStatus: ObservableObject {
     /// 重新从 gate 读状态（presence + profile/launchctl 开关 + 日志活动时间）。
     /// 视图 onAppear / 每次 refresh 调。
     func refresh() {
+        // launchctl 自愈（issue #3）：重启电脑后 launchctl 值会丢，QoderWork 读 shell 环境一旦
+        // 超时回退就拿不到 gate → 在这里顺带补写。spawn 进程，放后台跑，不阻塞主线程。
+        Task.detached(priority: .utility) { QoderUsageEnvGate.selfHealLaunchctl() }
         isCliPresent = QoderUsageEnvGate.isQoderCliPresent()
         isWorkPresent = QoderUsageEnvGate.isQoderWorkPresent()
         isQwenWorkPresent = QoderUsageEnvGate.isQwenWorkPresent()

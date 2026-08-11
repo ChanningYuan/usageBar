@@ -400,7 +400,7 @@ struct SettingsView: View {
         .init(id: "claude-code", icon: "claude-code", name: "Claude Code",
               desc: "开启后随每次刷新向 api.anthropic.com 查询。首次会弹一次系统钥匙串授权框（读取 Claude Code 自己保存的登录凭证），选「始终允许」后不再弹。"),
         .init(id: "qoder", icon: "qoder-work", name: "Qoder",
-              desc: "读取本机 Qoder 登录凭证并请求 qoder.com（首次同样弹一次钥匙串授权框）。额度是账号级的，CLI / Work / IDE 共用一份。"),
+              desc: "读取本机 Qoder 登录凭证并请求 qoder.com（QoderWork / Qoder IDE 各解各的，首次各弹一次钥匙串授权框）。登录同一账号时 CLI / Work / IDE 共用一份额度；两端登录了不同账号时各行显示各自账号的额度（CLI 跟随 QoderWork）。"),
         .init(id: "qwen-work", icon: "qwen-work", name: "千问办公额度与积分",
               desc: "读取千问办公登录凭证并请求 qwenwork.cn：查当前剩余可用积分（显示在主列表药丸），并缓存历史消耗流水（详情页按今日、本周、本月等周期查看）。"),
         .init(id: "cursor", icon: "cursor", name: "Cursor",

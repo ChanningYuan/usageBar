@@ -250,6 +250,22 @@ public enum QoderUsageEnvGate {
         return ok
     }
 
+    /// launchctl 自愈（issue #3）：profile 标记块里开关还在、但 launchctl（GUI app 的环境变量表，
+    /// **重启电脑即清空**，而 `enable()` 只在开启那一刻写过一次）里的值丢了 → 自动补写。
+    ///
+    /// 为什么值得补：QoderWork 启动时用 `zsh -ilc` 抓 shell 环境有 30 秒超时，超时会回退到
+    /// launchd 基础环境——此时 launchctl 里有值就能接住 gate，token 不再静默归零
+    /// （2026-07-14 A/B 实证的故障链，见 issue #3）。
+    ///
+    /// 幂等、毫秒级；只补 profile 已启用的变量，没开开关的用户零开销。
+    /// ⚠️ 会 spawn `launchctl` 进程：调用方放后台任务里跑（app 启动 + 每轮刷新顺带），别进 UI 循环。
+    public static func selfHealLaunchctl() {
+        guard let text = try? String(contentsOf: profilePath, encoding: .utf8) else { return }
+        for name in enabledEnvNames(inProfileText: text) where launchctlValue(name) != "1" {
+            runProcess("/bin/launchctl", ["setenv", name, "1"])
+        }
+    }
+
     /// 重写 profile：增量、非破坏性。
     /// 读整份原文 → 只剥掉我们自己的 BEGIN/END 标记块 → adding=true 再追加新块 → 写回。
     /// 用户其它内容（PATH / alias / 别的 export）原样保留。

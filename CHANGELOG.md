@@ -2,6 +2,13 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.29] - 2026-08-11
+
+### 修复
+- **Codex 额度被新模型限额池覆盖**（[#6](https://github.com/ChanningYuan/usageBar/issues/6)）：GPT-5.3-Codex-Spark 等新模型有独立限额池，最近会话都在用它时，主套餐额度会被专属池的 0% 整个盖掉。现在分池展示：主套餐保持 `7d x%` 药丸，专属池单独一颗（如 `Spark 0%`）。兼容 Codex 客户端两代日志格式——0.147 起池的身份标签被移除，改用「窗口重置时间 + 会话模型」区分，并只显示每个池的最新窗口（手动重置后旧窗口的残留数据不再干扰）。
+- **Qoder 三行额度标签与数据来源不一致**（[#4](https://github.com/ChanningYuan/usageBar/issues/4)）：QoderWork 与 Qoder IDE 可以登录不同账号，此前一律把先解出的（通常是 QoderWork）账号额度标到 CLI / Work / IDE 三行，"Qoder (IDE)" 显示的实际是 Work 账号的数据。现在双端都登录时先比对账号：同账号仍共用一份；不同账号则各行显示各自账号的额度（CLI 跟随 QoderWork）。设置页与引导文案同步加了限定条件。感谢 @EaKal-7 反馈。
+- **QoderWork token 统计偶发静默归零的兜底**（[#3](https://github.com/ChanningYuan/usageBar/issues/3)）：QoderWork 启动时读取 shell 环境偶发超时，会回退到系统环境表（launchctl）——而那里的开关重启电脑就会清空，导致 token 不再落日志、统计静默归零。现在 usageBar 启动与每轮刷新都会自检，发现开关丢失就自动补写，超时回退也能接住。
+
 ## [0.3.28] - 2026-08-04
 
 ### 新增

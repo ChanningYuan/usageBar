@@ -44,29 +44,29 @@ enum RateLimitCoordinator {
         // 冷启动（allowsKeychainAccess=false）时，跳过需要钥匙串的 provider → 不弹框。
         func canRun(_ id: String) -> Bool { s.isEnabled(id) && (allowsKeychainAccess || !needsKeychain(id)) }
 
-        await withTaskGroup(of: RateLimitSnapshot?.self) { group in
+        await withTaskGroup(of: [RateLimitSnapshot].self) { group in
             if canRun("codex") {
-                group.addTask { CodexRateLimitReader().read(now: now) }
+                group.addTask { [CodexRateLimitReader().read(now: now)] }
             }
             if canRun("claude-code") {
                 let source = s.dataSource(for: "claude-code")
-                group.addTask { await readClaude(source: source, now: now) }
+                group.addTask { [await readClaude(source: source, now: now)] }
             }
             if canRun("cursor") {
-                group.addTask { await CursorRateLimitReader().read(now: now) }
+                group.addTask { [await CursorRateLimitReader().read(now: now)] }
             }
             if canRun("qoder") {
-                group.addTask { await QoderRateLimitReader().read(now: now) }
+                // 1 或 2 个快照：双登录不同账号时 Work / IDE 各查各的（issue #4）
+                group.addTask { await QoderRateLimitReader().readAll(now: now) }
             }
             if canRun("qwen-work") {
-                group.addTask { await readQwenWork(now: now) }
+                group.addTask { [await readQwenWork(now: now)] }
             }
             if canRun("workbuddy") {
-                group.addTask { await WorkBuddyRateLimitReader().read(now: now) }
+                group.addTask { [await WorkBuddyRateLimitReader().read(now: now)] }
             }
-            for await snap in group {
-                guard let snap else { continue }
-                store(snap)
+            for await snaps in group {
+                store(snaps)
             }
         }
     }
@@ -80,12 +80,12 @@ enum RateLimitCoordinator {
         case "codex":       snap = CodexRateLimitReader().read(now: now)
         case "claude-code": snap = await readClaude(source: RateLimitSettings.shared.dataSource(for: "claude-code"), now: now)
         case "cursor":      snap = await CursorRateLimitReader().read(now: now)
-        case "qoder":       snap = await QoderRateLimitReader().read(now: now)
+        case "qoder":       store(await QoderRateLimitReader().readAll(now: now)); return
         case "qwen-work":   snap = await readQwenWork(now: now, force: true)
         case "workbuddy":   snap = await WorkBuddyRateLimitReader().read(now: now)
         default:            snap = nil
         }
-        if let snap { store(snap) }
+        if let snap { store([snap]) }
     }
 
     /// 千问办公额度快照：剩余可用（`/user/balance`）+ 当日真实消耗（账单里 `type == 对话` 的合计）。
@@ -157,23 +157,47 @@ enum RateLimitCoordinator {
         }
     }
 
-    /// Qoder 的快照复制到三个实例；其余原样写入。
-    private static func store(_ snap: RateLimitSnapshot) {
-        recordHistory(snap)
-        if snap.providerId.hasPrefix("qoder") {
-            for id in QoderRateLimitReader.providerIds {
-                RateLimitStore.shared.put(snap.with(providerId: id))
-            }
-        } else {
+    /// 一个 reader 的产出落库；Qoder 组走 `storeQoder`，其余原样写入。
+    private static func store(_ snaps: [RateLimitSnapshot]) {
+        if snaps.first?.providerId.hasPrefix("qoder") == true {
+            storeQoder(snaps)
+            return
+        }
+        for snap in snaps {
+            recordHistory(snap, logical: snap.providerId)
             RateLimitStore.shared.put(snap)
         }
     }
 
+    /// Qoder 快照落库（issue #4，按账号归属）：
+    /// - 单快照（仅一份凭证登录 / 双登录同账号）→ 复制到三实例（原有行为），历史记一次逻辑 id "qoder"；
+    /// - 双快照（Work 与 IDE 登录了**不同账号**）→ Work 快照写 work + cli 两行（CLI 凭证解不开、
+    ///   跟随 Work 账号），IDE 快照只写 ide 行；历史**分池**记（"qoder" / "qoder-ide"），
+    ///   否则两个账号的数值在同一个池里来回踩、每轮刷新都被记成一次假变化。
+    private static func storeQoder(_ snaps: [RateLimitSnapshot]) {
+        if snaps.count == 1, let snap = snaps.first {
+            recordHistory(snap, logical: "qoder")
+            for id in QoderRateLimitReader.providerIds {
+                RateLimitStore.shared.put(snap.with(providerId: id))
+            }
+            return
+        }
+        for snap in snaps {
+            if snap.providerId == "qoder-ide" {
+                recordHistory(snap, logical: "qoder-ide")
+                RateLimitStore.shared.put(snap)
+            } else {
+                recordHistory(snap, logical: "qoder")
+                RateLimitStore.shared.put(snap.with(providerId: "qoder-work"))
+                RateLimitStore.shared.put(snap.with(providerId: "qoder-cli"))
+            }
+        }
+    }
+
     /// 额度历史流水（v0.3.26）：所有 provider 的额度池，变化才落一行（0717 定稿）。
-    /// ⚠️ 必须在 Qoder 三份复制**前**、以账号级逻辑 id 记一次，否则一次变化写 3 行重复。
+    /// ⚠️ 必须在 Qoder 多份复制**前**、以账号级逻辑 id 记一次，否则一次变化写多行重复。
     /// 失败快照（error != nil）由 QuotaHistoryStore 内部拦截，不记陈旧数据。
-    private static func recordHistory(_ snap: RateLimitSnapshot) {
-        let logicalId = snap.providerId.hasPrefix("qoder") ? "qoder" : snap.providerId
+    private static func recordHistory(_ snap: RateLimitSnapshot, logical logicalId: String) {
         Task.detached {
             await QuotaHistoryStore.shared.record(provider: logicalId, snapshot: snap)
         }

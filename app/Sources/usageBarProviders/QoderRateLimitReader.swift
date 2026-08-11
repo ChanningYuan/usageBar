@@ -4,7 +4,7 @@ import CommonCrypto
 import SQLite3
 import usageBarCore
 
-/// Qoder 账号额度读取（v0.3.24）——账号级配额，覆盖 Qoder 全家桶（CLI / Work / IDE 共享一份）。
+/// Qoder 账号额度读取（v0.3.24 单账号，v0.3.29 起按凭证分账号，issue #4）。
 ///
 /// **额度值永远走官方 API**（`GET https://openapi.qoder.sh/api/v2/quota/usage`，2026-07-14 探针实证，见 spec §4.3）：
 /// ```json
@@ -13,13 +13,15 @@ import usageBarCore
 ///  "expiresAt":<ms>}
 /// ```
 ///
-/// 变的只是**从哪拿 token**——按可靠性降级，谁登录了用谁（用户可能只装了其中一个）：
+/// 凭证来源两处（各解各的，issue #4：外部用户实测两端可以登录**不同账号**，
+/// 「CLI / Work / IDE 共用一份额度」只在同账号时成立，不能拿 Work 的额度标成 IDE 的）：
 /// 1. **QoderWork**：`…/QoderWork/auth-v2.dat` → 钥匙串 `QoderWork Safe Storage` 解 safeStorage(v10)；
 /// 2. **Qoder IDE**：`…/Qoder/User/globalStorage/state.vscdb` 里 `secret://aicoding.auth.userInfo`
 ///    （值是 `{"type":"Buffer","data":[v10…]}`）→ 钥匙串 `Qoder Safe Storage` 解同款 safeStorage。
 ///
-/// 每档先做**免费的存在性检查**（文件/DB 在不在），命中才碰对应钥匙串 → 最多弹一次；解出的 token 内存缓存跨刷新复用。
-/// （Qoder CLI `~/.qoder/.auth/user` 用原生二进制里的固定密钥加密，机器码派生试过均不中、破解需反汇编 → 见调研 §Qoder降级，暂缓。）
+/// 每档先做**免费的存在性检查**（文件/DB 在不在），命中才碰对应钥匙串 → 各弹一次；解出的凭证内存缓存跨刷新复用。
+/// （Qoder CLI `~/.qoder/.auth/user` 用原生二进制里的固定密钥加密，机器码派生试过均不中、破解需反汇编 → 见调研 §Qoder降级，暂缓；
+/// CLI 行的额度跟随 QoderWork 账号，见调度层 `storeQoder`。）
 public struct QoderRateLimitReader {
     public init() {}
 
@@ -31,40 +33,66 @@ public struct QoderRateLimitReader {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
     }
 
-    /// ⚠️ 解密后 token 内存缓存（跨刷新复用）——不能每次刷新都读钥匙串解密，否则每 10 分钟弹一次授权框。
-    nonisolated(unsafe) private static var cachedToken: String?
+    /// ⚠️ 解密后凭证内存缓存（跨刷新复用）——不能每次刷新都读钥匙串解密，否则每 10 分钟弹一次授权框。
+    /// Work / IDE 分来源各存各的（issue #4：两端可能登录不同账号）。
+    nonisolated(unsafe) private static var cachedWork: Credential?
+    nonisolated(unsafe) private static var cachedIde: Credential?
 
     /// 取消授权/重置时清缓存 → 下次读重新解密（重新授权）
-    public static func clearCache() { cachedToken = nil }
+    public static func clearCache() { cachedWork = nil; cachedIde = nil }
 
-    /// 返回一个「代表账号」的快照（providerId = "qoder-work"）；调度层复制到三个 qoder 实例。
-    public func read(now: Date = Date()) async -> RateLimitSnapshot {
-        func fail(_ e: RateLimitError) -> RateLimitSnapshot {
-            RateLimitSnapshot(providerId: "qoder-work", windows: [], capturedAt: now, error: e)
+    /// token + 账号指纹（用于判断 Work / IDE 是否同一账号）
+    typealias Credential = (token: String, account: String)
+
+    private enum Source { case work, ide }
+
+    /// 按凭证分账号采集（issue #4）。返回 1 或 2 个快照：
+    /// - 仅一份凭证登录，或双登录但**账号指纹相同** → 1 个「代表账号」快照（providerId "qoder-work"），
+    ///   调度层复制到三个 qoder 实例——即原有行为；
+    /// - QoderWork 与 Qoder IDE 登录了**不同账号** → 2 个快照各查各的（"qoder-work" / "qoder-ide"），
+    ///   行标签与数据来源账号对齐，不再把 Work 账号的额度标成 "Qoder (IDE)"。
+    public func readAll(now: Date = Date()) async -> [RateLimitSnapshot] {
+        let work = credential(.work)
+        let ide = credential(.ide)
+        if let w = work, let i = ide, w.account != i.account {
+            return [await readSource(.work, providerId: "qoder-work", now: now),
+                    await readSource(.ide, providerId: "qoder-ide", now: now)]
         }
-
-        // 1. 优先用缓存 token（不碰钥匙串 → 不弹框）
-        if let tok = Self.cachedToken {
-            let snap = await request(token: tok, now: now)
-            if snap.error != .credentialUnavailable { return snap }
-            Self.cachedToken = nil   // 401 → 清缓存，下面重新走降级链
-        }
-
-        // 2. 降级链拿 token（QoderWork → Qoder IDE），谁登录用谁
-        guard let tok = acquireToken() else { return fail(.credentialUnavailable) }
-        Self.cachedToken = tok
-        return await request(token: tok, now: now)
+        if work != nil { return [await readSource(.work, providerId: "qoder-work", now: now)] }
+        if ide != nil { return [await readSource(.ide, providerId: "qoder-work", now: now)] }
+        return [RateLimitSnapshot(providerId: "qoder-work", windows: [], capturedAt: now,
+                                  error: .credentialUnavailable)]
     }
 
-    // MARK: - token 降级链
+    // MARK: - 凭证获取（分来源，带缓存）
 
-    /// 按顺序探测各来源；每档先做免费存在性检查，命中才碰钥匙串。返回第一个拿到的 token。
-    private func acquireToken() -> String? {
-        tokenFromQoderWork() ?? tokenFromQoderIDE()
+    /// 取某来源凭证；命中内存缓存则不碰钥匙串（不弹框）。未登录/解不出返回 nil。
+    private func credential(_ s: Source) -> Credential? {
+        switch s {
+        case .work:
+            if let c = Self.cachedWork { return c }
+            let c = credentialFromQoderWork(); Self.cachedWork = c; return c
+        case .ide:
+            if let c = Self.cachedIde { return c }
+            let c = credentialFromQoderIDE(); Self.cachedIde = c; return c
+        }
+    }
+
+    /// 某来源查一次额度；401 时清缓存重新解密（用户重新登录后 token 变了）、换到新 token 才重试一次。
+    private func readSource(_ s: Source, providerId: String, now: Date) async -> RateLimitSnapshot {
+        guard let c = credential(s) else {
+            return RateLimitSnapshot(providerId: providerId, windows: [], capturedAt: now,
+                                     error: .credentialUnavailable)
+        }
+        let snap = await request(token: c.token, providerId: providerId, now: now)
+        guard snap.error == .credentialUnavailable else { return snap }
+        switch s { case .work: Self.cachedWork = nil; case .ide: Self.cachedIde = nil }
+        guard let fresh = credential(s), fresh.token != c.token else { return snap }
+        return await request(token: fresh.token, providerId: providerId, now: now)
     }
 
     /// A 档 · QoderWork：解 auth-v2.dat / auth.dat（钥匙串 `QoderWork Safe Storage`）
-    private func tokenFromQoderWork() -> String? {
+    private func credentialFromQoderWork() -> Credential? {
         let dir = appSupport.appendingPathComponent("QoderWork")
         let files = ["auth-v2.dat", "auth.dat"].map { dir.appendingPathComponent($0) }
         guard files.contains(where: { FileManager.default.fileExists(atPath: $0.path) }),
@@ -73,13 +101,15 @@ public struct QoderRateLimitReader {
             guard let enc = try? Data(contentsOf: url),
                   let dec = Self.decrypt(enc, key: key),
                   let obj = try? JSONSerialization.jsonObject(with: dec) as? [String: Any] else { continue }
-            if let t = obj["token"] as? String, !t.isEmpty { return t }
+            if let t = obj["token"] as? String, !t.isEmpty {
+                return (t, Self.accountFingerprint(in: obj, token: t))
+            }
         }
         return nil
     }
 
     /// B 档 · Qoder IDE：vscdb `secret://aicoding.auth.userInfo`（钥匙串 `Qoder Safe Storage`）
-    private func tokenFromQoderIDE() -> String? {
+    private func credentialFromQoderIDE() -> Credential? {
         let db = appSupport.appendingPathComponent("Qoder/User/globalStorage/state.vscdb").path
         // 免费检查：DB 在不在 + 有没有 userInfo（读明文 vscdb，不碰钥匙串）
         guard FileManager.default.fileExists(atPath: db),
@@ -87,13 +117,60 @@ public struct QoderRateLimitReader {
               let enc = Self.bytesFromNodeBuffer(bufferJSON),
               let key = Self.deriveKey(service: "Qoder Safe Storage"),
               let dec = Self.decrypt(enc, key: key),
-              let obj = try? JSONSerialization.jsonObject(with: dec) else { return nil }
-        return Self.findToken(in: obj)
+              let obj = try? JSONSerialization.jsonObject(with: dec),
+              let t = Self.findToken(in: obj) else { return nil }
+        return (t, Self.accountFingerprint(in: obj, token: t))
     }
 
-    private func request(token tok: String, now: Date) async -> RateLimitSnapshot {
+    // MARK: - 账号指纹（issue #4：判断 Work 与 IDE 是否同一账号）
+
+    /// 判同优先级：JWT 的用户标识（sub/uid，最标准）→ 凭证 JSON 里的账号字段 → 退回 token 本身。
+    /// 判不出宁可当**不同账号**分开查——方向安全：同账号被误分只是多查一次、两行数字相同；
+    /// 不同账号被误合才会重现「标签与数据来源不一致」。
+    static func accountFingerprint(in obj: Any, token: String) -> String {
+        if let sub = jwtClaim(["sub", "uid", "userId", "user_id"], in: token) { return sub }
+        let keys = ["uid", "userId", "user_id", "accountId", "account_id", "email", "phone"]
+        if let hit = findString(keys: keys, in: obj) { return hit }
+        return token
+    }
+
+    /// JWT（三段 base64url 拼接的令牌）payload 里取第一个命中的 claim；不是 JWT 返回 nil。
+    static func jwtClaim(_ keys: [String], in token: String) -> String? {
+        let parts = token.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var b64 = String(parts[1]).replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while b64.count % 4 != 0 { b64 += "=" }
+        guard let data = Data(base64Encoded: b64),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        for k in keys {
+            if let s = obj[k] as? String, !s.isEmpty { return s }
+            if let n = obj[k] as? NSNumber { return n.stringValue }
+        }
+        return nil
+    }
+
+    /// 递归找第一个命中的账号字段（遍历方式同 findToken）
+    static func findString(keys: [String], in obj: Any) -> String? {
+        if let dict = obj as? [String: Any] {
+            for k in keys {
+                if let s = dict[k] as? String, !s.isEmpty { return s }
+                if let n = dict[k] as? NSNumber { return n.stringValue }
+            }
+            for v in dict.values {
+                if let found = findString(keys: keys, in: v) { return found }
+            }
+        } else if let arr = obj as? [Any] {
+            for v in arr {
+                if let found = findString(keys: keys, in: v) { return found }
+            }
+        }
+        return nil
+    }
+
+    private func request(token tok: String, providerId: String, now: Date) async -> RateLimitSnapshot {
         func fail(_ e: RateLimitError) -> RateLimitSnapshot {
-            RateLimitSnapshot(providerId: "qoder-work", windows: [], capturedAt: now, error: e)
+            RateLimitSnapshot(providerId: providerId, windows: [], capturedAt: now, error: e)
         }
         guard let url = URL(string: Self.endpoint) else { return fail(.network) }
         var req = URLRequest(url: url, timeoutInterval: 12)
@@ -112,7 +189,7 @@ public struct QoderRateLimitReader {
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 return fail(.network)
             }
-            return Self.snapshot(fromQuota: obj, now: now)
+            return Self.snapshot(fromQuota: obj, now: now, providerId: providerId)
         } catch {
             return fail(.network)
         }
@@ -121,13 +198,14 @@ public struct QoderRateLimitReader {
     /// 200 响应体 → 快照。静态纯函数，单测直接喂 personal / teams 两种账号的真实返回。
     /// 字段语义与坑（percentage 双量纲 / orgResourcePackage / expiresAt 归属）
     /// 见 KB `docs/0715-QoderTeams额度修复/Qoder额度API实录.md`。
-    static func snapshot(fromQuota obj: [String: Any], now: Date) -> RateLimitSnapshot {
+    static func snapshot(fromQuota obj: [String: Any], now: Date,
+                         providerId: String = "qoder-work") -> RateLimitSnapshot {
         let plan = obj["userType"] as? String   // API 响应自带 userType，无需本地兜底
         let quota = obj["userQuota"] as? [String: Any]
         let total = (quota?["total"] as? NSNumber)?.doubleValue ?? 0
         if total <= 0 {
             // 免费版（Community）无信用点额度概念
-            return RateLimitSnapshot(providerId: "qoder-work", windows: [],
+            return RateLimitSnapshot(providerId: providerId, windows: [],
                                      capturedAt: now, error: .noQuotaData)
         }
         let used = (quota?["used"] as? NSNumber)?.doubleValue ?? 0
@@ -151,7 +229,7 @@ public struct QoderRateLimitReader {
                                            detail: RateLimitWindow.usedOfTotal(pUsed, cap),
                                            used: pUsed, total: cap))
         }
-        return RateLimitSnapshot(providerId: "qoder-work", windows: windows,
+        return RateLimitSnapshot(providerId: providerId, windows: windows,
                                  planType: plan, capturedAt: now, error: nil)
     }
 
