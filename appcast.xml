@@ -5,23 +5,25 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.29</h3>
-<p><b>修复</b></p>
+<h3>usageBar 0.3.30</h3>
+<p><b>优化</b></p>
 <ul>
-<li><b>Codex 额度被新模型限额池覆盖</b>（[#6](https://github.com/ChanningYuan/usageBar/issues/6)）：GPT-5.3-Codex-Spark 等新模型有独立限额池，最近会话都在用它时，主套餐额度会被专属池的 0% 整个盖掉。现在分池展示：主套餐保持 `7d x%` 药丸，专属池单独一颗（如 `Spark 0%`）。兼容 Codex 客户端两代日志格式——0.147 起池的身份标签被移除，改用「窗口重置时间 + 会话模型」区分，并只显示每个池的最新窗口（手动重置后旧窗口的残留数据不再干扰）。</li>
-<li><b>Qoder 三行额度标签与数据来源不一致</b>（[#4](https://github.com/ChanningYuan/usageBar/issues/4)）：QoderWork 与 Qoder IDE 可以登录不同账号，此前一律把先解出的（通常是 QoderWork）账号额度标到 CLI / Work / IDE 三行，&quot;Qoder (IDE)&quot; 显示的实际是 Work 账号的数据。现在双端都登录时先比对账号：同账号仍共用一份；不同账号则各行显示各自账号的额度（CLI 跟随 QoderWork）。设置页与引导文案同步加了限定条件。感谢 @EaKal-7 反馈。</li>
-<li><b>QoderWork token 统计偶发静默归零的兜底</b>（[#3](https://github.com/ChanningYuan/usageBar/issues/3)）：QoderWork 启动时读取 shell 环境偶发超时，会回退到系统环境表（launchctl）——而那里的开关重启电脑就会清空，导致 token 不再落日志、统计静默归零。现在 usageBar 启动与每轮刷新都会自检，发现开关丢失就自动补写，超时回退也能接住。</li>
+<li><b>启动不再&quot;全程转圈等最慢的&quot;</b>：数据源谁扫完谁上屏，小工具几秒内先出现，Claude/Codex 扫完自动补上；菜单栏数字随扫描进度递增，不再长时间停在「加载中」。</li>
+<li><b>首次启动有进度了</b>：第一次索引历史数据时，弹层底部显示「首次索引历史数据…（x/y 数据源）」，不再只有一个干转的「刷新中…」。</li>
+<li><b>扫描中途强退/断电不再白扫</b>：索引进度阶段性保存，下次启动接着上次的进度补扫，而不是从头再来。</li>
+<li><b>「立即刷新」防连点</b>：刷新进行中右键菜单该项置灰——此前连点会让多轮扫描互相争抢、越点越慢。</li>
+<li>日志解析加入关键字预筛，全量扫描小幅提速。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.29</title>
-            <pubDate>Tue, 11 Aug 2026 21:58:34 +0800</pubDate>
-            <sparkle:version>0.3.29</sparkle:version>
-            <sparkle:shortVersionString>0.3.29</sparkle:shortVersionString>
+            <title>0.3.30</title>
+            <pubDate>Tue, 11 Aug 2026 23:28:06 +0800</pubDate>
+            <sparkle:version>0.3.30</sparkle:version>
+            <sparkle:shortVersionString>0.3.30</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.29/usageBar.zip" length="2564557" type="application/octet-stream" sparkle:edSignature="zb/LX9UsrKvRpcQByJ1QWXa1Yhi2ORF0LByAAuSvr5hKRIpuKuEgRmSvhZnTDYujHyfQSEEk+vDUq8YpBt1nAw=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.30/usageBar.zip" length="2570979" type="application/octet-stream" sparkle:edSignature="5CzUptAykD0eBUA5WXXtqL/zAZvk1luKREKm84aca/p6tGnfH6zd3eA9vpNcvrVFfknTZXtI4b6J0NSLhhbhCA=="/>
         </item>
     </channel>
 </rss>
