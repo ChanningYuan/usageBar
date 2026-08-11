@@ -650,7 +650,13 @@ struct UsageRootView: View {
         if viewModel.isRefreshing {
             HStack(spacing: 4) {
                 ProgressView().controlSize(.mini)
-                Text("刷新中…")
+                // 首扫（缓存为空的第一次全量索引）给进度预期,别让用户以为卡死（0709 R2）;
+                // 常规刷新维持原有轻提示。
+                if viewModel.isFirstScan, let p = viewModel.scanProgress {
+                    Text("首次索引历史数据…（\(p.done)/\(p.total) 数据源）")
+                } else {
+                    Text("刷新中…")
+                }
             }
         } else if viewModel.justRefreshed {
             HStack(spacing: 4) {

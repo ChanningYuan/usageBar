@@ -5,7 +5,14 @@ import SwiftUI
 import usageBarCore
 
 @MainActor
-final class StatusBarController: NSObject, NSPopoverDelegate {
+final class StatusBarController: NSObject, NSPopoverDelegate, NSMenuItemValidation {
+
+    /// 右键菜单项动态可用性（NSMenu autoenablesItems 默认开,对 target 调用本方法）：
+    /// 刷新进行中「立即刷新」置灰（0709 R4）。
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(refreshAction) { return !viewModel.isRefreshing }
+        return true
+    }
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     let viewModel: UsageViewModel
@@ -51,12 +58,14 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
         }
     }
 
-    /// 把菜单栏 title 的更新接到 viewModel.lastRefreshAt 上,这样所有 refresh 路径——
-    /// 包括 SwiftUI 弹层里的 🔄 按钮——都会同步菜单栏,不需要每个 caller 自己记得调。
+    /// 把菜单栏 title 的更新接到 viewModel.$stats 上,这样所有 refresh 路径——
+    /// 包括 SwiftUI 弹层里的 🔄 按钮和渐进提交的每一跳——都会同步菜单栏。
     private func installTitleSubscription() {
-        // 菜单栏 title 只在数据刷新时更新（读的是「今日」合计，与 popover 切 tab 无关）。
-        // v0.3.13 撤掉了 v0.3.10 的 $stats 跟随订阅——切 tab 不再改菜单栏（B1 固定今日）。
-        titleSubscription = viewModel.$lastRefreshAt
+        // v0.3.13 撤掉 $stats 订阅是因为当年 handler 读「当前 tab」、切 tab 会让菜单栏漂移；
+        // v0.3.30 渐进提交需要中间更新,恢复 $stats 订阅但 handler 恒读「今日」（B1 语义不破,
+        // 切 tab 时 stats 变了也只是重读一遍今日合计,值不变）。
+        // 首个 commit 前 allStats 为空 → updateMenuBarTitle 守住,维持「加载中...」不闪 0。
+        titleSubscription = viewModel.$stats
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.updateMenuBarTitle() }
     }
@@ -109,6 +118,8 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
 
     func updateMenuBarTitle() {
         guard let button = statusItem.button else { return }
+        // 首个渐进 commit 前维持「加载中...」，不闪 0（0709 §4）
+        if viewModel.lastRefreshAt == nil && viewModel.stats.isEmpty { return }
         // 菜单栏固定显示「今日」，不随 popover 切 tab 漂移（v0.3.13 B1）
         let total = viewModel.visibleTotal(for: .today)
         button.title = " " + formatTokens(total) + " token"
@@ -244,6 +255,8 @@ final class StatusBarController: NSObject, NSPopoverDelegate {
     // MARK: - Actions
 
     @objc private func refreshAction() {
+        // 防重入（0709 R4）：刷新在跑时连点「立即刷新」会让两代扫描抢 CPU、前一代白扫——越点越慢
+        guard !viewModel.isRefreshing else { return }
         RateLimitCoordinator.allowsKeychainAccess = true   // 手动刷新是主动动作 → 允许采需授权的额度
         Task {
             await viewModel.refresh()

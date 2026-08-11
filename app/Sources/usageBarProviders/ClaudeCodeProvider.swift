@@ -88,16 +88,22 @@ public actor ClaudeJsonlScanner {
 ///
 /// `classify`：把 `message.id` 映射到 provider id（Claude Code 恒为 `claude-code`，Cowork 恒为 `cowork`）。
 public enum ClaudeTranscriptParser {
+    /// 预筛子串（0709 spec R3）：目标行顶层 `"type":"assistant"` 必含此串——Claude Code 落盘是
+    /// compact JSON（无空格、键序稳定）。内容行恰好含同款文本只是误放行，由结构 guard 兜住。
+    /// 若上游格式漂移（出现空格变体），真机对拍会先暴露 → 届时退宽松 needle `assistant`。
+    public static let lineNeedle = "\"type\":\"assistant\""
+
     public static func parse(
         url: URL,
-        classify: (_ messageId: String) -> String
+        classify: (_ messageId: String) -> String,
+        lineNeedle: String? = ClaudeTranscriptParser.lineNeedle
     ) throws -> [FileDailyRecord] {
         // key = "\(provider)|\(date)", value = total token
         var totals: [String: Int] = [:]
         var cachedTotals: [String: Int] = [:]   // 同 key 的「缓存命中(cache_read)」分量 → 浅色段
         var seenIds = Set<String>()
 
-        try JSONLReader.forEachLine(at: url) { obj in
+        try JSONLReader.forEachLine(at: url, lineNeedle: lineNeedle) { obj in
             guard (obj["type"] as? String) == "assistant",
                   let message = obj["message"] as? [String: Any],
                   let usage = message["usage"] as? [String: Any],

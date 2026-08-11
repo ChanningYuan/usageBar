@@ -11,6 +11,10 @@ final class UsageViewModel: ObservableObject {
     @Published var isRefreshing: Bool = false
     @Published var lastRefreshAt: Date?
     @Published var justRefreshed: Bool = false
+    /// 首扫（缓存为空的第一次全量索引）进行中。驱动弹层 footer 的「首次索引历史数据…」提示（0709 R2）。
+    @Published var isFirstScan: Bool = false
+    /// 扫描进度（done/total 数据源）。仅刷新进行中非 nil。
+    @Published var scanProgress: (done: Int, total: Int)?
 
     // MARK: - drill-in 详情（懒加载，独立于主刷新快路径）
 
@@ -76,8 +80,14 @@ final class UsageViewModel: ObservableObject {
         let providers = ProviderRegistry.all
         let providerIds = providers.map { $0.id }
 
-        // 1) 并发扫盘:解析新增/变更文件 → 存入 FileMtimeCache(副作用)。返回值仅 DEBUG 计时用。
-        await withTaskGroup(of: Void.self) { group in
+        // 首扫判定：缓存为空 = 首次全量索引（0709 R2）。驱动「首次索引历史数据…」提示与渐进期 0 值行过滤。
+        isFirstScan = await FileMtimeCache.shared.count() == 0
+        scanProgress = (0, providers.count)
+
+        // 1) 并发扫盘:解析新增/变更文件 → 存入 FileMtimeCache(副作用)。
+        //    渐进提交（0709 R1）：每个 provider 完成即聚合上屏，不等最慢的那个——
+        //    否则 12 个源 1 秒扫完、最大的源扫 15 秒,用户就看 15 秒的 0。
+        await withTaskGroup(of: String.self) { group in
             for p in providers {
                 group.addTask {
                     #if DEBUG
@@ -89,17 +99,32 @@ final class UsageViewModel: ObservableObject {
                     #else
                     _ = try? await p.fetchDailyRecords()
                     #endif
+                    return p.id
                 }
+            }
+            var done = 0
+            for await pid in group {
+                done += 1
+                // 旧代不再 commit（但仍要把 group 消费完，别悬挂任务）
+                guard myGen == refreshGen else { continue }
+                scanProgress = (done, providers.count)
+                await commitAggregation(providerIds: providerIds, log: log)
+                log("progressive commit after '\(pid)' (\(done)/\(providers.count))")
+                // 周期性缓存落盘（0709 §9）：只有正常退出才存的话，首扫 20 分钟中途强退 = 全部白扫。
+                // 节流 + 后台 fire-and-forget，不拖慢渐进上屏。
+                Task.detached(priority: .utility) { await FileMtimeCache.shared.saveToDiskThrottled() }
             }
         }
 
-        // 只有最新 generation 才 commit
+        // 只有最新 generation 才走收尾（渐进 commit 已在循环内做过 gen 守卫）
         guard myGen == refreshGen else {
             log("discarded (stale)")
             return
         }
+        scanProgress = nil
+        isFirstScan = false
 
-        // 2) 第一阶段聚合(本地数据,秒回)。Cursor 此刻读的是已有 mirror(可能是旧值)。
+        // 2) 收尾聚合(保证终态完整)。Cursor 此刻读的是已有 mirror(可能是旧值)。
         await commitAggregation(providerIds: providerIds, log: log)
         // 首次运行智能默认：只保留「用过」的 provider（有用量 ∪ 有本地数据），其余自动隐藏（仅一次）。
         // Qoder CLI / Work / 千问办公特例：没开各自 EXPOSE_TOKEN_USAGE gate 时日志零 token，仍按会话文件算
@@ -138,7 +163,13 @@ final class UsageViewModel: ObservableObject {
             customRange: TabSettings.shared.customRange
         )
         self.allStats = computed
-        self.stats = computed.filter { $0.time == window.id }
+        // 首扫渐进期只显示已扫出数值的行（0709 §4）：首装 autoConfigure 要等全部扫完才跑，
+        // 不过滤的话 12 行 0 值先闪现、随后被自动隐藏收走，视觉上一片跳动。
+        if isFirstScan {
+            self.stats = computed.filter { $0.time == window.id && $0.token > 0 }
+        } else {
+            self.stats = computed.filter { $0.time == window.id }
+        }
     }
 
     /// 仅从内存缓存重新聚合（不扫盘）。用于 tab 配置变化（周起始/自定义区间）后即时刷新，秒回。

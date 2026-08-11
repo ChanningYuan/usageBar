@@ -136,11 +136,15 @@ public struct CodexProvider: UsageProvider {
         return (usage["total_tokens"] as? Int) ?? 0
     }
 
+    /// 预筛子串（0709 spec R3）：目标行 `payload.type == "token_count"` 必含此串；
+    /// 内容行恰好含 "token_count" 只是误放行多解析一行，由下面的结构 guard 兜住，不影响口径。
+    static let lineNeedle = "token_count"
+
     /// 遍历单个 rollout 文件，收集所有有效 token_count 事件的 (ts,total)。
-    /// `info==null` 的 token_count 跳过（不变量2）。
-    private func parseRawEvents(url: URL) -> [(ts: Date, total: Int, cached: Int)] {
+    /// `info==null` 的 token_count 跳过（不变量2）。`lineNeedle: nil` = 关预筛（对拍测试用）。
+    func parseRawEvents(url: URL, lineNeedle: String? = CodexProvider.lineNeedle) -> [(ts: Date, total: Int, cached: Int)] {
         var events: [(ts: Date, total: Int, cached: Int)] = []
-        try? JSONLReader.forEachLine(at: url) { obj in
+        try? JSONLReader.forEachLine(at: url, lineNeedle: lineNeedle) { obj in
             guard let payload = obj["payload"] as? [String: Any],
                   (payload["type"] as? String) == "token_count",
                   let info = payload["info"] as? [String: Any],

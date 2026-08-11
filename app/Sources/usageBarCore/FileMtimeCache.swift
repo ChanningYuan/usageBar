@@ -93,8 +93,18 @@ public actor FileMtimeCache {
         }
     }
 
+    private var lastSaveAt: Date?
+
+    /// 扫描期间的周期性落盘（0709 §9）：带节流,避免大缓存在 13 个 provider 连续完成时被反复全量编码。
+    /// 崩溃/强退最多丢 `minInterval` 秒内的解析成果,而不是整个首扫白干。
+    public func saveToDiskThrottled(minInterval: TimeInterval = 5) {
+        if let last = lastSaveAt, Date().timeIntervalSince(last) < minInterval { return }
+        saveToDisk()
+    }
+
     /// 退出时把内存 cache 写到磁盘
     public func saveToDisk() {
+        lastSaveAt = Date()
         let snapshot = PersistedCache(entries: Array(entries.values))
         do {
             let encoder = JSONEncoder()

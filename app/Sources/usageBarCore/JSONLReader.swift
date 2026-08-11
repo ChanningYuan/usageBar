@@ -13,44 +13,59 @@ public enum JSONLReader {
 
     /// 逐行读 JSONL 文件，把每行 parse 成 `[String: Any]` 后回调。
     /// 解析失败的行静默跳过（与 ai-token-stats.sh node 实现一致）。
+    ///
+    /// `lineNeedle`：字节级预筛子串（0709 spec R3）。非 nil 时，行内**不含**该子串的行直接跳过
+    /// `Data` 拷贝 + JSON 解析——日志里 99% 是与计量无关的内容行，全量解析是首扫慢的主因之一。
+    /// ⚠️ 判据必须满足「目标行必然包含该子串」：只允许误放行（内容里恰好含关键字 → 多解析一行，
+    /// 由回调里的结构 guard 兜住，不影响口径），**绝不允许漏掉目标行**。对拍单测锁此不变量。
     public static func forEachLine(
         at url: URL,
+        lineNeedle: String? = nil,
         body: (_ obj: [String: Any]) throws -> Void
     ) throws {
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        let needle: [UInt8] = lineNeedle.map { Array($0.utf8) } ?? []
         try data.withUnsafeBytes { raw in
             guard let base = raw.baseAddress else { return }
             let bytes = base.assumingMemoryBound(to: UInt8.self)
-            var lineStart = 0
-            for i in 0..<data.count {
-                if bytes[i] == 0x0A {  // '\n'
-                    if i > lineStart {
-                        let slice = Data(bytes: bytes.advanced(by: lineStart), count: i - lineStart)
-                        if let obj = try? JSONSerialization.jsonObject(with: slice) as? [String: Any] {
-                            try body(obj)
-                        }
-                    }
-                    lineStart = i + 1
+
+            // memmem 是 libc 的高效子串搜索；needle 为空 = 不预筛，恒放行
+            func lineMatches(_ start: Int, _ len: Int) -> Bool {
+                guard !needle.isEmpty else { return true }
+                guard len >= needle.count else { return false }
+                return needle.withUnsafeBytes { np in
+                    memmem(base.advanced(by: start), len, np.baseAddress!, needle.count) != nil
                 }
             }
-            // 尾行无换行
-            if lineStart < data.count {
-                let slice = Data(bytes: bytes.advanced(by: lineStart), count: data.count - lineStart)
+            func handle(_ start: Int, _ len: Int) throws {
+                guard len > 0, lineMatches(start, len) else { return }
+                let slice = Data(bytes: bytes.advanced(by: start), count: len)
                 if let obj = try? JSONSerialization.jsonObject(with: slice) as? [String: Any] {
                     try body(obj)
                 }
             }
+
+            var lineStart = 0
+            for i in 0..<data.count {
+                if bytes[i] == 0x0A {  // '\n'
+                    try handle(lineStart, i - lineStart)
+                    lineStart = i + 1
+                }
+            }
+            // 尾行无换行
+            try handle(lineStart, data.count - lineStart)
         }
     }
 
     /// 对 glob 路径下所有 jsonl 文件逐行遍历。
     public static func forEachLine(
         atFiles urls: [URL],
+        lineNeedle: String? = nil,
         body: (_ obj: [String: Any]) throws -> Void
     ) throws {
         for url in urls {
-            try forEachLine(at: url, body: body)
+            try forEachLine(at: url, lineNeedle: lineNeedle, body: body)
         }
     }
 
