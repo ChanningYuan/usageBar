@@ -396,7 +396,7 @@ struct SettingsView: View {
     private struct QuotaRowSpec { let id: String; let icon: String; let name: String; let desc: String }
     private static let quotaRows: [QuotaRowSpec] = [
         .init(id: "codex", icon: "codex", name: "Codex",
-              desc: "纯本地读日志，零联网。"),
+              desc: "通过本机 Codex CLI 查询官方额度接口（凭据由 Codex 自己管理，不读钥匙串、不弹授权框）。离线时显示上次数据。"),
         .init(id: "claude-code", icon: "claude-code", name: "Claude Code",
               desc: "开启后随每次刷新向 api.anthropic.com 查询。首次会弹一次系统钥匙串授权框（读取 Claude Code 自己保存的登录凭证），选「始终允许」后不再弹。"),
         .init(id: "qoder", icon: "qoder-work", name: "Qoder",

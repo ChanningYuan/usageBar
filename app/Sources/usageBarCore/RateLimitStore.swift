@@ -46,13 +46,17 @@ public final class RateLimitStore: ObservableObject {
     /// 否则一次网络抖动就把有效数据抹掉。调用方传 error 快照，这里做「保留 windows」的合并。
     public func put(_ snap: RateLimitSnapshot) {
         if snap.error == .network, let prev = snapshots[snap.providerId], !prev.windows.isEmpty {
-            // 网络类失败：保留上次的 windows（陈旧展示），只记录这次没刷成
+            // 网络类失败：保留上次的 windows 与全部附加字段（陈旧展示），只记录这次没刷成
             let merged = RateLimitSnapshot(
                 providerId: snap.providerId,
                 windows: prev.windows,
                 planType: prev.planType,
                 capturedAt: prev.capturedAt,   // 保留上次成功时间 → UI 据此算「陈旧」
-                error: .network)
+                error: .network,
+                credits: prev.credits, spendCap: prev.spendCap,
+                spendControlReached: prev.spendControlReached,
+                rateLimitReachedType: prev.rateLimitReachedType,
+                resetCoupons: prev.resetCoupons)
             snapshots[snap.providerId] = merged
         } else {
             snapshots[snap.providerId] = snap

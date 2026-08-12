@@ -154,6 +154,15 @@ struct ProviderDetailView: View {
                 // 头行按设计稿 bafX0 复原：「账号额度」标签 + plan 标签（Max/prolite…）。
                 // 设计里「账号级·不随周期切换」那句是关掉的，故不显示。
                 quotaBox {
+                    // 支出管控红条（0812 Lane C 定稿②）：置顶、比一切窗口行都醒目
+                    if snap.spendControlReached == true {
+                        Text("已达管理员设置的支出上限，Codex 已暂停使用 · 请联系管理员提额")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundStyle(quotaRed)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(quotaRed.opacity(scheme == .dark ? 0.15 : 0.094)))
+                    }
                     HStack(spacing: 6) {
                         Text("账号额度")
                             .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(pal.text2)
@@ -166,7 +175,7 @@ struct ProviderDetailView: View {
                         Spacer()
                         // 区头右槽：陈旧说明优先（解释「为什么灰」），否则放上提的重置时间（0715 定稿 B3）
                         if stale {
-                            Text(QuotaFormat.staleNote(snap.capturedAt) + Self.staleHint(for: snap.providerId))
+                            Text(QuotaFormat.staleNote(snap.capturedAt) + Self.staleHint(for: snap))
                                 .font(.system(size: 9)).foregroundStyle(pal.text3)
                         } else if let t = QuotaFormat.resetTextLong(hoisted) {
                             Text(t)
@@ -176,6 +185,12 @@ struct ProviderDetailView: View {
                     ForEach(Array(snap.windows.enumerated()), id: \.offset) { _, w in
                         quotaWindowRow(w, stale: stale, hideReset: hoisted != nil)
                     }
+                    // 限流原因（rate_limit_reached_type，5 种文案映射，0812 Lane E 定稿）
+                    if let reached = snap.rateLimitReachedType {
+                        Text(Self.reachedText(reached))
+                            .font(.system(size: 9.5, weight: .medium)).foregroundStyle(quotaRed)
+                    }
+                    quotaExtras(snap)
                 }
             } else if let err = snap?.error {
                 quotaBox { quotaNoteRow(QuotaFormat.errorText(err), action: nil) }
@@ -249,11 +264,112 @@ struct ProviderDetailView: View {
         }
     }
 
-    /// 陈旧说明的补救提示：statusline 源只在 Claude 会话开着时写数据，指条明路；其余源等自动重试即可
-    private static func staleHint(for providerId: String) -> String {
-        guard providerId == "claude-code",
+    /// 陈旧说明的补救提示：statusline 源只在 Claude 会话开着时写数据，指条明路；
+    /// Codex RPC 连不上时明说「连接不上」（0812 定稿措辞）；其余源等自动重试即可
+    private static func staleHint(for snap: RateLimitSnapshot) -> String {
+        if snap.providerId == "codex", snap.error == .network { return " · 连接不上 Codex" }
+        guard snap.providerId == "claude-code",
               RateLimitSettings.shared.dataSources["claude-code"] == "statusline" else { return "" }
         return " · 打开 Claude 会话后自动更新"
+    }
+
+    /// 额度红（与 QuotaFormat 色档一致）
+    private var quotaRed: Color { Color(hex: scheme == .dark ? "#FF6459" : "#D1372B") }
+    private var quotaGreen: Color { Color(hex: scheme == .dark ? "#66C08C" : "#1F8A54") }
+
+    /// 限流原因 → 中文（0812 Lane E 定稿表；没见过的值原样兜底）
+    static func reachedText(_ raw: String) -> String {
+        switch raw {
+        case "rate_limit_reached":                    return "已限流：本窗口额度已用完"
+        case "workspace_owner_credits_depleted":      return "已限流：工作区积分已耗尽（所有者）"
+        case "workspace_member_credits_depleted":     return "已限流：你的积分配额已耗尽"
+        case "workspace_owner_usage_limit_reached":   return "已限流：工作区用量上限已达（所有者）"
+        case "workspace_member_usage_limit_reached":  return "已限流：你的人均用量上限已达"
+        default:                                      return "已限流：\(raw)"
+        }
+    }
+
+    /// 0812 新增区（Lane B/C 定稿）：人均上限行、按量积分行、重置券区。有数据才渲染，无则整行缺席。
+    @ViewBuilder private func quotaExtras(_ snap: RateLimitSnapshot) -> some View {
+        let hasExtras = snap.spendCap != nil
+            || snap.credits?.displayText != nil
+            || !snap.availableCoupons.isEmpty
+        if hasExtras {
+            Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
+        }
+        // 人均上限（individual_limit，企业/团队）
+        if let cap = snap.spendCap {
+            HStack(spacing: 8) {
+                Text("人均上限")
+                    .font(.system(size: 10)).foregroundStyle(pal.text2)
+                    .frame(width: 52, alignment: .leading)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.primary.opacity(0.09))
+                        Capsule().fill(cap.usedPercent >= 100 ? quotaRed : quotaGreen)
+                            .frame(width: max(4, geo.size.width * min(1, cap.usedPercent / 100)))
+                    }
+                }
+                .frame(height: 5)
+                Text(cap.usedOfLimitText)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(pal.text)
+                if let r = cap.resetsAt {
+                    Text(Self.shortDate(r) + " 重置")
+                        .font(.system(size: 9)).foregroundStyle(pal.text3)
+                }
+            }
+        }
+        // 按量积分（0812 定稿 1a：unlimited 或余额 > 0 才出现）
+        if let creditsText = snap.credits?.displayText {
+            HStack(spacing: 8) {
+                Text("按量积分")
+                    .font(.system(size: 10)).foregroundStyle(pal.text2)
+                    .frame(width: 52, alignment: .leading)
+                Text(snap.credits?.unlimited == true ? "∞ 不限量" : creditsText)
+                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(pal.text)
+                Spacer()
+                Text("套餐用尽后自动消耗")
+                    .font(.system(size: 9)).foregroundStyle(pal.text3)
+            }
+        }
+        // 重置券区（0812 用户定稿：首行 ×N，每张券单独一行、各自到期时间）
+        let coupons = snap.availableCoupons
+        if !coupons.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text("重置券")
+                        .font(.system(size: 10)).foregroundStyle(pal.text2)
+                        .frame(width: 52, alignment: .leading)
+                    Text("×\(coupons.count)")
+                        .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(quotaGreen)
+                    Spacer()
+                    Text("用完即失效 · 到期自动作废")
+                        .font(.system(size: 9)).foregroundStyle(pal.text3)
+                }
+                ForEach(Array(coupons.enumerated()), id: \.offset) { _, c in
+                    HStack(spacing: 6) {
+                        Text(c.title ?? "限额重置")
+                            .font(.system(size: 9)).foregroundStyle(pal.text2)
+                        Spacer()
+                        if let exp = c.expiresAt {
+                            Text(Self.shortDate(exp) + " 前有效")
+                                .font(.system(size: 9)).foregroundStyle(pal.text3)
+                        }
+                    }
+                    .padding(.leading, 60)
+                }
+            }
+        }
+    }
+
+    /// "8-14" 短日期（重置券到期 / 人均上限重置用）
+    static func shortDate(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "M-d"
+        return f.string(from: d)
     }
 
     /// 详情页额度行的中文窗口标签（主列表药丸仍用 5h/7d 缩写；模型名如 Fable 原样）。

@@ -34,6 +34,21 @@ struct QuotaPillsRow: View {
                         .font(.system(size: 8))
                         .foregroundStyle(Color(hex: scheme == .dark ? "#636366" : "#8E8E93"))
                 }
+                // 按量积分药丸（0812 定稿 1a：仅 unlimited 或余额 > 0 时出现；neutral 色不套色档）
+                // ⚠️ 底色必须用 6 位 hex + .opacity()——本项目 Color(hex:) 不认 8 位带 alpha 的写法
+                if let creditsText = snap.credits?.displayText {
+                    let gray = Color(hex: scheme == .dark ? "#98989D" : "#8E8E93")
+                    infoPill(label: "积分", value: creditsText,
+                             valueColor: Color(hex: scheme == .dark ? "#F5F5F7" : "#1D1D1F"),
+                             bg: gray.opacity(scheme == .dark ? 0.15 : 0.094))
+                }
+                // 重置券药丸（0812 定稿：≥1 张才出现；明细在详情页）
+                if !snap.availableCoupons.isEmpty {
+                    let green = Color(hex: scheme == .dark ? "#66C08C" : "#1F8A54")
+                    infoPill(label: "券", value: "×\(snap.availableCoupons.count)",
+                             valueColor: green,
+                             bg: green.opacity(scheme == .dark ? 0.15 : 0.094))
+                }
                 Spacer(minLength: 0)
             }
         } else if let err = snap.error {
@@ -70,6 +85,20 @@ struct QuotaPillsRow: View {
         }
         .padding(.horizontal, 7).padding(.vertical, 2)
         .background(Capsule().fill(color.opacity(scheme == .dark ? 0.15 : 0.094)))
+    }
+
+    /// 非窗口信息药丸（按量积分 / 重置券）：同药丸壳，label 固定灰 + 值单色
+    private func infoPill(label: String, value: String, valueColor: Color, bg: Color) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color(hex: scheme == .dark ? "#98989D" : "#636366"))
+            Text(value)
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .foregroundStyle(valueColor)
+        }
+        .padding(.horizontal, 7).padding(.vertical, 2)
+        .background(Capsule().fill(bg))
     }
 
     @ViewBuilder
@@ -209,6 +238,8 @@ enum QuotaFormat {
         case .noQuotaData:           return "该账号类型不提供配额数据"
         case .noDataSource:          return "该工具未提供额度接口"
         case .awaitingData:          return "打开 Claude 会话后自动显示，或切「联网 API」立即看"
+        case .binaryNotFound:        return "未找到 Codex — 安装 CLI 或 Codex Desktop 后自动显示"
+        case .versionTooOld:         return "Codex 版本过老，升级后可显示额度"
         }
     }
 }

@@ -23,7 +23,7 @@ enum RateLimitCoordinator {
     /// 某逻辑开关当前的数据源是否需要读系统钥匙串（决定冷启动要不要跳过它）。
     /// - Qoder：恒需要（token 全加密）。
     /// - Claude：仅 OAuth 源需要；statusline / CLI 零钥匙串。
-    /// - 其余（Codex 读日志 / Cursor·WorkBuddy 明文）都不需要。
+    /// - 其余（Codex 走官方 CLI RPC、凭据由 CLI 自管 / Cursor·WorkBuddy 明文）都不需要。
     static func needsKeychain(_ logicalId: String) -> Bool {
         switch logicalId {
         case "qoder", "qwen-work": return true
@@ -46,7 +46,7 @@ enum RateLimitCoordinator {
 
         await withTaskGroup(of: [RateLimitSnapshot].self) { group in
             if canRun("codex") {
-                group.addTask { [CodexRateLimitReader().read(now: now)] }
+                group.addTask { [await CodexRateLimitReader().read(now: now)] }
             }
             if canRun("claude-code") {
                 let source = s.dataSource(for: "claude-code")
@@ -77,7 +77,7 @@ enum RateLimitCoordinator {
         allowsKeychainAccess = true
         let snap: RateLimitSnapshot?
         switch logicalId {
-        case "codex":       snap = CodexRateLimitReader().read(now: now)
+        case "codex":       snap = await CodexRateLimitReader().read(now: now)
         case "claude-code": snap = await readClaude(source: RateLimitSettings.shared.dataSource(for: "claude-code"), now: now)
         case "cursor":      snap = await CursorRateLimitReader().read(now: now)
         case "qoder":       store(await QoderRateLimitReader().readAll(now: now)); return

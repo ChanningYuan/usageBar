@@ -8,170 +8,137 @@ import XCTest
 /// 锁住几条最容易写死的不变量：窗口数量动态、分模型限额单独一行、官方 severity。
 final class RateLimitTests: XCTestCase {
 
-    // MARK: - Codex：窗口数量动态（§1c 铁律）
+    // MARK: - Codex：RPC 数据源（0812 重构，JSONL 扫描已退役）
 
-    /// ⛔ 最重要的一条锁：Codex 实测只有一个 7 天窗（primary=7d、secondary=null）。
-    /// 旧 spec 写死的「primary=5h、secondary=7d」是错的。这条锁防止有人回退成硬编码两窗口。
-    func testCodexSingleWindow() {
-        // 本机真实返回：primary 是 7 天窗（window_minutes=10080），secondary 为 null
-        let rl: [String: Any] = [
-            "limit_id": "codex",
-            "primary": ["used_percent": 21.0, "window_minutes": 10080, "resets_at": 1784512060],
-            "secondary": NSNull(),
-            "plan_type": "prolite",
+    /// ⛔ 主 fixture = 2026-08-12 本机 `codex app-server` `account/rateLimits/read` 的真实返回。
+    /// 锁：多池全展示（issue #6/#7 的主池丢失从数据源上根治）、主池在前、专属池短名、
+    /// 套餐透传、余额为 0 的积分不展示、重置券解析。
+    func testCodexRPCFullResponse() {
+        let result: [String: Any] = [
+            "rateLimits": Self.mainPool75,
+            "rateLimitsByLimitId": [
+                "codex": Self.mainPool75,
+                "codex_bengalfox": [
+                    "limitId": "codex_bengalfox", "limitName": "GPT-5.3-Codex-Spark",
+                    "primary": ["usedPercent": 0, "windowDurationMins": 10080, "resetsAt": 1_787_059_602],
+                    "secondary": NSNull(), "credits": NSNull(), "individualLimit": NSNull(),
+                    "spendControlReached": NSNull(), "planType": "prolite", "rateLimitReachedType": NSNull(),
+                ] as [String: Any],
+            ] as [String: Any],
+            "rateLimitResetCredits": [
+                "availableCount": 1,
+                "credits": [[
+                    "id": "RateLimitResetCredit_x", "resetType": "codexRateLimits",
+                    "status": "available", "grantedAt": 1_783_966_383, "expiresAt": 1_786_558_383,
+                    "title": "Full reset",
+                ] as [String: Any]],
+            ] as [String: Any],
         ]
-        let windows = CodexRateLimitReader.parseWindows(rl)
-        XCTAssertEqual(windows.count, 1, "Codex 当前只有一个窗口，别写死成两个")
-        XCTAssertEqual(windows[0].label, "7d", "window_minutes=10080 应推导为 7d，不是按名字写死 5h")
-        XCTAssertEqual(windows[0].usedPercent, 21.0)
-        XCTAssertNotNil(windows[0].resetsAt)
+        let snap = CodexRateLimitReader.snapshot(fromRPC: result, accountPlan: "prolite", now: Date())
+        XCTAssertEqual(snap.windows.count, 2, "主池 + Spark 都要展示")
+        XCTAssertEqual(snap.windows[0].label, "7d", "主池排最前")
+        XCTAssertEqual(snap.windows[0].usedPercent, 75.0)
+        XCTAssertNil(snap.windows[0].scopeModel)
+        XCTAssertEqual(snap.windows[1].label, "Spark", "专属池 limit_name 短名")
+        XCTAssertEqual(snap.windows[1].scopeModel, "Spark")
+        XCTAssertEqual(snap.planType, "prolite")
+        XCTAssertNil(snap.credits?.displayText, "余额为 0 且非 unlimited → 积分不展示（定稿 1a）")
+        XCTAssertEqual(snap.availableCoupons.count, 1, "一张可用重置券")
+        XCTAssertEqual(snap.availableCoupons[0].title, "Full reset")
+        XCTAssertNotNil(snap.availableCoupons[0].expiresAt)
+        XCTAssertNil(snap.error)
     }
 
-    /// 若将来 Codex 恢复双窗口（primary=5h + secondary=7d），也要按 window_minutes 各自推导
-    func testCodexDualWindowByMinutes() {
-        let rl: [String: Any] = [
-            "primary": ["used_percent": 30.0, "window_minutes": 300, "resets_at": 1784512060],
-            "secondary": ["used_percent": 8.0, "window_minutes": 10080, "resets_at": 1784600000],
+    nonisolated(unsafe) private static let mainPool75: [String: Any] = [
+        "limitId": "codex", "limitName": NSNull(),
+        "primary": ["usedPercent": 75, "windowDurationMins": 10080, "resetsAt": 1_787_033_018],
+        "secondary": NSNull(),
+        "credits": ["hasCredits": false, "unlimited": false, "balance": "0"] as [String: Any],
+        "individualLimit": NSNull(), "spendControlReached": false,
+        "planType": "prolite", "rateLimitReachedType": NSNull(),
+    ]
+
+    /// 主池双窗（plus 经典 5h + 7d）：label 一律由 windowDurationMins 推导（§1c 铁律延续）
+    func testCodexRPCDualWindowMainPool() {
+        let pool: [String: Any] = [
+            "limitId": "codex", "limitName": NSNull(),
+            "primary": ["usedPercent": 12, "windowDurationMins": 300, "resetsAt": 1_787_000_000],
+            "secondary": ["usedPercent": 51, "windowDurationMins": 10080, "resetsAt": 1_787_100_000],
         ]
-        let windows = CodexRateLimitReader.parseWindows(rl)
-        XCTAssertEqual(windows.count, 2)
-        XCTAssertEqual(windows[0].label, "5h")   // 300 分钟
-        XCTAssertEqual(windows[1].label, "7d")   // 10080 分钟
+        let snap = CodexRateLimitReader.snapshot(
+            fromRPC: ["rateLimitsByLimitId": ["codex": pool]], accountPlan: "plus", now: Date())
+        XCTAssertEqual(snap.windows.count, 2)
+        XCTAssertEqual(snap.windows[0].label, "5h")
+        XCTAssertEqual(snap.windows[1].label, "7d")
+        XCTAssertEqual(snap.planType, "plus", "池里没 planType 时用 account/read 的兜底")
     }
 
-    // MARK: - Codex：多桶 rate_limits（issue #6，2026-08-03 上游变更）
-
-    /// fixture 是 2026-08-04 本机 `~/.codex/sessions` 的真实数据（issue #6 原文）。
-    private static let codexNow = Date(timeIntervalSince1970: 1_786_000_000)
-    private var sparkRL: [String: Any] {
-        ["limit_id": "codex_bengalfox", "limit_name": "GPT-5.3-Codex-Spark",
-         "primary": ["used_percent": 0.0, "window_minutes": 10080, "resets_at": 1_786_415_386],
-         "secondary": NSNull(), "plan_type": NSNull()]
-    }
-    private var mainRL: [String: Any] {
-        ["limit_id": "codex", "limit_name": NSNull(),
-         "primary": ["used_percent": 13.0, "window_minutes": 10080, "resets_at": 1_786_100_000],
-         "secondary": NSNull(), "plan_type": "prolite"]
+    /// 30 天窗（free 档实测 43200 分钟）：label 推导为 30d，不许写死 7d 上限
+    func testCodexRPC30dWindow() {
+        let pool: [String: Any] = [
+            "limitId": "codex",
+            "primary": ["usedPercent": 58, "windowDurationMins": 43200, "resetsAt": 1_789_008_955],
+        ]
+        let snap = CodexRateLimitReader.snapshot(
+            fromRPC: ["rateLimitsByLimitId": ["codex": pool]], accountPlan: "free", now: Date())
+        XCTAssertEqual(snap.windows.count, 1)
+        XCTAssertEqual(snap.windows[0].label, "30d")
     }
 
-    /// ⛔ 核心锁：最近会话都是 Spark（entries 里 Spark 桶最新）时，主套餐桶不能被覆盖——两桶全展示、主桶在前。
-    func testCodexMultiBucketSparkNotOverridingMain() {
-        let entries = [
-            CodexRateLimitReader.RLEntry(rl: sparkRL, ts: Date(timeIntervalSince1970: 1_785_999_000), file: 0),  // 最新：Spark 会话
-            CodexRateLimitReader.RLEntry(rl: mainRL, ts: Date(timeIntervalSince1970: 1_785_900_000), file: 1),   // 较旧：主模型会话
-        ]
-        let (windows, plan) = CodexRateLimitReader.bucketize(entries, now: Self.codexNow)
-        XCTAssertEqual(windows.count, 2, "两个桶都要展示，Spark 不能盖掉主套餐")
-        XCTAssertEqual(windows[0].label, "7d", "主桶排最前、保持现有样式")
-        XCTAssertEqual(windows[0].usedPercent, 13.0)
-        XCTAssertNil(windows[0].scopeModel)
-        XCTAssertEqual(windows[1].label, "Spark", "专属桶用 limit_name 短名（类比 Claude 的 Fable chip）")
-        XCTAssertEqual(windows[1].usedPercent, 0.0)
-        XCTAssertEqual(windows[1].scopeModel, "Spark")
-        XCTAssertEqual(plan, "prolite", "plan_type 是账号级的，Spark 桶里是 null，要从主桶取")
+    /// 老版本 CLI 只回单条 rateLimits（无 rateLimitsByLimitId）也要能解析
+    func testCodexRPCSingleRateLimitsFallback() {
+        let snap = CodexRateLimitReader.snapshot(
+            fromRPC: ["rateLimits": Self.mainPool75], accountPlan: nil, now: Date())
+        XCTAssertEqual(snap.windows.count, 1)
+        XCTAssertEqual(snap.windows[0].usedPercent, 75.0)
+        XCTAssertEqual(snap.planType, "prolite", "池里的 planType 优先")
     }
 
-    /// 旧格式（无 limit_id 字段，2026-08-03 之前的 session）归入主桶，向后兼容。
-    func testCodexOldFormatWithoutLimitIdIsMainBucket() {
-        let old: [String: Any] = [
-            "primary": ["used_percent": 21.0, "window_minutes": 10080, "resets_at": 1_786_100_000],
-            "secondary": NSNull(), "plan_type": "prolite",
-        ]
-        let (windows, _) = CodexRateLimitReader.bucketize(
-            [CodexRateLimitReader.RLEntry(rl: old, ts: Date(timeIntervalSince1970: 1_785_999_000))], now: Self.codexNow)
-        XCTAssertEqual(windows.count, 1)
-        XCTAssertEqual(windows[0].label, "7d")
-        XCTAssertNil(windows[0].scopeModel, "旧格式是主桶，不能当成专属桶")
+    /// 企业字段：人均上限（美元字符串 + 剩余百分比翻转）、支出管控、限流原因透传
+    func testCodexRPCEnterpriseFields() {
+        var pool = Self.mainPool75
+        pool["individualLimit"] = ["limit": "50", "used": "18.5",
+                                   "remainingPercent": 63, "resetsAt": 1_788_000_000] as [String: Any]
+        pool["spendControlReached"] = true
+        pool["rateLimitReachedType"] = "workspace_member_credits_depleted"
+        let snap = CodexRateLimitReader.snapshot(
+            fromRPC: ["rateLimitsByLimitId": ["codex": pool]], accountPlan: "business", now: Date())
+        XCTAssertEqual(snap.spendCap?.usedOfLimitText, "$18.50/$50")
+        XCTAssertEqual(snap.spendCap?.usedPercent ?? -1, 37.0, accuracy: 0.01, "官方给剩余 63% → 已用 37%")
+        XCTAssertNotNil(snap.spendCap?.resetsAt)
+        XCTAssertEqual(snap.spendControlReached, true)
+        XCTAssertEqual(snap.rateLimitReachedType, "workspace_member_credits_depleted")
     }
 
-    /// resets_at 已过 = 那个窗口已结束，百分比失效 → 过期桶剔除，不展示死数据。
-    func testCodexExpiredBucketDropped() {
-        var expiredMain = mainRL
-        expiredMain["primary"] = ["used_percent": 13.0, "window_minutes": 10080,
-                                  "resets_at": 1_785_916_855]   // < now，已过期
-        let entries = [
-            CodexRateLimitReader.RLEntry(rl: sparkRL, ts: Date(timeIntervalSince1970: 1_785_999_000), file: 0),
-            CodexRateLimitReader.RLEntry(rl: expiredMain, ts: Date(timeIntervalSince1970: 1_785_000_000), file: 1),
-        ]
-        let (windows, plan) = CodexRateLimitReader.bucketize(entries, now: Self.codexNow)
-        XCTAssertEqual(windows.count, 1, "过期的主桶要剔除")
-        XCTAssertEqual(windows[0].label, "Spark")
-        XCTAssertEqual(plan, "prolite", "plan_type 仍可从过期桶里捞（账号级，不随窗口过期）")
+    /// 积分药丸出现时机（定稿 1a）：0 隐藏、有余额显示美元、unlimited 显示 ∞
+    func testCodexCreditsDisplayGating() {
+        XCTAssertNil(RateLimitCredits(hasCredits: false, unlimited: false, balance: "0").displayText)
+        XCTAssertNil(RateLimitCredits(hasCredits: false, unlimited: false, balance: nil).displayText)
+        XCTAssertEqual(RateLimitCredits(hasCredits: true, unlimited: false, balance: "4.2").displayText, "$4.20")
+        XCTAssertEqual(RateLimitCredits(hasCredits: true, unlimited: false, balance: "12").displayText, "$12")
+        XCTAssertEqual(RateLimitCredits(hasCredits: true, unlimited: true, balance: nil).displayText, "∞")
     }
 
-    /// 全部桶都过期（长期没用 Codex）→ 退回只显示最新一桶，对齐旧行为：显示最后已知状态而非整行消失。
-    func testCodexAllExpiredFallsBackToNewest() {
-        var expiredSpark = sparkRL
-        expiredSpark["primary"] = ["used_percent": 0.0, "window_minutes": 10080,
-                                   "resets_at": 1_785_916_855]
-        var expiredMain = mainRL
-        expiredMain["primary"] = ["used_percent": 13.0, "window_minutes": 10080,
-                                  "resets_at": 1_785_916_855]
-        let entries = [
-            CodexRateLimitReader.RLEntry(rl: expiredSpark, ts: Date(timeIntervalSince1970: 1_785_999_000), file: 0),
-            CodexRateLimitReader.RLEntry(rl: expiredMain, ts: Date(timeIntervalSince1970: 1_785_000_000), file: 1),
-        ]
-        let (windows, _) = CodexRateLimitReader.bucketize(entries, now: Self.codexNow)
-        XCTAssertEqual(windows.count, 1)
-        XCTAssertEqual(windows[0].label, "Spark", "退回最新一桶（entries 首个）")
-    }
-
-    /// ⛔ 0.147 格式锁（2026-08-11 本机实测）：cli 0.147 起 `limit_id` 恒为 "codex"、`limit_name` 恒
-    /// null——两池只能靠 `resets_at` 区分、靠会话 `model` 命名。主桶挑选：出现文件多的是共享主池。
-    func testCodex147SameLimitIdSplitByResetsAt() {
-        // 本机真实数据：主池 48%（resets 08-18 14:03，gpt-5.6-sol 会话在写）；
-        // Spark 池 0%（resets 08-18 21:26 = 首次用 Spark + 7d，gpt-5.3-codex-spark 会话在写）
-        let spark147: [String: Any] = [
-            "limit_id": "codex", "limit_name": NSNull(),
-            "primary": ["used_percent": 0.0, "window_minutes": 10080, "resets_at": 1_786_415_386],
-            "secondary": NSNull(), "plan_type": "prolite",
-        ]
-        let main147: [String: Any] = [
-            "limit_id": "codex", "limit_name": NSNull(),
-            "primary": ["used_percent": 48.0, "window_minutes": 10080, "resets_at": 1_786_100_000],
-            "secondary": NSNull(), "plan_type": "prolite",
-        ]
-        let entries = [
-            CodexRateLimitReader.RLEntry(rl: spark147, ts: Date(timeIntervalSince1970: 1_785_999_000),
-                                         model: "gpt-5.3-codex-spark", file: 0),   // 最新：Spark 会话
-            CodexRateLimitReader.RLEntry(rl: main147, ts: Date(timeIntervalSince1970: 1_785_990_000),
-                                         model: "gpt-5.6-sol", file: 1),           // 主池被多个会话写
-            CodexRateLimitReader.RLEntry(rl: main147, ts: Date(timeIntervalSince1970: 1_785_900_000),
-                                         model: "gpt-5.6-sol", file: 2),
-        ]
-        let (windows, plan) = CodexRateLimitReader.bucketize(entries, now: Self.codexNow)
-        XCTAssertEqual(windows.count, 2, "limit_id 相同也要按 resets_at 分成两池")
-        XCTAssertEqual(windows[0].label, "7d", "主池（出现文件多）排最前、保持现有样式")
-        XCTAssertEqual(windows[0].usedPercent, 48.0)
-        XCTAssertEqual(windows[1].label, "Spark", "专属池 limit_name 缺失时用会话模型短名")
-        XCTAssertEqual(windows[1].usedPercent, 0.0)
-        XCTAssertEqual(windows[1].scopeModel, "Spark")
-        XCTAssertEqual(plan, "prolite")
-    }
-
-    /// ⛔ 顶替锁（2026-08-11 实测翻车修正）：主池手动重置/滚动后 `resets_at` 会跳变，旧窗口实例
-    /// 即使时间上没过期也是死数据（当天 08-15/08-17/08-18 三代实例并存，前两代 15%/9% 都是幽灵）。
-    /// 同池（模型共现判定）只显示最新实例。
-    func testCodex147SupersededInstanceHidden() {
-        func rl(_ pct: Double, resets: Int) -> [String: Any] {
-            ["limit_id": "codex", "limit_name": NSNull(),
-             "primary": ["used_percent": pct, "window_minutes": 10080, "resets_at": resets],
-             "secondary": NSNull(), "plan_type": "prolite"]
-        }
-        let entries = [
-            // 旧实例（15%，resets 在未来）——被顶替的死数据；同模型 → 同池
-            CodexRateLimitReader.RLEntry(rl: rl(15, resets: 1_786_200_000),
-                                         ts: Date(timeIntervalSince1970: 1_785_800_000),
-                                         model: "gpt-5.6-sol", file: 2),
-            // 当前实例（48%，ts 最新）
-            CodexRateLimitReader.RLEntry(rl: rl(48, resets: 1_786_400_000),
-                                         ts: Date(timeIntervalSince1970: 1_785_999_000),
-                                         model: "gpt-5.6-sol", file: 0),
-        ]
-        let (windows, _) = CodexRateLimitReader.bucketize(entries, now: Self.codexNow)
-        XCTAssertEqual(windows.count, 1, "同池的旧窗口实例必须被顶替隐藏，不能当成另一个池展示")
-        XCTAssertEqual(windows[0].label, "7d")
-        XCTAssertEqual(windows[0].usedPercent, 48.0, "显示的必须是 ts 最新的实例")
+    /// 断网合并（RateLimitStore）要连 0812 新字段一起保留——积分/券在离线时不许消失
+    @MainActor
+    func testStoreNetworkMergeKeepsExtras() {
+        let coupon = RateLimitResetCoupon(title: "Full reset", status: "available",
+                                          expiresAt: Date(timeIntervalSince1970: 1_786_558_383))
+        let good = RateLimitSnapshot(
+            providerId: "codex-test-merge",
+            windows: [RateLimitWindow(kind: "codex_primary", label: "7d", windowMinutes: 10080, usedPercent: 75)],
+            planType: "prolite", capturedAt: Date(timeIntervalSince1970: 1_786_500_000),
+            credits: RateLimitCredits(hasCredits: true, unlimited: false, balance: "4.2"),
+            resetCoupons: [coupon])
+        RateLimitStore.shared.put(good)
+        RateLimitStore.shared.put(RateLimitSnapshot(
+            providerId: "codex-test-merge", windows: [], capturedAt: Date(), error: .network))
+        let merged = RateLimitStore.shared.snapshot(for: "codex-test-merge")
+        XCTAssertEqual(merged?.windows.count, 1)
+        XCTAssertEqual(merged?.error, .network)
+        XCTAssertEqual(merged?.credits?.displayText, "$4.20", "积分随窗口一起保留")
+        XCTAssertEqual(merged?.availableCoupons.count, 1, "重置券随窗口一起保留")
+        RateLimitStore.shared.remove("codex-test-merge")
     }
 
     // MARK: - Qoder：账号指纹（issue #4，Work 与 IDE 可能登录不同账号）

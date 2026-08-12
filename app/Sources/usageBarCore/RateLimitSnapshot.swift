@@ -83,25 +83,114 @@ public struct RateLimitWindow: Codable, Sendable, Equatable {
     }
 }
 
+/// 按量积分（Codex credits，0812 spec §二.5）。`balance` 保留官方原始字符串（"0" / "4.20"）。
+public struct RateLimitCredits: Codable, Sendable, Equatable {
+    public let hasCredits: Bool
+    public let unlimited: Bool
+    public let balance: String?
+
+    public init(hasCredits: Bool, unlimited: Bool, balance: String?) {
+        self.hasCredits = hasCredits
+        self.unlimited = unlimited
+        self.balance = balance
+    }
+
+    /// 药丸/详情页的展示值；nil = 不展示（拍板 1a：仅 unlimited 或余额 > 0 时出现）。
+    public var displayText: String? {
+        if unlimited { return "∞" }
+        guard let balance, let v = Double(balance), v > 0 else { return nil }
+        // 官方 balance 是美元字符串；两位小数、去多余零（"4.20"→"$4.20"、"12"→"$12"）
+        let s = v == v.rounded() ? String(Int(v)) : String(format: "%.2f", v)
+        return "$\(s)"
+    }
+}
+
+/// 企业/团队人均花费上限（individual_limit，美元字符串 + 剩余百分比）。
+public struct RateLimitSpendCap: Codable, Sendable, Equatable {
+    public let limit: String
+    public let used: String
+    public let remainingPercent: Double?
+    public let resetsAt: Date?
+
+    public init(limit: String, used: String, remainingPercent: Double?, resetsAt: Date?) {
+        self.limit = limit
+        self.used = used
+        self.remainingPercent = remainingPercent
+        self.resetsAt = resetsAt
+    }
+
+    /// 已用百分比（进度条用）；官方给的是剩余，这里翻转
+    public var usedPercent: Double { max(0, min(100, 100 - (remainingPercent ?? 100))) }
+
+    /// "$18.50/$50" —— 美元字符串直接拼接（保留官方原始精度）
+    public var usedOfLimitText: String {
+        func fmt(_ s: String) -> String {
+            guard let v = Double(s) else { return s }
+            return v == v.rounded() ? String(Int(v)) : String(format: "%.2f", v)
+        }
+        return "$\(fmt(used))/$\(fmt(limit))"
+    }
+}
+
+/// 限额重置券（rate_limit_reset_credits 的单张券）。
+public struct RateLimitResetCoupon: Codable, Sendable, Equatable {
+    /// "Full reset" 等官方标题；可空
+    public let title: String?
+    /// "available" / "redeemed" / "expired"…（原样保留，展示层只挑 available）
+    public let status: String
+    public let expiresAt: Date?
+
+    public init(title: String?, status: String, expiresAt: Date?) {
+        self.title = title
+        self.status = status
+        self.expiresAt = expiresAt
+    }
+}
+
 /// 某 provider 某次采集时刻的完整额度快照
 public struct RateLimitSnapshot: Codable, Sendable, Equatable {
     public let providerId: String
     /// ⚠️ 数量动态：可能 1 条也可能 3 条
     public let windows: [RateLimitWindow]
-    /// 套餐名："max" / "prolite" / "Community" / "pro_plus"…，仅作展示
+    /// 套餐名："max" / "prolite" / "Community" / "pro_plus"…，仅作展示。
+    /// ⚠️ 开放集合（Codex 实测 20 档且官方留了 unknown 兜底）——原样展示，绝不枚举写死。
     public let planType: String?
     /// 本次采集时刻（本地时钟）
     public let capturedAt: Date
     /// 采集失败原因（超时/未登录/凭证失效/无配额数据/无数据源）；非 nil 时 windows 可能为空
     public let error: RateLimitError?
+    // —— 以下 0812 新增（Codex RPC 全量字段）；全部可选，老快照 JSON 解码自动 nil ——
+    /// 按量积分
+    public let credits: RateLimitCredits?
+    /// 企业/团队人均花费上限
+    public let spendCap: RateLimitSpendCap?
+    /// 已达管理员支出管控（true 时 UI 出红条）
+    public let spendControlReached: Bool?
+    /// 限流原因原始值（"rate_limit_reached" 等 5 种，文案映射在 UI 层）
+    public let rateLimitReachedType: String?
+    /// 重置券（含非 available 的；展示层过滤）
+    public let resetCoupons: [RateLimitResetCoupon]?
 
     public init(providerId: String, windows: [RateLimitWindow], planType: String? = nil,
-                capturedAt: Date, error: RateLimitError? = nil) {
+                capturedAt: Date, error: RateLimitError? = nil,
+                credits: RateLimitCredits? = nil, spendCap: RateLimitSpendCap? = nil,
+                spendControlReached: Bool? = nil, rateLimitReachedType: String? = nil,
+                resetCoupons: [RateLimitResetCoupon]? = nil) {
         self.providerId = providerId
         self.windows = windows
         self.planType = planType
         self.capturedAt = capturedAt
         self.error = error
+        self.credits = credits
+        self.spendCap = spendCap
+        self.spendControlReached = spendControlReached
+        self.rateLimitReachedType = rateLimitReachedType
+        self.resetCoupons = resetCoupons
+    }
+
+    /// 可用的重置券（详情页逐张列出、主列表 "券 ×N"）
+    public var availableCoupons: [RateLimitResetCoupon] {
+        (resetCoupons ?? []).filter { $0.status == "available" }
     }
 
     /// 「最紧窗口」= usedPercent 最高的那个（主列表药丸只显示这一个的场景可能会用；本版药丸子行全显）。
@@ -112,7 +201,11 @@ public struct RateLimitSnapshot: Codable, Sendable, Equatable {
     /// 复制成另一个 providerId（Qoder 一次 read → 复制到 CLI/Work/IDE 三实例）
     public func with(providerId newId: String) -> RateLimitSnapshot {
         RateLimitSnapshot(providerId: newId, windows: windows, planType: planType,
-                          capturedAt: capturedAt, error: error)
+                          capturedAt: capturedAt, error: error,
+                          credits: credits, spendCap: spendCap,
+                          spendControlReached: spendControlReached,
+                          rateLimitReachedType: rateLimitReachedType,
+                          resetCoupons: resetCoupons)
     }
 }
 
@@ -130,4 +223,8 @@ public enum RateLimitError: String, Codable, Sendable, Equatable {
     case noDataSource
     /// statusline 已配置但还没数据（Claude 尚未刷新状态栏写入文件）—— 零钥匙串路线特有的「等待」态，非错误
     case awaitingData
+    /// 找不到可用的 CLI 二进制（Codex RPC 数据源：发现链全空）—— 装 CLI / Desktop 后自动恢复
+    case binaryNotFound
+    /// CLI 版本太老、没有额度查询接口（JSON-RPC method not found）—— 升级后自动恢复
+    case versionTooOld
 }
