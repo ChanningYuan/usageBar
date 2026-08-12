@@ -355,7 +355,9 @@ struct ProviderDetailView: View {
                             .font(.system(size: 9)).foregroundStyle(pal.text2)
                         Spacer()
                         if let exp = c.expiresAt {
-                            Text(Self.shortDate(exp) + " 前有效")
+                            // 0812 用户定稿(1)：固定带时分——纯日期在最后一天会低估紧迫感
+                            // （RPC 的 expiresAt 精确到秒，如「8-13 02:13」实为当天深夜作废）
+                            Text(Self.shortDateTime(exp) + " 前有效")
                                 .font(.system(size: 9)).foregroundStyle(pal.text3)
                         }
                     }
@@ -365,10 +367,17 @@ struct ProviderDetailView: View {
         }
     }
 
-    /// "8-14" 短日期（重置券到期 / 人均上限重置用）
+    /// "8-14" 短日期（人均上限重置用）
     static func shortDate(_ d: Date) -> String {
         let f = DateFormatter()
         f.dateFormat = "M-d"
+        return f.string(from: d)
+    }
+
+    /// "8-13 02:13" 短日期+时分（重置券到期用，0812 定稿）
+    static func shortDateTime(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "M-d HH:mm"
         return f.string(from: d)
     }
 
