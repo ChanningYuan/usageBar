@@ -5,27 +5,21 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.31</h3>
-<p><b>修复</b></p>
+<h3>usageBar 0.3.32</h3>
+<p><b>优化</b></p>
 <ul>
-<li><b>Codex 主额度池不再丢失（#7）</b>：额度数据源从「扫描本地会话日志」整体切换为「通过本机 Codex CLI 查询官方额度接口」（凭据由 Codex 自己管理，usageBar 不读钥匙串、不弹授权框）。超大会话日志把主池挤出扫描窗口、只剩 Spark 的问题从机制上根治；离线时保留上次数据并标注「连接不上 Codex」。</li>
-</ul>
-<p><b>新增</b></p>
-<ul>
-<li><b>Codex 额度信息更全</b>：主列表新增「积分」药丸（按量积分有余额或不限量时出现）与「券 ×N」限额重置券药丸；详情页新增按量积分行、重置券明细（每张各自到期时间）、企业/团队人均花费上限、支出管控与限流原因提示。</li>
-<li>Codex 套餐档位识别覆盖全部档位（free / plus / prolite / business / enterprise 等约 20 档，未知档位原样显示）。</li>
-<li>找不到 Codex、CLI 版本过老、未登录、API Key 登录等场景各有明确提示，不再混作一句「无配额数据」。</li>
+<li>Codex 重置券到期时间显示到时分（如「8-13 02:13 前有效」）——纯日期在最后一天会低估紧迫感，券实际常在深夜整点作废。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.31</title>
-            <pubDate>Wed, 12 Aug 2026 12:31:23 +0800</pubDate>
-            <sparkle:version>0.3.31</sparkle:version>
-            <sparkle:shortVersionString>0.3.31</sparkle:shortVersionString>
+            <title>0.3.32</title>
+            <pubDate>Wed, 12 Aug 2026 13:49:23 +0800</pubDate>
+            <sparkle:version>0.3.32</sparkle:version>
+            <sparkle:shortVersionString>0.3.32</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.31/usageBar.zip" length="2599327" type="application/octet-stream" sparkle:edSignature="GdXOg59zQW0cr30HSp/4v/W9rT5K7UuIkDxh44smWqB78PlFsGODXXxKzHQZMhiczB2/XUPUfJDdkKN3Fq9LDA=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.32/usageBar.zip" length="2599387" type="application/octet-stream" sparkle:edSignature="py4Heg2cSOWFwISfmsC9rX2i2qJFhf0fWm7mwSaFd21zcm6IMgzh8lDA4dOv0VHO4aeiQkr8cCzkKLq6yS7vDA=="/>
         </item>
     </channel>
 </rss>
