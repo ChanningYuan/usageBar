@@ -5,25 +5,27 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.30</h3>
-<p><b>优化</b></p>
+<h3>usageBar 0.3.31</h3>
+<p><b>修复</b></p>
 <ul>
-<li><b>启动不再&quot;全程转圈等最慢的&quot;</b>：数据源谁扫完谁上屏，小工具几秒内先出现，Claude/Codex 扫完自动补上；菜单栏数字随扫描进度递增，不再长时间停在「加载中」。</li>
-<li><b>首次启动有进度了</b>：第一次索引历史数据时，弹层底部显示「首次索引历史数据…（x/y 数据源）」，不再只有一个干转的「刷新中…」。</li>
-<li><b>扫描中途强退/断电不再白扫</b>：索引进度阶段性保存，下次启动接着上次的进度补扫，而不是从头再来。</li>
-<li><b>「立即刷新」防连点</b>：刷新进行中右键菜单该项置灰——此前连点会让多轮扫描互相争抢、越点越慢。</li>
-<li>日志解析加入关键字预筛，全量扫描小幅提速。</li>
+<li><b>Codex 主额度池不再丢失（#7）</b>：额度数据源从「扫描本地会话日志」整体切换为「通过本机 Codex CLI 查询官方额度接口」（凭据由 Codex 自己管理，usageBar 不读钥匙串、不弹授权框）。超大会话日志把主池挤出扫描窗口、只剩 Spark 的问题从机制上根治；离线时保留上次数据并标注「连接不上 Codex」。</li>
+</ul>
+<p><b>新增</b></p>
+<ul>
+<li><b>Codex 额度信息更全</b>：主列表新增「积分」药丸（按量积分有余额或不限量时出现）与「券 ×N」限额重置券药丸；详情页新增按量积分行、重置券明细（每张各自到期时间）、企业/团队人均花费上限、支出管控与限流原因提示。</li>
+<li>Codex 套餐档位识别覆盖全部档位（free / plus / prolite / business / enterprise 等约 20 档，未知档位原样显示）。</li>
+<li>找不到 Codex、CLI 版本过老、未登录、API Key 登录等场景各有明确提示，不再混作一句「无配额数据」。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.30</title>
-            <pubDate>Tue, 11 Aug 2026 23:28:06 +0800</pubDate>
-            <sparkle:version>0.3.30</sparkle:version>
-            <sparkle:shortVersionString>0.3.30</sparkle:shortVersionString>
+            <title>0.3.31</title>
+            <pubDate>Wed, 12 Aug 2026 12:31:23 +0800</pubDate>
+            <sparkle:version>0.3.31</sparkle:version>
+            <sparkle:shortVersionString>0.3.31</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.30/usageBar.zip" length="2570979" type="application/octet-stream" sparkle:edSignature="5CzUptAykD0eBUA5WXXtqL/zAZvk1luKREKm84aca/p6tGnfH6zd3eA9vpNcvrVFfknTZXtI4b6J0NSLhhbhCA=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.31/usageBar.zip" length="2599327" type="application/octet-stream" sparkle:edSignature="GdXOg59zQW0cr30HSp/4v/W9rT5K7UuIkDxh44smWqB78PlFsGODXXxKzHQZMhiczB2/XUPUfJDdkKN3Fq9LDA=="/>
         </item>
     </channel>
 </rss>
