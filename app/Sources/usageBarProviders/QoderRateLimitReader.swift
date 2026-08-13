@@ -25,8 +25,11 @@ import usageBarCore
 public struct QoderRateLimitReader {
     public init() {}
 
-    /// Qoder 全家桶三个 provider 实例共享同一份账号级快照
-    public static let providerIds = ["qoder-cli", "qoder-work", "qoder-ide"]
+    /// Qoder 家族的 provider 实例共享同一份账号级快照。
+    /// ⚠️ v0.3.33 起 QoderWork 已下架（由千问办公替代），只剩 CLI / IDE 两个实例。
+    /// 额度接口本身仍按**凭证**查（QoderWork 客户端可能还装着、凭证仍可读），
+    /// 但快照的 providerId 只会是这两个之一。
+    public static let providerIds = ["qoder-cli", "qoder-ide"]
     private static let endpoint = "https://openapi.qoder.sh/api/v2/quota/usage"
 
     private var appSupport: URL {
@@ -47,20 +50,24 @@ public struct QoderRateLimitReader {
     private enum Source { case work, ide }
 
     /// 按凭证分账号采集（issue #4）。返回 1 或 2 个快照：
-    /// - 仅一份凭证登录，或双登录但**账号指纹相同** → 1 个「代表账号」快照（providerId "qoder-work"），
-    ///   调度层复制到三个 qoder 实例——即原有行为；
-    /// - QoderWork 与 Qoder IDE 登录了**不同账号** → 2 个快照各查各的（"qoder-work" / "qoder-ide"），
-    ///   行标签与数据来源账号对齐，不再把 Work 账号的额度标成 "Qoder (IDE)"。
+    /// - 仅一份凭证登录，或双登录但**账号指纹相同** → 1 个「代表账号」快照（providerId "qoder-cli"），
+    ///   调度层复制到各 qoder 实例——即原有行为；
+    /// - QoderWork 客户端与 Qoder IDE 登录了**不同账号** → 2 个快照各查各的（"qoder-cli" / "qoder-ide"），
+    ///   行标签与数据来源账号对齐，不再把一个账号的额度标成另一个的。
+    ///
+    /// ⚠️ v0.3.33：QoderWork **provider 已下架**，但它的本机凭证仍是可用的额度来源之一
+    /// （很多人 CLI 与 Work 是同一个账号）。所以这里继续读 `.work` 凭证，只是代表账号快照
+    /// 改挂 `qoder-cli`——CLI 行的额度由此跟随 Work 凭证，与下架前口径一致。
     public func readAll(now: Date = Date()) async -> [RateLimitSnapshot] {
         let work = credential(.work)
         let ide = credential(.ide)
         if let w = work, let i = ide, w.account != i.account {
-            return [await readSource(.work, providerId: "qoder-work", now: now),
+            return [await readSource(.work, providerId: "qoder-cli", now: now),
                     await readSource(.ide, providerId: "qoder-ide", now: now)]
         }
-        if work != nil { return [await readSource(.work, providerId: "qoder-work", now: now)] }
-        if ide != nil { return [await readSource(.ide, providerId: "qoder-work", now: now)] }
-        return [RateLimitSnapshot(providerId: "qoder-work", windows: [], capturedAt: now,
+        if work != nil { return [await readSource(.work, providerId: "qoder-cli", now: now)] }
+        if ide != nil { return [await readSource(.ide, providerId: "qoder-cli", now: now)] }
+        return [RateLimitSnapshot(providerId: "qoder-cli", windows: [], capturedAt: now,
                                   error: .credentialUnavailable)]
     }
 
@@ -199,7 +206,7 @@ public struct QoderRateLimitReader {
     /// 字段语义与坑（percentage 双量纲 / orgResourcePackage / expiresAt 归属）
     /// 见 KB `docs/0715-QoderTeams额度修复/Qoder额度API实录.md`。
     static func snapshot(fromQuota obj: [String: Any], now: Date,
-                         providerId: String = "qoder-work") -> RateLimitSnapshot {
+                         providerId: String = "qoder-cli") -> RateLimitSnapshot {
         let plan = obj["userType"] as? String   // API 响应自带 userType，无需本地兜底
         let quota = obj["userQuota"] as? [String: Any]
         let total = (quota?["total"] as? NSNumber)?.doubleValue ?? 0

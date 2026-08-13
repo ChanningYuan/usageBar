@@ -50,7 +50,11 @@ public struct CoworkProvider: UsageProvider {
             }
 
             let records = (try? ClaudeTranscriptParser.parse(url: url) { _ in "cowork" }) ?? []
-            let entry = FileCacheEntry(filePath: path, mtime: meta.mtime, size: meta.size, records: records)
+            // v0.3.33：扫盘顺带落明细，详情页改读账本（issue #8 根治）
+            let details = ClaudeDetailScanner.detailRecords(
+                url: url, providerId: "cowork", attachSource: false)
+            let entry = FileCacheEntry(filePath: path, mtime: meta.mtime, size: meta.size,
+                                       records: records, details: details)
             await FileMtimeCache.shared.store(entry)
             allRecords.append(contentsOf: records)
         }

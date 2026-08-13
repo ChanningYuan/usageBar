@@ -2,9 +2,9 @@ import Foundation
 
 /// Qoder token 用量开关（env gate）的检测 / 写入 / 撤销。
 ///
-/// 背景：Qoder CLI / QoderWork 与千问办公（QwenWorkCN）都使用 Qoder Agent SDK 的
+/// 背景：Qoder CLI 与千问办公（QwenWorkCN）都使用 Qoder Agent SDK 的
 /// `EMPTY_USAGE` gate，但 CN binary 会把变量前缀展开为 `QODERCN_`：
-/// - Qoder CLI / QoderWork：`QODER_EXPOSE_TOKEN_USAGE=1`
+/// - Qoder CLI：`QODER_EXPOSE_TOKEN_USAGE=1`
 /// - 千问办公：`QODERCN_EXPOSE_TOKEN_USAGE=1`
 ///
 /// usageBar 把两行 export 幂等地写进 shell profile（+ launchctl），可一键撤销。CLI 新开终端
@@ -60,18 +60,28 @@ public enum QoderUsageEnvGate {
     private static let beginMarker = "# BEGIN usageBar-qodercli-usage"
     private static let endMarker = "# END usageBar-qodercli-usage"
 
-    /// 写进 profile 的完整标记块（幂等识别靠 BEGIN/END）
-    static var managedBlock: String {
-        """
-        \(beginMarker)
-        # 让 Qoder CLI / QoderWork 把真实 token 用量写进本地日志。
-        export \(qoderEnvName)=1
-        # 千问办公内置 CN binary，变量前缀是 QODERCN_。
-        export \(qwenWorkEnvName)=1
-        # 两个 gate 都只对之后的新请求生效；QoderWork / 千问办公需重启 app。
-        \(endMarker)
-        """
+    /// 写进 profile 的标记块（幂等识别靠 BEGIN/END）。
+    ///
+    /// v0.3.33 起**按产品按需生成**：块里放哪几行由 `names` 决定，而不是恒定两行。
+    /// 这样两个产品的开关才能各开各的——此前一键开启恒写两行、撤销恒删两行，
+    /// 用户只用其中一个产品时被迫连另一个的变量一起写进 `~/.zshrc`。
+    static func managedBlock(for names: Set<String>) -> String {
+        var lines = [beginMarker]
+        if names.contains(qoderEnvName) {
+            lines.append("# 让 Qoder CLI 把真实 token 用量写进本地日志。")
+            lines.append("export \(qoderEnvName)=1")
+        }
+        if names.contains(qwenWorkEnvName) {
+            lines.append("# 千问办公内置 CN binary，变量前缀是 QODERCN_。")
+            lines.append("export \(qwenWorkEnvName)=1")
+        }
+        lines.append("# gate 只对之后的新请求生效；CLI 需新开终端，千问办公需重启 app。")
+        lines.append(endMarker)
+        return lines.joined(separator: "\n")
     }
+
+    /// 兼容旧调用（两个都开）——设置页「已写入」展示用。
+    static var managedBlock: String { managedBlock(for: Set(envNames)) }
 
     // MARK: - 路径
 
@@ -96,32 +106,42 @@ public enum QoderUsageEnvGate {
     /// qodercli 是否「用过」：`~/.qoder/projects` 下有会话条目即算。
     /// 用作 first-run keep-set 判定 + 横幅是否出现的开关。
     public static func isQoderCliPresent() -> Bool {
-        let projects = home.appendingPathComponent(".qoder/projects")
-        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: projects.path) else {
+        // ⚠️ **两个源都要看**（v0.3.33 修）：判据原先只认旧 transcript 目录 `~/.qoder/projects`，
+        // 但 qodercli 1.1.13 起大量调用带 `--no-session-persistence`，**根本不写那个目录**——
+        // 只在 `~/.qoder/logs/sessions/**/segments/*.jsonl` 留诊断日志。
+        // 结果：这类用户明明天天用 CLI，`present` 却恒为 false → 设置页的 gate 横幅
+        // 压根不出现，连「去开启」的入口都看不到（本机实测：projects 目录不存在、
+        // segments 有 2 个日志文件，横幅缺失）。
+        if hasEntries(".qoder/projects") { return true }
+        return hasFiles(under: home.appendingPathComponent(".qoder/logs/sessions"), ext: "jsonl")
+    }
+
+    /// 目录存在且非空
+    private static func hasEntries(_ relativePath: String) -> Bool {
+        let dir = home.appendingPathComponent(relativePath)
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else {
             return false
         }
         return !entries.isEmpty
     }
 
-    /// QoderWork 是否「用过」：`~/.qoderwork/projects` 下有会话条目即算。
-    /// 与 CLI 共用同一个 env gate（同一个 `QODER_EXPOSE_TOKEN_USAGE`），故同样用作
-    /// first-run keep-set 判定 + 横幅是否出现的开关。
-    public static func isQoderWorkPresent() -> Bool {
-        let projects = home.appendingPathComponent(".qoderwork/projects")
-        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: projects.path) else {
-            return false
-        }
-        return !entries.isEmpty
+    /// 递归找有没有指定后缀的文件（找到一个就返回，不全量枚举）
+    private static func hasFiles(under root: URL, ext: String) -> Bool {
+        guard let en = FileManager.default.enumerator(
+            at: root, includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return false }
+        for case let url as URL in en where url.pathExtension == ext { return true }
+        return false
     }
+
 
     /// 千问办公是否「用过」：`~/.qwenworkcn/projects` 下有会话条目即算。
     /// 千问办公内置 CN 版 Qoder Agent SDK，受 `QODERCN_EXPOSE_TOKEN_USAGE` gate 控制。
     public static func isQwenWorkPresent() -> Bool {
-        let projects = home.appendingPathComponent(".qwenworkcn/projects")
-        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: projects.path) else {
-            return false
-        }
-        return !entries.isEmpty
+        // 同 `isQoderCliPresent`：千问办公的 token 真值也在 segments 日志里，
+        // 只认 projects 目录会漏判（两个源任一有内容就算用过）。
+        if hasEntries(".qwenworkcn/projects") { return true }
+        return hasFiles(under: home.appendingPathComponent(".qwenworkcn/logs/sessions"), ext: "jsonl")
     }
 
     /// 受 gate 产品**最近一次产生会话日志**的时间（只看有没有写日志，不看 token 是不是 0）。
@@ -131,7 +151,7 @@ public enum QoderUsageEnvGate {
     /// - **用了，但 gate 没在目标进程里生效** → 本周期有日志活动、token 却全是 0 → 提示「重启后开始记录」。
     ///
     /// ⚠️ 别退回成「gate 已开 + 装过 + token=0」就提示：那会对**今天没用过**的产品误报
-    /// （2026-08-04 验收现场：用户当天没开 QoderWork，却被提示「重启 QoderWork」）。
+    /// （2026-08-04 验收现场：用户当天没开千问办公，却被提示「重启千问办公」）。
     ///
     /// 只取最新 mtime、不解析内容。调用方应在每次刷新时取一次缓存起来（见 `QoderUsageStatus`），
     /// **别放进 SwiftUI body 里按需调用**——那会每次重绘都扫盘。
@@ -139,7 +159,6 @@ public enum QoderUsageEnvGate {
         let root: URL
         switch productId {
         case "qoder-cli":  root = home.appendingPathComponent(".qoder/projects")
-        case "qoder-work": root = home.appendingPathComponent(".qoderwork/projects")
         case "qwen-work":  root = home.appendingPathComponent(".qwenworkcn/logs/sessions")
         default: return nil
         }
@@ -166,7 +185,7 @@ public enum QoderUsageEnvGate {
         return newest
     }
 
-    /// Qoder CLI / QoderWork 的 gate 是否已开启。
+    /// Qoder CLI 的 gate 是否已开启。
     public static func isQoderEnabled() -> Bool {
         isEnvEnabled(qoderEnvName)
     }
@@ -179,7 +198,7 @@ public enum QoderUsageEnvGate {
     /// 所有「已经用过」的受控产品都开启才算完成；未安装/未使用的产品不强制要求。
     public static func isEnabled() -> Bool {
         allRequiredProductsEnabled(
-            qoderPresent: isQoderCliPresent() || isQoderWorkPresent(),
+            qoderPresent: isQoderCliPresent(),
             qwenWorkPresent: isQwenWorkPresent(),
             enabledEnvNames: Set(envNames.filter(isEnvEnabled))
         )
@@ -228,32 +247,56 @@ public enum QoderUsageEnvGate {
 
     // MARK: - 写入 / 撤销
 
-    /// 幂等开启：profile 写标记块（已存在则先清再写）+ launchctl setenv。
+    /// 幂等开启**指定的变量**：profile 重写标记块 + launchctl setenv。
     /// 返回 profile 是否写入成功（launchctl 是 best-effort）。
+    ///
+    /// ⚠️ 标记块只有一个（BEGIN/END 一对），所以每次都要把**当前应启用的全集**一起写进去：
+    /// 已开的 + 本次要开的。只写本次这一个会把另一个产品的行冲掉。
     @discardableResult
-    public static func enable() -> Bool {
-        let ok = writeProfile(adding: true)
-        // launchctl 让 GUI / 新登录会话也覆盖；失败不影响 profile 主路径
-        for envName in envNames {
-            runProcess("/bin/launchctl", ["setenv", envName, "1"])
-        }
+    public static func enable(_ envName: String) -> Bool {
+        var target = currentlyEnabledInProfile()
+        target.insert(envName)
+        let ok = writeProfile(names: target)
+        runProcess("/bin/launchctl", ["setenv", envName, "1"])
         return ok
     }
 
-    /// 撤销：删 profile 标记块 + launchctl unsetenv。
+    /// 撤销**指定的变量**：从标记块里去掉它（另一个若已开则保留），launchctl unsetenv。
+    @discardableResult
+    public static func disable(_ envName: String) -> Bool {
+        var target = currentlyEnabledInProfile()
+        target.remove(envName)
+        let ok = writeProfile(names: target)
+        runProcess("/bin/launchctl", ["unsetenv", envName])
+        return ok
+    }
+
+    /// 两个都开（兼容旧调用 / 引导 sheet 的「全部开启」）
+    @discardableResult
+    public static func enable() -> Bool {
+        let ok = writeProfile(names: Set(envNames))
+        for envName in envNames { runProcess("/bin/launchctl", ["setenv", envName, "1"]) }
+        return ok
+    }
+
+    /// 全部撤销
     @discardableResult
     public static func disable() -> Bool {
-        let ok = writeProfile(adding: false)
-        for envName in envNames {
-            runProcess("/bin/launchctl", ["unsetenv", envName])
-        }
+        let ok = writeProfile(names: [])
+        for envName in envNames { runProcess("/bin/launchctl", ["unsetenv", envName]) }
         return ok
+    }
+
+    /// 当前 profile 标记块里已经写着哪几个变量
+    private static func currentlyEnabledInProfile() -> Set<String> {
+        guard let text = try? String(contentsOf: profilePath, encoding: .utf8) else { return [] }
+        return enabledEnvNames(inProfileText: text)
     }
 
     /// launchctl 自愈（issue #3）：profile 标记块里开关还在、但 launchctl（GUI app 的环境变量表，
     /// **重启电脑即清空**，而 `enable()` 只在开启那一刻写过一次）里的值丢了 → 自动补写。
     ///
-    /// 为什么值得补：QoderWork 启动时用 `zsh -ilc` 抓 shell 环境有 30 秒超时，超时会回退到
+    /// 为什么值得补：GUI app（如千问办公）启动时用 `zsh -ilc` 抓 shell 环境有 30 秒超时，超时会回退到
     /// launchd 基础环境——此时 launchctl 里有值就能接住 gate，token 不再静默归零
     /// （2026-07-14 A/B 实证的故障链，见 issue #3）。
     ///
@@ -269,7 +312,7 @@ public enum QoderUsageEnvGate {
     /// 重写 profile：增量、非破坏性。
     /// 读整份原文 → 只剥掉我们自己的 BEGIN/END 标记块 → adding=true 再追加新块 → 写回。
     /// 用户其它内容（PATH / alias / 别的 export）原样保留。
-    private static func writeProfile(adding: Bool) -> Bool {
+    private static func writeProfile(names: Set<String>) -> Bool {
         let path = profilePath
         // 文件存在但读不出（非 UTF-8 等）→ 宁可开启失败，绝不用"只剩我们的块"覆盖掉用户文件
         var text: String
@@ -280,10 +323,10 @@ public enum QoderUsageEnvGate {
             text = ""
         }
         text = strippedBlock(from: text)
-        if adding {
+        if !names.isEmpty {
             if !text.isEmpty && !text.hasSuffix("\n") { text += "\n" }
             if !text.isEmpty { text += "\n" }
-            text += managedBlock + "\n"
+            text += managedBlock(for: names) + "\n"
         }
         do {
             try text.write(to: path, atomically: true, encoding: .utf8)

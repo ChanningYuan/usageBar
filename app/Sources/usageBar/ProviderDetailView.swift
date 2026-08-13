@@ -139,7 +139,7 @@ struct ProviderDetailView: View {
 
     /// M0 账号额度：Hero 之上、周期切换器之上。三态——正常 / 未开启引导 / 错误态说明。
     /// 只对「有额度数据源」**且声明要画这块**的 provider 显示
-    /// （Cowork/OpenCode/悟空/WorkBuddy 无数据源；千问办公有数据源但声明 `hasQuotaModule: false`，
+    /// （Cowork/OpenCode/WorkBuddy 无数据源；千问办公有数据源但声明 `hasQuotaModule: false`，
     /// 因为它的额度就一个「剩余可用」、主列表药丸已经显示过）。
     @ViewBuilder private var accountQuotaModule: some View {
         if spec.hasQuotaModule, RateLimitSettings.logicalKey(forProvider: providerId) != nil {

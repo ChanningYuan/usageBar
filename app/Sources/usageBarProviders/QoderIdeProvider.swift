@@ -13,7 +13,7 @@ import usageBarCore
 /// {"prompt_tokens": 39005, "completion_tokens": 67, "cached_tokens": 37485, "max_input_tokens": 200000}
 /// ```
 ///
-/// 映射到 Anthropic 4 列(跟 QoderWork / QoderCli 保持一致):
+/// 映射到 Anthropic 4 列(跟 Qoder CLI 保持一致):
 ///   - `input` = `prompt_tokens - cached_tokens`
 ///   - `cache_read` = `cached_tokens`
 ///   - `cache_creation` = 0(Qoder 协议不暴露此列)
@@ -30,7 +30,7 @@ import usageBarCore
 /// (声明 `chat_message` 表含 token),实测本机 db 验证成立。
 public struct QoderIdeProvider: UsageProvider {
     public let id = "qoder-ide"
-    public let displayName = "Qoder (IDE)"
+    public let displayName = "Qoder IDE"
     public let iconSymbol = "wand.and.stars"
     public let brandColor = "#0E5F7A"
     public var family: String? { "qoder" }
@@ -52,12 +52,25 @@ public struct QoderIdeProvider: UsageProvider {
         guard let meta = sqliteMetadataWithWAL(dbPath: path) else { return [] }
 
         if let entry = await FileMtimeCache.shared.lookup(filePath: path, mtime: meta.mtime, size: meta.size) {
+
+        // v0.3.33：明细落进持久账本（详情页从此读账本，源被清理/锁住也能展开）。
+        // 写成一条**合成条目**（非真实路径 + 每轮覆盖），不参与 mtime 缓存命中。
+        // ⚠️ 必须在**所有** return 之前写：命中 mtime 缓存的那条快路径也要写，
+        // 否则第二轮起就再也不更新明细（首扫恰好没数据的 provider 会永远空着）。
+        await Self.storeDetails(QoderIdeDetailScanner.shared)
             return entry.records
         }
 
         let records = (try? parseDB(path: path)) ?? []
         let entry = FileCacheEntry(filePath: path, mtime: meta.mtime, size: meta.size, records: records)
         await FileMtimeCache.shared.store(entry)
+
+
+        // v0.3.33：明细落进持久账本（详情页从此读账本，源被清理/锁住也能展开）。
+        // 写成一条**合成条目**（非真实路径 + 每轮覆盖），不参与 mtime 缓存命中。
+        // ⚠️ 必须在**所有** return 之前写：命中 mtime 缓存的那条快路径也要写，
+        // 否则第二轮起就再也不更新明细（首扫恰好没数据的 provider 会永远空着）。
+        await Self.storeDetails(QoderIdeDetailScanner.shared)
         return records
     }
 
@@ -138,4 +151,14 @@ public struct QoderIdeProvider: UsageProvider {
         //   total            = (prompt - cached) + 0 + cached + completion = prompt + completion
         return (prompt + completion, cached)
     }
+
+    /// 把 scanner 的全量明细写进账本（合成 key，每轮覆盖）。
+    private static func storeDetails(_ scanner: QoderIdeDetailScanner) async {
+        let details = await scanner.allDetails()
+        guard !details.isEmpty else { return }
+        await FileMtimeCache.shared.store(FileCacheEntry(
+            filePath: "usagebar://detail-ledger/qoder-ide", mtime: Date(), size: details.count,
+            records: [], details: details))
+    }
+
 }

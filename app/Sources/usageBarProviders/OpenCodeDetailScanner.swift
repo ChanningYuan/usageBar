@@ -25,6 +25,18 @@ public actor OpenCodeDetailScanner {
                             window: window, weekStartMonday: weekStartMonday, now: now)
     }
 
+    /// 全量明细 → 写进持久账本（v0.3.33）。
+    /// ⚠️ subagent 子会话仍收敛到根会话（与 `compose` 同口径），否则详情页会话数对不上。
+    public func allDetails() async -> [FileDetailRecord] {
+        let (messages, sessions) = loadAll()
+        return messages.map { m in
+            let root = OpenCodeDB.rootSessionId(of: m.sessionId, in: sessions)
+            return FileDetailRecord(provider: "opencode", date: m.date, sessionId: root,
+                                    title: sessions[root]?.title ?? "",
+                                    model: m.modelId, lastActivity: m.time, tokens: m.tokens)
+        }
+    }
+
     /// 纯聚合逻辑（静态、无 IO，单测直接打）
     static func compose(messages: [OpenCodeDB.MessageRow],
                         sessions: [String: OpenCodeDB.SessionInfo],

@@ -58,6 +58,15 @@ public actor QoderIdeDetailScanner {
         Self.compose(rows: load(), window: window, weekStartMonday: weekStartMonday, now: now)
     }
 
+    /// 全量明细 → 写进持久账本（v0.3.33）。详情页从账本读，SQLite 被清理/锁住也能展开。
+    public func allDetails() async -> [FileDetailRecord] {
+        load().map { r in
+            FileDetailRecord(provider: "qoder-ide", date: r.date, sessionId: r.sessionId,
+                             title: (r.title?.isEmpty == false ? r.title! : (r.project ?? "")),
+                             model: r.model, lastActivity: r.time, tokens: r.tokens)
+        }
+    }
+
     static func compose(rows: [Row], window: TimeWindow,
                         weekStartMonday: Bool, now: Date) -> ProviderDetail {
         let inWindow = DailyAggregator.windowPredicate(window, weekStartMonday: weekStartMonday, now: now)

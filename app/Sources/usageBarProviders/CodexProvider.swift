@@ -1,7 +1,7 @@
 import Foundation
 import usageBarCore
 
-/// Codex (OpenAI) provider（mtime 增量 + fork/resume 跨文件去重版）
+/// Codex（OpenAI 家）provider（mtime 增量 + fork/resume 跨文件去重版）
 ///
 /// 数据源：`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
 /// `payload.info.total_token_usage.total_tokens` 是 session 累计值（非增量）。
@@ -40,7 +40,7 @@ import usageBarCore
 /// 「父在 fork 时刻的 final」快照）。
 public struct CodexProvider: UsageProvider {
     public let id = "codex"
-    public let displayName = "Codex (OpenAI)"
+    public let displayName = "Codex"
     public let iconSymbol = "bolt.circle.fill"
     public let brandColor = "#10A37F"
 
@@ -210,11 +210,28 @@ public struct CodexProvider: UsageProvider {
                 records = daily.map { FileDailyRecord(provider: id, date: $0.key, token: $0.value, cachedToken: cachedDaily[$0.key] ?? 0) }
                 fileFinal = ff
                 cachedFinal = cf
-                // 只缓存非 fork 文件：fork 的 records 依赖跨文件 baseline，父增长会让它失效，故不缓存。
-                if !isFork, let m = FileMetadata.read(at: path) {
-                    await FileMtimeCache.shared.store(
-                        FileCacheEntry(filePath: path, mtime: m.mtime, size: m.size, records: records)
-                    )
+                if let m = FileMetadata.read(at: path) {
+                    if !isFork {
+                        // 非 fork：正常按 (mtime,size) 缓存，下轮可命中跳过解析。
+                        await FileMtimeCache.shared.store(
+                            FileCacheEntry(filePath: path, mtime: m.mtime, size: m.size, records: records)
+                        )
+                    } else {
+                        // ⚠️ **fork 文件也必须写账本**（v0.3.33 修）。
+                        //
+                        // 老行为是「fork 一律不写」——理由是它的 records 依赖跨文件 baseline、父会话增长后会失效。
+                        // 但主列表是从 `FileMtimeCache.allEntries()` 聚合的**持久账本**，不写 = 这些 fork 会话的
+                        // 用量在主列表里**根本不存在**。本机实测：8-11 一个 fork 会话的 87 万 token 就这么丢了
+                        // （列表 18.0M vs 详情 18.9M，正是 issue #8 那类「两个数字打架」，只是方向相反）。
+                        //
+                        // 修法：写一个**合成 key**（真实路径 + 后缀），且 `mtime` 用当前时刻、`size` 用记录数——
+                        // 这样它**永远不会被 `lookup` 命中**（下一轮 fork 分支压根不查缓存），每轮都以最新
+                        // baseline 重算并覆盖同一条，既不会失效也不会重复累加。
+                        await FileMtimeCache.shared.store(
+                            FileCacheEntry(filePath: path + "#fork", mtime: Date(), size: records.count,
+                                           records: records)
+                        )
+                    }
                 }
             }
 
@@ -223,6 +240,18 @@ public struct CodexProvider: UsageProvider {
                 sessionCachedFinal[meta.ownId] = max(sessionCachedFinal[meta.ownId] ?? 0, cachedFinal)
             }
             allRecords.append(contentsOf: records)
+        }
+
+        // v0.3.33：把**明细**（会话 / 模型 / 5 列）落进持久账本，详情页从此读账本、不再重扫源日志。
+        // ⚠️ 与 Claude 系不同，这里必须整体扫完再写：Codex 的 fork 差分基线是跨文件状态，
+        // 逐文件独立算会把 replay 段重复计（见 CodexDetailScanner.allDetails 的注释）。
+        // 写成一条合成条目（非真实文件路径），源 rollout 被清理后明细仍在。
+        let details = await CodexDetailScanner.shared.allDetails(providerId: id, root: sessionsDir)
+        if !details.isEmpty {
+            await FileMtimeCache.shared.store(FileCacheEntry(
+                filePath: sessionsDir.appendingPathComponent(".usagebar-detail-ledger").path,
+                mtime: Date(), size: details.count,
+                records: [], details: details))
         }
 
         return allRecords

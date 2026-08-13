@@ -169,15 +169,13 @@ enum DetailScannerKind {
     /// Claude Code / Cowork / **Qoder CLI** / **Qoder Work** 全部复用 —— 结构一模一样，只是根目录不同。
     case claudeTranscript(ClaudeTranscriptSource)
     /// Codex rollout（`payload.type=="token_count"` 的累计值 → 必须差分）。
-    /// Codex / **悟空**（内置 codex 内核，落点在 `~/.real/**/kernel/codex/sessions/`）共用。
+    /// Codex 用。
     case codexRollout(root: URL, requirePath: String?)
     case openCode
     case cursor
     case workBuddy
     case qoderIde
     case qwenWork
-    /// 悟空：**双源合并**（旧 requests.jsonl 占 99.96% + 新 codex rollout）。见 `WukongDetailScanner`。
-    case wukong
 }
 
 // MARK: - 声明
@@ -263,13 +261,7 @@ enum ProviderDetailRegistry {
         .init(root: home.appendingPathComponent(".qoder/projects"))
     }
 
-    /// QoderWork：`~/.qoderwork/projects/<workspace>/<sessionId>.jsonl`（含 subagents/ 递归，与主行一致）
-    private static var qoderWorkSource: ClaudeTranscriptSource {
-        .init(root: home.appendingPathComponent(".qoderwork/projects"))
-    }
 
-    /// 悟空：内置 codex 内核的 rollout 落点（0.9.66+）
-    private static var wukongRoot: URL { home.appendingPathComponent(".real") }
 
     /// Codex：`~/.codex/sessions`
     private static var codexRoot: URL { home.appendingPathComponent(".codex/sessions") }
@@ -328,7 +320,7 @@ enum ProviderDetailRegistry {
 
         // Qoder CLI：Claude 同款 transcript，复用 Claude 扫描器。
         // **3 格**（无缓存写）—— 2026-07-13 另一台机器实测：168 个文件、cache_creation 合计恒 0，
-        // 与 Qoder Work / IDE 一致。（原按 4 格写，探针回来后改。数据见 `探针实测-悟空与QoderCLI.json`）
+        // 与 Qoder IDE 一致。（原按 4 格写，探针回来后改）
         // 金额「无价目」：它的 9 个「模型名」逐个查价目表 8 个查不到 ——
         // `ultimate` / `efficient` / `lite` / `performance` 是**套餐档位名**不是模型；
         // `dmodel` / `kmodel` / `gm51model` / `qmodel_latest` 是打码别名；`auto` 是路由名（已进黑名单）。
@@ -339,15 +331,6 @@ enum ProviderDetailRegistry {
             hasSources: false, hasSessions: true, ring: .ofTotal, costUnit: .unavailable,
             accentDark: "#35C2B1", accentLight: "#0C7A6E",
             scanner: .claudeTranscript(qoderCliSource)),
-
-        // Qoder Work：同上，但实测缓存写恒 0（协议不暴露）→ 只声明 3 块，UI 就只渲染 3 块。
-        // 这正是「清单驱动」的价值：少一列不需要写新函数。
-        "qoder-work": ProviderDetailSpec(
-            metricRows: [[.tile(.input), .tile(.output)],
-                         [.tile(.cacheRead)]],
-            hasSources: false, hasSessions: true, ring: .ofTotal, costUnit: .unavailable,
-            accentDark: "#29B5A8", accentLight: "#0C6B52",
-            scanner: .claudeTranscript(qoderWorkSource)),
 
         // Qoder IDE：唯一一个数据源是 SQLite 的 provider。协议无缓存写 → 3 块。
         "qoder-ide": ProviderDetailSpec(
@@ -383,18 +366,6 @@ enum ProviderDetailRegistry {
             accentDark: "#8A8AE8", accentLight: "#4A4AC0",
             scanner: .workBuddy),
 
-        // 悟空：**双源合并**（`WukongDetailScanner`）。指标区沿用 Codex 的父块形态（新源是 codex 同款）。
-        // ⚠️ 2026-07-13 探针推翻了原假设：旧源 `requests.jsonl` 有 3.52 亿 token（**占 99.96%**），
-        //    新源 rollout 只有 14.9 万（0.04%）。只做新源的话详情页会显示 14.9 万、主行显示 3.52 亿 —— 崩坏。
-        //    而旧源**完全拆得开**（有 model 真名 + sessionId）→ 必须合并，拍板 4b 的前提不成立。
-        // 金额「等效美元」：两源的模型名多为真名（gpt-5.5 / claude-opus-4-7 / deepseek-v4-flash 都查得到价）；
-        //    dingtalk-* 这类查不到的会走「无价目」按钮，逐行诚实展示。
-        "wukong": ProviderDetailSpec(
-            metricRows: [[.parent(.inputWithCache, child: .cacheRead),
-                          .parent(.output, child: .reasoning)]],
-            hasSources: false, hasSessions: true, ring: .ofInput, costUnit: .equivalentUSD,
-            accentDark: "#4C9AFF", accentLight: "#0D5FCC",
-            scanner: .wukong),
     ]
 
     static func spec(for providerId: String) -> ProviderDetailSpec? { specs[providerId] }

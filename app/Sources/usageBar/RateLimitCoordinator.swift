@@ -170,10 +170,12 @@ enum RateLimitCoordinator {
     }
 
     /// Qoder 快照落库（issue #4，按账号归属）：
-    /// - 单快照（仅一份凭证登录 / 双登录同账号）→ 复制到三实例（原有行为），历史记一次逻辑 id "qoder"；
-    /// - 双快照（Work 与 IDE 登录了**不同账号**）→ Work 快照写 work + cli 两行（CLI 凭证解不开、
-    ///   跟随 Work 账号），IDE 快照只写 ide 行；历史**分池**记（"qoder" / "qoder-ide"），
-    ///   否则两个账号的数值在同一个池里来回踩、每轮刷新都被记成一次假变化。
+    /// - 单快照（仅一份凭证登录 / 双登录同账号）→ 复制到各实例（原有行为），历史记一次逻辑 id "qoder"；
+    /// - 双快照（QoderWork 凭证与 Qoder IDE 登录了**不同账号**）→ 各写各行；历史**分池**记
+    ///   （"qoder" / "qoder-ide"），否则两个账号的数值在同一个池里来回踩、每轮刷新都被记成一次假变化。
+    ///
+    /// ⚠️ v0.3.33：QoderWork provider 已下架，`qoder-work` 这个 id 不再存在 —— 代表账号快照
+    /// 直接挂 `qoder-cli`（CLI 行的额度跟随 Work 凭证，与下架前口径一致）。
     private static func storeQoder(_ snaps: [RateLimitSnapshot]) {
         if snaps.count == 1, let snap = snaps.first {
             recordHistory(snap, logical: "qoder")
@@ -188,7 +190,6 @@ enum RateLimitCoordinator {
                 RateLimitStore.shared.put(snap)
             } else {
                 recordHistory(snap, logical: "qoder")
-                RateLimitStore.shared.put(snap.with(providerId: "qoder-work"))
                 RateLimitStore.shared.put(snap.with(providerId: "qoder-cli"))
             }
         }

@@ -81,7 +81,7 @@ struct CursorUsageEvent {
     /// `1,891,508 → 5,659,446 → 6,183,595 → 14,504,573`，真值只有终值 1450 万，却被加成 2824 万。
     /// 全量对账：显示 94,164,889 vs 真值 54,742,624（虚高 39,422,265，+72%）。
     ///
-    /// 同类前科：悟空 `testRolloutCumulativeMustDiffNotSum`、Codex 峰值跟踪 —— **累计型数据被当成增量累加**。
+    /// 同类前科：Codex 峰值跟踪 —— **累计型数据被当成增量累加**。
     ///
     /// 去掉 token 后，同一条对话的多份快照落到同一个 key 上 → 由 `mergeIntoMirror` 取终值覆盖。
     var dedupeKey: String { "\(timestampISO)|\(model)" }

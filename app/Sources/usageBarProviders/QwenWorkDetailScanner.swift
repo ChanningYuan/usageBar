@@ -92,6 +92,29 @@ public actor QwenWorkDetailScanner {
         )
     }
 
+    /// 全量 **token 明细** → 写进持久账本（v0.3.33）。
+    ///
+    /// ⚠️ **不含积分**：千问办公的积分来自联网账单（`/user/billings`）+ 与本地会话按时间区间匹配，
+    /// 不是逐条日志自带的数（详见 `QwenWorkBillingStore`）。积分保持原链路实时算，
+    /// 账本只存 token —— 否则账单一变（同一会话的账单行金额会原地增长），账本里就是陈旧值。
+    public func allDetails() async -> [FileDetailRecord] {
+        let events = await QwenWorkEventStore.shared.events(under: sessionsRoot)
+        var metas = loadTranscriptMetas()
+        for (sessionId, databaseMeta) in loadDatabaseMetas() {
+            if var current = metas[sessionId] {
+                current.merge(databaseMeta)
+                metas[sessionId] = current
+            } else {
+                metas[sessionId] = databaseMeta
+            }
+        }
+        return events.filter { $0.tokens.total > 0 }.map { e in
+            FileDetailRecord(provider: "qwen-work", date: e.date, sessionId: e.sessionId,
+                             title: metas[e.sessionId]?.resolvedTitle ?? "",
+                             model: e.model, lastActivity: e.timestamp, tokens: e.tokens)
+        }
+    }
+
     public func invalidate() async {
         await QwenWorkEventStore.shared.invalidate()
         transcriptCache.removeAll()

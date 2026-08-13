@@ -64,7 +64,12 @@ public actor ClaudeJsonlScanner {
             }
 
             let records = (try? parseFile(url: url)) ?? []
-            let entry = FileCacheEntry(filePath: path, mtime: meta.mtime, size: meta.size, records: records)
+            // v0.3.33：同一次扫盘顺带落**明细**（会话 / 模型 / 5 列拆分）。
+            // 详情页从此读账本，源日志被清理或读不到也能展开（issue #8 根治）。
+            let details = ClaudeDetailScanner.detailRecords(
+                url: url, providerId: "claude-code", attachSource: true)
+            let entry = FileCacheEntry(filePath: path, mtime: meta.mtime, size: meta.size,
+                                       records: records, details: details)
             await FileMtimeCache.shared.store(entry)
             allRecords.append(contentsOf: records)
         }

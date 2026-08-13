@@ -32,17 +32,13 @@ enum ProviderMetaLookup {
         "claude-code": .init(id: "claude-code", displayName: "Claude Code", brandColor: "#D97757"),
         "cowork": .init(id: "cowork", displayName: "Claude Cowork", brandColor: "#B05730"),
         // Qoder family(Qoder 自家 AI:CLI/Work/IDE,IDE 2026-05-28 接入 SharedClientCache SQLite 直读)
-        "qoder-cli": .init(id: "qoder-cli", displayName: "Qoder (CLI)", brandColor: "#10A37F"),
-        "qoder-work": .init(id: "qoder-work", displayName: "Qoder (Work)", brandColor: "#0E7A5F"),
-        "qoder-ide": .init(id: "qoder-ide", displayName: "Qoder (IDE)", brandColor: "#0E5F7A"),
+        "qoder-cli": .init(id: "qoder-cli", displayName: "Qoder CLI", brandColor: "#10A37F"),
+        "qoder-ide": .init(id: "qoder-ide", displayName: "Qoder IDE", brandColor: "#0E5F7A"),
         // 独立
         "qwen-work": .init(id: "qwen-work", displayName: "千问办公", brandColor: "#39D98A"),
-        "codex": .init(id: "codex", displayName: "Codex (OpenAI)", brandColor: "#10A37F"),
-        "wukong": .init(id: "wukong", displayName: "悟空", brandColor: "#1677FF"),
+        "codex": .init(id: "codex", displayName: "Codex", brandColor: "#10A37F"),
         "workbuddy": .init(id: "workbuddy", displayName: "WorkBuddy", brandColor: "#5B5BD6"),
         "cursor": .init(id: "cursor", displayName: "Cursor", brandColor: "#000000"),
-        "openclaw": .init(id: "openclaw", displayName: "OpenClaw", brandColor: "#E8632C"),
-        "hermes": .init(id: "hermes", displayName: "Hermes Agent", brandColor: "#7C3AED"),
         "opencode": .init(id: "opencode", displayName: "OpenCode", brandColor: "#F59E0B"),
     ]
 
@@ -148,7 +144,7 @@ struct ProviderIcon: View {
             //   - qoder-cli / qoder-ide:Qoder 品牌 logo(黑底+绿 Q+白细节,self-contained)
             // 三者通过 displayName 后缀 + token bar 颜色(brandColor)进一步区分。
             // fallback 到 brandColor 圆角底 + "Qoder" 白字
-            let iconName = providerId == "qoder-work" ? "qoderwork" : "qoder"
+            let iconName = "qoder"
             if let img = BundleIconLoader.load(name: iconName, ext: "svg") {
                 Image(nsImage: img)
                     .resizable()
@@ -197,30 +193,6 @@ struct ProviderIcon: View {
                 } else {
                     Color.clear.frame(width: size, height: size)
                 }
-            case "openclaw":
-                // OpenClaw:官方像素龙虾 logo(红橙色,抽自 openclaw 仓库 docs/assets)
-                if let img = BundleIconLoader.load(name: "openclaw", ext: "svg") {
-                    Image(nsImage: img)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: size, height: size)
-                } else {
-                    roundedBox(bg: "#E8632C") {
-                        Text("OC").font(.system(size: 8, weight: .semibold)).foregroundStyle(.white)
-                    }
-                }
-            case "hermes":
-                // Hermes Agent:NousResearch 组织 logo(黑底白圈 NOUS,无独立方形 logo 用此)
-                if let img = BundleIconLoader.load(name: "hermes", ext: "png") {
-                    Image(nsImage: img)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: size, height: size)
-                } else {
-                    roundedBox(bg: "#7C3AED") {
-                        Text("H").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                    }
-                }
             case "opencode":
                 // OpenCode:官方像素风方块 mark(brand 页双变体:浅色黑框/深色白框,黑框在深色主题下会隐形)
                 if let img = BundleIconLoader.load(
@@ -233,16 +205,6 @@ struct ProviderIcon: View {
                     roundedBox(bg: "#F59E0B") {
                         Text("OC").font(.system(size: 8, weight: .semibold)).foregroundStyle(.white)
                     }
-                }
-            case "wukong":
-                // 悟空:无底色,直接显示 PNG(PNG 自己有设计)
-                if let img = BundleIconLoader.load(name: "wukong", ext: "png") {
-                    Image(nsImage: img)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: size, height: size)
-                } else {
-                    Color.clear.frame(width: size, height: size)
                 }
             default:
                 RoundedRectangle(cornerRadius: cornerRadius)
@@ -300,8 +262,6 @@ struct UsageRootView: View {
         switch pid {
         case "qoder-cli":
             (present, gateEnabled) = (qoderStatus.isCliPresent, qoderStatus.isQoderEnabled)
-        case "qoder-work":
-            (present, gateEnabled) = (qoderStatus.isWorkPresent, qoderStatus.isQoderEnabled)
         case "qwen-work":
             (present, gateEnabled) = (qoderStatus.isQwenWorkPresent, qoderStatus.isQwenWorkEnabled)
         default:
@@ -332,7 +292,6 @@ struct UsageRootView: View {
     private func restartHintText(for pid: String) -> String {
         switch pid {
         case "qoder-cli":  return "已开启统计，新开终端后开始记录"
-        case "qoder-work": return "已开启统计，重启 QoderWork 后开始记录"
         case "qwen-work":  return "已开启统计，重启千问办公后开始记录"
         default:           return "已开启统计，重启后开始记录"
         }
@@ -344,7 +303,7 @@ struct UsageRootView: View {
 
     /// 当前要显示的提示行条数,用于算高度。
     private var qoderHintCount: Int {
-        ["qoder-cli", "qoder-work", "qwen-work"]
+        ["qoder-cli", "qwen-work"]
             .filter { showsQoderHint(for: $0) || showsRestartHint(for: $0) }
             .count
     }

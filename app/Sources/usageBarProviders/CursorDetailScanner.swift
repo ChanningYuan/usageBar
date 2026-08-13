@@ -44,6 +44,20 @@ public actor CursorDetailScanner {
                      weekStartMonday: weekStartMonday, now: now)
     }
 
+    /// 全量明细 → 写进持久账本（v0.3.33）。
+    /// ⚠️ Cursor **无会话维度**（本地 mirror 没有 conversationId）→ `sessionId` 留空，
+    /// 详情页「按会话」区本就不渲染（`spec.hasSessions == false`）。
+    public func allDetails() async -> [FileDetailRecord] {
+        load().map { s in
+            // Snapshot 只保留日界串（同 (时间戳,模型) 已收敛成终值），
+            // lastActivity 取该日 00:00 —— Cursor 无会话区，这个字段不参与任何展示。
+            FileDetailRecord(provider: "cursor", date: s.date, sessionId: "", title: "",
+                             model: s.model,
+                             lastActivity: .distantPast,
+                             tokens: s.tokens)
+        }
+    }
+
     /// 纯聚合（静态、无 IO，单测直接打）
     static func compose(snapshots: [Snapshot], window: TimeWindow,
                         weekStartMonday: Bool, now: Date) -> ProviderDetail {

@@ -41,6 +41,19 @@ public actor FileMtimeCache {
         Array(entries.values)
     }
 
+    /// 取某 provider 的全部**明细**条目（详情页聚合用，v0.3.33 起）。
+    ///
+    /// 详情页从这里取数，不再实时重扫源日志——源文件被清理 / 读不到也不影响展示，
+    /// 且与主列表同源，天然不会出现 issue #8 的「列表有量、详情空」。
+    public func details(forProvider providerId: String) -> [FileDetailRecord] {
+        entries.values.flatMap { $0.details }.filter { $0.provider == providerId }
+    }
+
+    /// 该 provider 是否有任何明细（用于区分「真没用过」和「历史数据无明细」）。
+    public func hasDetails(forProvider providerId: String) -> Bool {
+        entries.values.contains { $0.details.contains { $0.provider == providerId } }
+    }
+
     /// 清理已经从磁盘消失的文件缓存（避免无限增长）
     ///
     /// ⚠️ 注意:当前聚合走各 provider 的 findFiles(只看现存文件),缓存仅作「按 path 的解析提速」,

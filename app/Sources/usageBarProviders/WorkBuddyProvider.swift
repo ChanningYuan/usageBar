@@ -50,6 +50,12 @@ public struct WorkBuddyProvider: UsageProvider {
             allRecords.append(contentsOf: records)
         }
 
+
+
+        // v0.3.33：明细落进持久账本（详情页从此读账本，源被清理/锁住也能展开）。
+        // ⚠️ 必须在**所有** return 之前写：命中 mtime 缓存的快路径也要写，
+        // 否则第二轮起明细就不再更新（首扫时数据源没就绪的 provider 会永远空着）。
+        await Self.storeDetails(WorkBuddyDetailScanner.shared)
         return allRecords
     }
 
@@ -103,4 +109,14 @@ public struct WorkBuddyProvider: UsageProvider {
         guard ms > 0 else { return nil }
         return Date(timeIntervalSince1970: ms / 1000.0)
     }
+
+    /// 把 scanner 的全量明细写进账本（合成 key，每轮覆盖）。
+    private static func storeDetails(_ scanner: WorkBuddyDetailScanner) async {
+        let details = await scanner.allDetails()
+        guard !details.isEmpty else { return }
+        await FileMtimeCache.shared.store(FileCacheEntry(
+            filePath: "usagebar://detail-ledger/workbuddy", mtime: Date(), size: details.count,
+            records: [], details: details))
+    }
+
 }

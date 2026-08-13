@@ -115,7 +115,11 @@ final class QwenWorkProviderTests: XCTestCase {
 
         XCTAssertEqual(mainRecords.reduce(0) { $0 + $1.token }, 130)
         XCTAssertEqual(mainRecords.reduce(0) { $0 + $1.cachedToken }, 40)
-        XCTAssertEqual(ledgerEntryCount, 2, "两次真实请求应对应两条持久账本记录")
+        // 两次真实请求 = 两条**按请求**的账本记录（另有 1 条 v0.3.33 的明细账本合成条目，
+        // 它 records 为空、不参与主聚合，故这里只数带 records 的）。
+        let requestEntryCount = await ledger.allEntries().filter { !$0.records.isEmpty }.count
+        XCTAssertEqual(requestEntryCount, 2, "两次真实请求应对应两条持久账本记录")
+        XCTAssertEqual(ledgerEntryCount, 3, "外加一条明细账本条目（详情页数据源）")
         XCTAssertEqual(ledgerAll?.token, 130, "UsageViewModel 主聚合路径必须拿到千问办公用量")
         XCTAssertEqual(ledgerAll?.cachedToken, 40)
         XCTAssertEqual(detail.tokens.total, 130, "详情 Hero 必须与主列表合计完全一致")
@@ -130,8 +134,8 @@ final class QwenWorkProviderTests: XCTestCase {
         // 重复刷新只覆盖同一 request key，账本不得增长或翻倍。
         _ = try await provider.fetchDailyRecords()
         let refreshedDaily = await ledger.allEntries().flatMap(\.records)
-        let refreshedEntryCount = await ledger.count()
-        XCTAssertEqual(refreshedEntryCount, 2)
+        let refreshedRequestCount = await ledger.allEntries().filter { !$0.records.isEmpty }.count
+        XCTAssertEqual(refreshedRequestCount, 2, "重复刷新覆盖同一 request key，不新增")
         XCTAssertEqual(refreshedDaily.reduce(0) { $0 + $1.token }, 130)
     }
 

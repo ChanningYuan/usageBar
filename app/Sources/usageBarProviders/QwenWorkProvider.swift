@@ -187,6 +187,14 @@ public struct QwenWorkProvider: UsageProvider {
         for event in events where event.tokens.total > 0 {
             await ledger.store(Self.ledgerEntry(from: event, sessionsRoot: sessionsRoot))
         }
+        // v0.3.33：token 明细落账本（积分不入账本——它来自联网账单且会原地增长，
+        // 见 QwenWorkDetailScanner.allDetails 的说明）。
+        let details = await QwenWorkDetailScanner.shared.allDetails()
+        if !details.isEmpty {
+            await ledger.store(FileCacheEntry(
+                filePath: "usagebar://detail-ledger/qwen-work", mtime: Date(), size: details.count,
+                records: [], details: details))
+        }
         return Self.dailyRecords(from: events.filter { $0.tokens.total > 0 })
     }
 

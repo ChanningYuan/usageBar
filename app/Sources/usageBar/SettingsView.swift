@@ -20,7 +20,7 @@ final class SettingsNavigation: ObservableObject {
 /// Settings 面板(右键菜单 → 偏好设置...)
 ///
 /// 形态:family 用虚线圆角框包起来,标题压在虚线边上(类似 HTML fieldset);
-/// 独立 provider(Codex/悟空)不框,直接平铺。无父级 Toggle — 用户要"关 family 整组"
+/// 独立 provider(Codex 等)不框,直接平铺。无父级 Toggle — 用户要"关 family 整组"
 /// 自己把子项各自关掉即可(UI 视觉用虚线框提示同组关联)。
 struct SettingsView: View {
     @ObservedObject var settings: ProviderVisibilitySettings
@@ -190,11 +190,6 @@ struct SettingsView: View {
     private var visibleProviderCount: Int {
         ProviderRegistry.all.filter { settings.isProviderToggleOn($0.id) }.count
     }
-    private var lastGatedProviderId: String? {
-        ProviderRegistry.all.last {
-            $0.id == "qoder-cli" || $0.id == "qoder-work" || $0.id == "qwen-work"
-        }?.id
-    }
 
     /// 折叠段标题行：chevron（收起▸ / 展开▾）+ 标题 + 右侧计数；整行可点击折叠。
     private func sectionHeader(_ title: String, count: String, expanded: Bool, toggle: @escaping () -> Void) -> some View {
@@ -303,9 +298,11 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(ProviderRegistry.all, id: \.id) { p in
                         providerRow(p)
-                        // 共享 gate banner 挂在三个受控产品的最后一行之后。
-                        if p.id == lastGatedProviderId {
-                            QoderUsageBanner(status: qoderStatus)
+                        // gate 横幅**按产品各挂各的**（v0.3.33）：Qoder CLI 与千问办公是两个独立的
+                        // 环境变量、两个独立的开关状态，共用一条横幅时用户无法判断"到底谁没开"。
+                        // 一键开启仍是同时写两行（共用标记块），只是展示分开。
+                        if p.id == "qoder-cli" || p.id == "qwen-work" {
+                            QoderUsageBanner(status: qoderStatus, product: p.id)
                         }
                         if p.id == "cursor" {
                             Text("Cursor 真实用量只在服务端，需联网获取：勾选后每次刷新会读取本机 Cursor 登录凭证并请求 cursor.com。不想联网就取消勾选。")
@@ -399,8 +396,8 @@ struct SettingsView: View {
               desc: "通过本机 Codex CLI 查询官方额度接口（凭据由 Codex 自己管理，不读钥匙串、不弹授权框）。离线时显示上次数据。"),
         .init(id: "claude-code", icon: "claude-code", name: "Claude Code",
               desc: "开启后随每次刷新向 api.anthropic.com 查询。首次会弹一次系统钥匙串授权框（读取 Claude Code 自己保存的登录凭证），选「始终允许」后不再弹。"),
-        .init(id: "qoder", icon: "qoder-work", name: "Qoder",
-              desc: "读取本机 Qoder 登录凭证并请求 qoder.com（QoderWork / Qoder IDE 各解各的，首次各弹一次钥匙串授权框）。登录同一账号时 CLI / Work / IDE 共用一份额度；两端登录了不同账号时各行显示各自账号的额度（CLI 跟随 QoderWork）。"),
+        .init(id: "qoder", icon: "qoder-cli", name: "Qoder",
+              desc: "读取本机 Qoder 登录凭证并请求 qoder.com（首次弹一次钥匙串授权框）。CLI 与 IDE 登录同一账号时共用一份额度；登录了不同账号时各行显示各自账号的额度。"),
         .init(id: "qwen-work", icon: "qwen-work", name: "千问办公额度与积分",
               desc: "读取千问办公登录凭证并请求 qwenwork.cn：查当前剩余可用积分（显示在主列表药丸），并缓存历史消耗流水（详情页按今日、本周、本月等周期查看）。"),
         .init(id: "cursor", icon: "cursor", name: "Cursor",
@@ -480,7 +477,7 @@ struct SettingsView: View {
     private func quotaChip(id: String) -> (text: String, dot: Color)? {
         guard ["claude-code", "qoder", "qwen-work"].contains(id),
               quotaSettings.isEnabled(id) else { return nil }
-        let pid = id == "qoder" ? "qoder-work" : id
+        let pid = id == "qoder" ? "qoder-cli" : id
         let snap = quotaStore.snapshot(for: pid)
         let dot: Color
         if let snap {
@@ -672,16 +669,42 @@ private extension View {
 /// 详见 docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md。
 private struct QoderUsageBanner: View {
     @ObservedObject var status: QoderUsageStatus
+    /// 这条横幅属于哪个产品："qoder-cli" 或 "qwen-work"。
+    ///
+    /// v0.3.33 拆开：Qoder CLI 看 `QODER_EXPOSE_TOKEN_USAGE`、千问办公看 `QODERCN_EXPOSE_TOKEN_USAGE`，
+    /// 是**两个独立变量、两个独立状态**。此前共用一条横幅挂在最后一个受控产品之后，
+    /// 用户看到「未开启」也不知道是哪个没开，而且横幅离对应的数据源行很远。
+    let product: String
+
+    /// 该产品是否装过（没用过就不打扰）
+    private var isPresent: Bool {
+        product == "qwen-work" ? status.isQwenWorkPresent : status.isCliPresent
+    }
+
+    /// 该产品自己的 gate 是否已开
+    private var isOn: Bool {
+        product == "qwen-work" ? status.isQwenWorkEnabled : status.isQoderEnabled
+    }
+
+    private var envName: String {
+        product == "qwen-work" ? QoderUsageEnvGate.qwenWorkEnvName : QoderUsageEnvGate.qoderEnvName
+    }
+
+    private var productName: String {
+        product == "qwen-work" ? "千问办公" : "Qoder CLI"
+    }
+
+    /// 开启后要做什么才生效：CLI 是新开终端，GUI app 要重启自己。
+    private var takeEffectHint: String {
+        product == "qwen-work" ? "重启千问办公后开始记录" : "新开终端后开始记录"
+    }
 
     var body: some View {
-        if status.isAnyGatedPresent {
+        if isPresent {
             Group {
-                if status.isEnabled {
-                    enabledBanner
-                } else {
-                    notEnabledBanner
-                }
+                if isOn { enabledBanner } else { notEnabledBanner }
             }
+            .padding(.leading, 32)   // 与 provider 名对齐（icon 22 + spacing 10）
             .padding(.trailing, 2)
         }
     }
@@ -693,7 +716,7 @@ private struct QoderUsageBanner: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(.orange)
-                Text("Qoder CLI / QoderWork 需开启 QODER_EXPOSE_TOKEN_USAGE；千问办公需开启 QODERCN_EXPOSE_TOKEN_USAGE。两者都只统计开启后的新请求。")
+                Text("需开启 \(envName) 才能统计到 token，只统计开启后的新请求。")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -703,7 +726,10 @@ private struct QoderUsageBanner: View {
                     Text(err).font(.system(size: 9)).foregroundStyle(.red)
                 }
                 Spacer()
-                Button("一键开启") { status.enable() }
+                // 一键开启仍是**一次写两行**（两个产品共用同一个 profile 标记块，
+                // 分开写会互相覆盖）。这里只是入口分散到各自行下，行为不变。
+                // 只开自己这一个产品的 gate（另一个产品的开关状态不受影响）
+                Button("开启") { status.enable(product: product) }
                     .controlSize(.small)
             }
         }
@@ -713,20 +739,18 @@ private struct QoderUsageBanner: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    // 已开启：绿底 + 生效说明 + 撤销（开启后唯一样式）
+    // 已开启：绿底 + 生效说明 + 撤销
     private var enabledBanner: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
                 Image(systemName: "checkmark.circle.fill").font(.system(size: 10)).foregroundStyle(.green)
-                Text("已开启 token 统计（Qoder CLI / Work / 千问办公）").font(.system(size: 10, weight: .medium))
+                Text("已开启 token 统计").font(.system(size: 10, weight: .medium))
                 Spacer()
-                Button("撤销") { status.disable() }.controlSize(.mini).buttonStyle(.link)
+                // 只撤销自己这一个；另一个产品若已开，保持不变
+                Button("撤销") { status.disable(product: product) }.controlSize(.mini).buttonStyle(.link)
             }
-            Text("首次开启后 CLI 新开终端；QoderWork / 千问办公需重启 app")
+            Text("\(takeEffectHint)；已写入 \(status.profileDisplayName)：export \(envName)=1")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("已写入 \(status.profileDisplayName)：\n\(status.envExports)")
-                .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }

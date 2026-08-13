@@ -92,6 +92,41 @@ public actor WorkBuddyDetailScanner {
                             weekStartMonday: weekStartMonday, now: now)
     }
 
+    /// 全量明细 → 写进持久账本（v0.3.33）。
+    /// 金额走 `nativeCost`（信用点由数据自带，模型名是 auto 打码、查不到价目表）。
+    public func allDetails() async -> [FileDetailRecord] {
+        guard FileManager.default.fileExists(atPath: projectsDir.path) else { return [] }
+        var rows: [Row] = []
+        var metas: [String: SessionMeta] = [:]
+        for url in JSONLReader.findFiles(under: projectsDir, where: { $0.pathExtension == "jsonl" }) {
+            let path = url.path
+            guard let meta = FileMetadata.read(at: path) else { continue }
+            let fp: FileParse
+            if let c = cache[path], c.mtime == meta.mtime, c.size == meta.size {
+                fp = c.parse
+            } else {
+                fp = Self.parse(url: url)
+                cache[path] = CacheEntry(mtime: meta.mtime, size: meta.size, parse: fp)
+            }
+            rows.append(contentsOf: fp.rows)
+            for (sid, m) in fp.metas {
+                var cur = metas[sid] ?? SessionMeta()
+                cur.aiTitle = m.aiTitle ?? cur.aiTitle
+                cur.firstUserText = cur.firstUserText ?? m.firstUserText
+                cur.cwd = cur.cwd ?? m.cwd
+                metas[sid] = cur
+            }
+        }
+        return rows.map { r in
+            let m = metas[r.sessionId]
+            let title = m?.aiTitle ?? m?.firstUserText
+                ?? m?.cwd.map { ($0 as NSString).lastPathComponent } ?? ""
+            return FileDetailRecord(provider: "workbuddy", date: r.date, sessionId: r.sessionId,
+                                    title: title, model: r.model, lastActivity: r.time,
+                                    tokens: r.tokens, nativeCost: r.credit)
+        }
+    }
+
     /// 纯聚合（静态、无 IO，单测直接打）
     static func compose(rows: [Row], metas: [String: SessionMeta], window: TimeWindow,
                         weekStartMonday: Bool, now: Date) -> ProviderDetail {

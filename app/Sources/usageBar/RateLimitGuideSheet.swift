@@ -185,7 +185,7 @@ struct RateLimitGuideSheet: View {
 
     static let qoderOption = Option(
         source: "", title: "联网查询账号额度",
-        desc: "读取本机 Qoder 登录凭证（QoderWork / Qoder IDE 各解各的），向 qoder.com 查账号额度。登录同一账号时 CLI / Work / IDE 共用一份；两端登录了不同账号时各行显示各自账号的额度（CLI 跟随 QoderWork）。",
+        desc: "读取本机 Qoder 登录凭证，向 qoder.com 查账号额度。CLI 与 IDE 登录同一账号时共用一份；登录了不同账号时各行显示各自账号的额度。",
         recommended: false, needsKeychain: true)
 
     static let qwenWorkOption = Option(

@@ -15,7 +15,7 @@ public actor ClaudeDetailScanner {
 
     // MARK: - 缓存单元（窗口无关，按文件缓存）
 
-    private struct Unit {
+    fileprivate struct Unit {
         let source: ClaudeSource
         let sessionId: String
         let model: String
@@ -23,7 +23,7 @@ public actor ClaudeDetailScanner {
         var tokens: TokenBreakdown
     }
 
-    private struct SessionMeta {
+    fileprivate struct SessionMeta {
         var customTitle: String? = nil
         var aiTitle: String?
         var firstUserText: String?
@@ -31,7 +31,7 @@ public actor ClaudeDetailScanner {
         var lastActivity: Date
     }
 
-    private struct FileParse {
+    fileprivate struct FileParse {
         let units: [Unit]
         let metas: [String: SessionMeta]
     }
@@ -100,6 +100,32 @@ public actor ClaudeDetailScanner {
     /// 数据可能已变（主刷新后）→ 清缓存，下次重扫。
     public func invalidate() { cache.removeAll() }
 
+    /// 解析单个 transcript，产出**写进持久账本的明细条目**（v0.3.33 起）。
+    ///
+    /// 由各 provider 在**主扫盘**时调用：同一次文件解析既算主行总量、又落明细，
+    /// 详情页此后从账本读，不再重扫源文件（根治 issue #8 的列表/详情分叉）。
+    ///
+    /// `attachSource`：Claude Code 才需要区分官方直连 / 中转代理（详情页「按来源」区）。
+    /// 其余复用本解析器的 provider（Cowork / Qoder CLI）传 false，`source` 存 nil。
+    nonisolated public static func detailRecords(url: URL, providerId: String,
+                                                 attachSource: Bool) -> [FileDetailRecord] {
+        let fp = parseTranscript(url: url)
+        return fp.units.map { u in
+            let m = fp.metas[u.sessionId]
+            let title = m?.customTitle
+                ?? m?.aiTitle
+                ?? m?.firstUserText
+                ?? m?.cwd.map { ($0 as NSString).lastPathComponent }
+                ?? ""
+            return FileDetailRecord(
+                provider: providerId, date: u.date, sessionId: u.sessionId,
+                title: title, model: u.model,
+                lastActivity: m?.lastActivity ?? .distantPast,
+                tokens: u.tokens,
+                source: attachSource ? u.source.rawValue : nil)
+        }
+    }
+
     // MARK: - 文件枚举（与 ClaudeJsonlScanner 同源）
 
     /// 列出该源下的所有 transcript。源由调用方给（见 `detail(providerId:root:...)` 的说明）。
@@ -116,7 +142,11 @@ public actor ClaudeDetailScanner {
 
     // MARK: - 单文件解析（窗口无关）
 
-    private func parse(url: URL) -> FileParse {
+    private func parse(url: URL) -> FileParse { Self.parseTranscript(url: url) }
+
+    /// 纯解析（无状态，可从 actor 外调用）。实例方法 `parse` 与账本入口 `detailRecords` 共用它，
+    /// 保证「主扫盘写账本」和「详情页兜底重扫」两条路径逐字同口径。
+    nonisolated fileprivate static func parseTranscript(url: URL) -> FileParse {
         var acc: [String: Unit] = [:]          // key = source|session|model|date
         var metas: [String: SessionMeta] = [:]
         var seenIds = Set<String>()

@@ -60,8 +60,7 @@ public actor CodexDetailScanner {
     /// 扫描并聚合 Codex（或同款 rollout 格式的 provider）在某窗口的明细。
     ///
     /// ⚠️ `root` / `requirePath` 由调用方传入（v0.3.22 起）。此前路径写死 `~/.codex/sessions`，
-    /// 悟空（内置 codex 内核，rollout 落在 `~/.real/**/kernel/codex/sessions/`，格式**完全同款**）
-    /// 没法复用。参数化后同一套差分算法两边共用。
+    /// 参数化后同一套差分算法可被同款 rollout 格式的 provider 共用。
     public func detail(providerId: String, root: URL, requirePath: String? = nil,
                        window: TimeWindow,
                        weekStartMonday: Bool = true, now: Date = Date()) async -> ProviderDetail {
@@ -166,6 +165,99 @@ public actor CodexDetailScanner {
 
     /// 数据可能已变（主刷新后）→ 清缓存，下次重扫。
     public func invalidate() { cache.removeAll() }
+
+    /// 全量扫描并产出**写进持久账本的明细条目**（v0.3.33，issue #8）。
+    ///
+    /// ⚠️ **不能像 Claude 系那样按单文件独立产明细**：Codex 的 `fork` 会把父会话整段 token
+    /// replay 进新文件，必须拿父会话的 final 当差分基线（见 `CodexProvider` 文件头的
+    /// 「fork / resume 跨文件去重」段）。基线是**跨文件**状态，逐文件各算各的会把 replay 段
+    /// 重复计成新增（同事机实测 2~2.5 倍虚高）。所以这里整体扫一遍、按文件名时间序处理，
+    /// 与主行口径逐字一致。
+    public func allDetails(providerId: String, root: URL,
+                           requirePath: String? = nil) async -> [FileDetailRecord] {
+        let files = allFiles(root: root, requirePath: requirePath)
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        let threadNames = loadThreadNames()
+
+        var sessionFinal: [String: Cumul] = [:]
+        var acc: [String: TokenBreakdown] = [:]        // key = session|model|date
+        var sessMeta: [String: Meta] = [:]
+        var lastAt: [String: Date] = [:]
+
+        for url in files {
+            let path = url.path
+            guard let m = FileMetadata.read(at: path) else { continue }
+
+            let fp: FileParse
+            if let c = cache[path], c.mtime == m.mtime, c.size == m.size {
+                fp = c.parse
+            } else {
+                guard let parsed = parse(url: url) else { continue }
+                cache[path] = CacheEntry(mtime: m.mtime, size: m.size, parse: parsed)
+                fp = parsed
+            }
+            let meta = fp.meta
+            let sid = meta.ownId.isEmpty ? path : meta.ownId
+
+            var prev = Cumul()
+            if !meta.isSubagent, let parent = meta.forkedFromId, let pf = sessionFinal[parent] {
+                prev = pf
+            }
+            var fileFinal = prev
+
+            for ev in fp.events {
+                let dIn = max(0, ev.c.input - prev.input)
+                let dCa = max(0, ev.c.cached - prev.cached)
+                let dOut = max(0, ev.c.output - prev.output)
+                let dRe = max(0, ev.c.reasoning - prev.reasoning)
+                prev.input = max(prev.input, ev.c.input)
+                prev.cached = max(prev.cached, ev.c.cached)
+                prev.output = max(prev.output, ev.c.output)
+                prev.reasoning = max(prev.reasoning, ev.c.reasoning)
+                fileFinal = prev
+
+                let net = max(0, dIn - dCa)
+                if net == 0 && dCa == 0 && dOut == 0 { continue }
+                let date = DailyAggregator.dateString(for: ev.ts)
+                let model = ev.model.isEmpty ? meta.firstModel : ev.model
+                let tb = TokenBreakdown(input: net, output: dOut, cacheRead: dCa,
+                                        reasoning: min(dRe, dOut))
+                acc["\(sid)\u{0}\(model)\u{0}\(date)", default: TokenBreakdown()].add(tb)
+                lastAt[sid] = max(lastAt[sid] ?? .distantPast, ev.ts)
+            }
+
+            if !meta.ownId.isEmpty {
+                var f = sessionFinal[meta.ownId] ?? Cumul()
+                f.input = max(f.input, fileFinal.input)
+                f.cached = max(f.cached, fileFinal.cached)
+                f.output = max(f.output, fileFinal.output)
+                f.reasoning = max(f.reasoning, fileFinal.reasoning)
+                sessionFinal[meta.ownId] = f
+            }
+            if let existing = sessMeta[sid] {
+                sessMeta[sid] = Meta(ownId: existing.ownId, forkedFromId: existing.forkedFromId,
+                                     isSubagent: existing.isSubagent,
+                                     title: existing.title ?? meta.title,
+                                     cwd: existing.cwd ?? meta.cwd,
+                                     firstModel: existing.firstModel.isEmpty ? meta.firstModel : existing.firstModel,
+                                     lastActivity: max(existing.lastActivity, meta.lastActivity))
+            } else {
+                sessMeta[sid] = meta
+            }
+        }
+
+        return acc.map { (key, tb) in
+            let parts = key.components(separatedBy: "\u{0}")
+            let sid = parts[0], model = parts[1], date = parts[2]
+            let mt = sessMeta[sid]
+            let title = threadNames[sid] ?? mt?.title
+                ?? mt?.cwd.map { ($0 as NSString).lastPathComponent } ?? ""
+            return FileDetailRecord(provider: providerId, date: date, sessionId: sid,
+                                    title: title, model: model,
+                                    lastActivity: lastAt[sid] ?? mt?.lastActivity ?? .distantPast,
+                                    tokens: tb)
+        }
+    }
 
     // MARK: - 文件枚举（与 CodexProvider 同源）
 

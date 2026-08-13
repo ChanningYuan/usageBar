@@ -7,7 +7,7 @@ import usageBarProviders
 /// 包一层 `QoderUsageEnvGate`（纯逻辑），给 `SettingsView` 的横幅和弹层提示行观察。
 /// 状态来源：profile 标记块 + launchctl（见 `QoderUsageEnvGate`）。
 ///
-/// Qoder CLI / QoderWork 使用 `QODER_EXPOSE_TOKEN_USAGE`；千问办公的 CN binary 使用
+/// Qoder CLI 使用 `QODER_EXPOSE_TOKEN_USAGE`；千问办公的 CN binary 使用
 /// `QODERCN_EXPOSE_TOKEN_USAGE`。一键开启/撤销同时管理两行，但每个产品按自己的 gate 判定。
 /// Qoder IDE 不受 gate，不在此跟踪。
 /// 详见 docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md。
@@ -17,8 +17,6 @@ final class QoderUsageStatus: ObservableObject {
 
     /// Qoder CLI 是否用过（`~/.qoder/projects` 有会话文件）。
     @Published private(set) var isCliPresent: Bool = false
-    /// QoderWork 是否用过（`~/.qoderwork/projects` 有会话文件）。
-    @Published private(set) var isWorkPresent: Bool = false
     /// 千问办公是否用过（`~/.qwenworkcn/projects` 有会话文件）。
     @Published private(set) var isQwenWorkPresent: Bool = false
     /// Qoder CLI / Work 的 gate。
@@ -44,37 +42,51 @@ final class QoderUsageStatus: ObservableObject {
         // 超时回退就拿不到 gate → 在这里顺带补写。spawn 进程，放后台跑，不阻塞主线程。
         Task.detached(priority: .utility) { QoderUsageEnvGate.selfHealLaunchctl() }
         isCliPresent = QoderUsageEnvGate.isQoderCliPresent()
-        isWorkPresent = QoderUsageEnvGate.isQoderWorkPresent()
         isQwenWorkPresent = QoderUsageEnvGate.isQwenWorkPresent()
         isQoderEnabled = QoderUsageEnvGate.isQoderEnabled()
         isQwenWorkEnabled = QoderUsageEnvGate.isQwenWorkEnabled()
         isEnabled = QoderUsageEnvGate.isEnabled()
-        latestActivity = ["qoder-cli", "qoder-work", "qwen-work"]
+        latestActivity = ["qoder-cli", "qwen-work"]
             .reduce(into: [:]) { result, pid in
                 result[pid] = QoderUsageEnvGate.latestSessionActivity(for: pid)
             }
     }
 
     /// 任一受 gate 的产品用过 → 才需要展示开关横幅。
-    var isAnyGatedPresent: Bool { isCliPresent || isWorkPresent || isQwenWorkPresent }
+    var isAnyGatedPresent: Bool { isCliPresent || isQwenWorkPresent }
 
-    /// 一键开启：写 profile 标记块 + launchctl setenv（三个产品一次都开）。
+    /// 一键开启：写 profile 标记块 + launchctl setenv（两个产品一次都开）。
     func enable() {
-        if QoderUsageEnvGate.enable() {
-            refresh()
-            lastError = nil
-        } else {
-            lastError = "写入 \(QoderUsageEnvGate.profileDisplayName) 失败"
-        }
+        apply(QoderUsageEnvGate.enable(), failure: "写入 \(QoderUsageEnvGate.profileDisplayName) 失败")
     }
 
-    /// 撤销：删 profile 标记块 + launchctl unsetenv。
+    /// 撤销：删 profile 标记块 + launchctl unsetenv（全部）。
     func disable() {
-        if QoderUsageEnvGate.disable() {
+        apply(QoderUsageEnvGate.disable(), failure: "撤销失败")
+    }
+
+    /// 只开启某个产品的 gate（v0.3.33：两个产品各开各的）。
+    /// `product` = "qoder-cli" / "qwen-work"。
+    func enable(product: String) {
+        apply(QoderUsageEnvGate.enable(Self.envName(for: product)),
+              failure: "写入 \(QoderUsageEnvGate.profileDisplayName) 失败")
+    }
+
+    /// 只撤销某个产品的 gate（另一个若已开则保持不变）。
+    func disable(product: String) {
+        apply(QoderUsageEnvGate.disable(Self.envName(for: product)), failure: "撤销失败")
+    }
+
+    private static func envName(for product: String) -> String {
+        product == "qwen-work" ? QoderUsageEnvGate.qwenWorkEnvName : QoderUsageEnvGate.qoderEnvName
+    }
+
+    private func apply(_ ok: Bool, failure: String) {
+        if ok {
             refresh()
             lastError = nil
         } else {
-            lastError = "撤销失败"
+            lastError = failure
         }
     }
 

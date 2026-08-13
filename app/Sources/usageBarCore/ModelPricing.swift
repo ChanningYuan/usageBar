@@ -37,7 +37,10 @@ public enum UnifiedPricing {
     /// - `auto` —— Cursor / WorkBuddy / Qoder 都用它表示「自动选模型」。真实成本取决于当时选中的是谁，
     ///   我们无从得知 → **无价目才是诚实的**。
     /// - `ultimate` / `efficient` / `lite` / `performance` —— Qoder CLI 的**套餐档位名**（2026-07-13 实测）
-    /// - `qmodel` / `qmodel_latest` / `qwork-auto` / `dmodel` / `kmodel` / `gm51model` —— Qoder 的打码别名
+    /// - `qmodel` / `qmodel_latest` / `qwork-auto` / `qwork-advanced` / `dmodel` / `dmodel_latest`
+    ///   / `kmodel` / `gm51model` / `cmodel` —— Qoder 系（含千问办公）的打码别名。
+    ///   ⚠️ 厂商会不定期新增：2026-08-14 千问办公 0.1.7 就冒出了 `qwork-advanced` / `dmodel_latest`。
+    ///   发现日志里出现没见过的打码名，补进这里，否则会去价目表里撞名（见下方警告）。
     ///
     /// ⚠️ **为什么必须黑名单、而不能靠"查不到就算了"**：`auto` 这种大众名字在 154 个 provider 的
     /// 价目表里**必然撞名**。实测它先命中 `llmgateway/auto`（单价全 0 → 静默显示 $0），
@@ -47,7 +50,8 @@ public enum UnifiedPricing {
     static let genericAliases: Set<String> = [
         "auto",
         "ultimate", "efficient", "lite", "performance",
-        "qmodel", "qmodel_latest", "qwork-auto", "dmodel", "kmodel", "gm51model",
+        "qmodel", "qmodel_latest", "qwork-auto", "qwork-advanced",
+        "dmodel", "dmodel_latest", "kmodel", "gm51model", "cmodel",
     ]
 
     public static func inputRate(for modelId: String, provider: String? = nil) -> Double {

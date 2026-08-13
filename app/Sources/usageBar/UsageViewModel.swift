@@ -127,15 +127,14 @@ final class UsageViewModel: ObservableObject {
         // 2) 收尾聚合(保证终态完整)。Cursor 此刻读的是已有 mirror(可能是旧值)。
         await commitAggregation(providerIds: providerIds, log: log)
         // 首次运行智能默认：只保留「用过」的 provider（有用量 ∪ 有本地数据），其余自动隐藏（仅一次）。
-        // Qoder CLI / Work / 千问办公特例：没开各自 EXPOSE_TOKEN_USAGE gate 时日志零 token，仍按会话文件算
+        // Qoder CLI / 千问办公特例：没开各自 EXPOSE_TOKEN_USAGE gate 时日志零 token，仍按会话文件算
         // 「用过」，否则会被自动隐藏 → 连「去开启」横幅都看不到（见 docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md）。
         // （IDE 不受 gate，用过必有 token>0，本就进 keep，无需特判。）
         var keep = Set(allStats.filter { $0.token > 0 }.map { $0.provider })
         if QoderUsageEnvGate.isQoderCliPresent() { keep.insert("qoder-cli") }
-        if QoderUsageEnvGate.isQoderWorkPresent() { keep.insert("qoder-work") }
         if QoderUsageEnvGate.isQwenWorkPresent() { keep.insert("qwen-work") }
         ProviderVisibilitySettings.shared.autoConfigureFirstRunIfNeeded(providerIdsToKeep: keep)
-        // 每次刷新顺带扫一遍 Qoder 的 env 开关状态（CLI/Work 共用），驱动弹层/设置页横幅。
+        // 每次刷新顺带扫一遍 Qoder 的 env 开关状态，驱动弹层/设置页横幅。
         QoderUsageStatus.shared.refresh()
         // 远程价目表每日条件拉取（内部 24h 节流 + ETag 304，非到期零开销；详见 RemotePricing）
         Task.detached(priority: .utility) { await RemotePricing.shared.refreshIfNeeded() }
@@ -246,40 +245,67 @@ final class UsageViewModel: ObservableObject {
         //    `~/.claude/projects`、完全无视 providerId，Cowork 一旦放开 drill-in 就会显示 Claude Code
         //    的数据（白名单恰好挡住、bug 尚未暴露）。
         guard let spec = ProviderDetailRegistry.spec(for: providerId) else { return }
-        let d: ProviderDetail
-        switch spec.scanner {
-        case .claudeTranscript(let src):
-            d = await ClaudeDetailScanner.shared.detail(
-                providerId: providerId, root: src.root,
-                includeHidden: src.includeHidden,
-                requirePath: src.requirePath, excludePath: src.excludePath,
-                window: win, weekStartMonday: weekStartMonday)
-        case .codexRollout(let root, let requirePath):
-            d = await CodexDetailScanner.shared.detail(
-                providerId: providerId, root: root, requirePath: requirePath,
-                window: win, weekStartMonday: weekStartMonday)
-        case .openCode:
-            d = await OpenCodeDetailScanner.shared.detail(
-                window: win, weekStartMonday: weekStartMonday)
-        case .cursor:
-            d = await CursorDetailScanner.shared.detail(
-                window: win, weekStartMonday: weekStartMonday)
-        case .workBuddy:
-            d = await WorkBuddyDetailScanner.shared.detail(
-                window: win, weekStartMonday: weekStartMonday)
-        case .qoderIde:
-            d = await QoderIdeDetailScanner.shared.detail(
-                window: win, weekStartMonday: weekStartMonday)
-        case .qwenWork:
-            // 积分账单是联网数据：只在用户明确开启后刷新；无网/未开启时 scanner 仍读持久缓存。
-            if RateLimitSettings.shared.isEnabled("qwen-work") {
-                _ = await QwenWorkBillingStore.shared.refresh()
+
+        // ── v0.3.33：**所有 provider 一律先读持久明细账本** ────────────────────
+        // 主扫盘已把「会话 / 模型 / 5 列拆分」落进账本，详情页不再实时重扫源日志。
+        // 源被工具清理、被权限挡住（issue #8 的 Operation not permitted）、SQLite 被锁，
+        // 都不影响展开——这正是本版要根治的「列表有量 / 详情空」。
+        //
+        // 只有账本里**这个 provider 一条明细都没有**时才回落到实时扫源：
+        //   - 刚升级、首扫还没跑完；
+        //   - 该 provider 本轮扫盘失败（源目录不存在等）。
+        // 回落是降级路径，不是常态；两条路的聚合口径逐字一致（见 LedgerDetailAggregator）。
+        //
+        // ⚠️ 千问办公例外一步：它的**积分**来自联网账单，不在账本里（账单行金额会原地增长，
+        // 存进账本就是陈旧值）。所以进详情页时照旧刷新账单，token 明细才走账本。
+        if providerId == "qwen-work", RateLimitSettings.shared.isEnabled("qwen-work") {
+            _ = await QwenWorkBillingStore.shared.refresh()
+        }
+
+        var d: ProviderDetail
+        if await FileMtimeCache.shared.hasDetails(forProvider: providerId) {
+            d = LedgerDetailAggregator.aggregate(
+                providerId: providerId,
+                details: await FileMtimeCache.shared.details(forProvider: providerId),
+                window: win, weekStartMonday: weekStartMonday,
+                costUnavailable: spec.costUnit == .unavailable)
+            // 千问办公的积分不在账本里 → 用实时链路的金额覆盖账本算出来的（后者恒 0）。
+            if providerId == "qwen-work" {
+                let live = await QwenWorkDetailScanner.shared.detail(
+                    window: win, weekStartMonday: weekStartMonday)
+                d = ProviderDetail(providerId: d.providerId, windowId: d.windowId,
+                                   tokens: d.tokens, cost: live.cost,
+                                   costAvailable: live.costAvailable,
+                                   sources: d.sources, models: d.models, sessions: live.sessions)
             }
-            d = await QwenWorkDetailScanner.shared.detail(
-                window: win, weekStartMonday: weekStartMonday)
-        case .wukong:
-            d = await WukongDetailScanner.shared.detail(
-                window: win, weekStartMonday: weekStartMonday)
+        } else {
+            switch spec.scanner {
+            case .claudeTranscript(let src):
+                d = await ClaudeDetailScanner.shared.detail(
+                    providerId: providerId, root: src.root,
+                    includeHidden: src.includeHidden,
+                    requirePath: src.requirePath, excludePath: src.excludePath,
+                    window: win, weekStartMonday: weekStartMonday)
+            case .codexRollout(let root, let requirePath):
+                d = await CodexDetailScanner.shared.detail(
+                    providerId: providerId, root: root, requirePath: requirePath,
+                    window: win, weekStartMonday: weekStartMonday)
+            case .openCode:
+                d = await OpenCodeDetailScanner.shared.detail(
+                    window: win, weekStartMonday: weekStartMonday)
+            case .cursor:
+                d = await CursorDetailScanner.shared.detail(
+                    window: win, weekStartMonday: weekStartMonday)
+            case .workBuddy:
+                d = await WorkBuddyDetailScanner.shared.detail(
+                    window: win, weekStartMonday: weekStartMonday)
+            case .qoderIde:
+                d = await QoderIdeDetailScanner.shared.detail(
+                    window: win, weekStartMonday: weekStartMonday)
+            case .qwenWork:
+                d = await QwenWorkDetailScanner.shared.detail(
+                    window: win, weekStartMonday: weekStartMonday)
+            }
         }
         // 仅当用户仍停在同一 provider 详情页才 commit（防止快速来回切）
         guard detailProviderId == providerId, win == window else { return }

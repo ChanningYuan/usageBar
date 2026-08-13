@@ -69,6 +69,34 @@ final class QoderUsageEnvGateTests: XCTestCase {
         )
     }
 
+    /// v0.3.33：两个产品的 gate 必须能**各开各的**。
+    ///
+    /// 此前标记块恒写两行、撤销恒删两行 —— 只用其中一个产品的用户被迫把另一个的变量
+    /// 也写进 ~/.zshrc，撤销时又会把另一个一起关掉。这条锁住「块内容按需生成」。
+    func testManagedBlockCanCarryEitherProductAlone() {
+        let cliOnly = QoderUsageEnvGate.managedBlock(for: [QoderUsageEnvGate.qoderEnvName])
+        XCTAssertEqual(QoderUsageEnvGate.enabledEnvNames(inProfileText: cliOnly),
+                       [QoderUsageEnvGate.qoderEnvName],
+                       "只开 Qoder CLI 时，块里不该出现千问办公的变量")
+
+        let qwenOnly = QoderUsageEnvGate.managedBlock(for: [QoderUsageEnvGate.qwenWorkEnvName])
+        XCTAssertEqual(QoderUsageEnvGate.enabledEnvNames(inProfileText: qwenOnly),
+                       [QoderUsageEnvGate.qwenWorkEnvName],
+                       "只开千问办公时，块里不该出现 Qoder CLI 的变量")
+
+        let both = QoderUsageEnvGate.managedBlock(for: Set(QoderUsageEnvGate.envNames))
+        XCTAssertEqual(QoderUsageEnvGate.enabledEnvNames(inProfileText: both),
+                       Set(QoderUsageEnvGate.envNames))
+
+        // 关掉一个之后，另一个仍应被判定为已开启
+        XCTAssertTrue(QoderUsageEnvGate.allRequiredProductsEnabled(
+            qoderPresent: true, qwenWorkPresent: false,
+            enabledEnvNames: QoderUsageEnvGate.enabledEnvNames(inProfileText: cliOnly)))
+        XCTAssertTrue(QoderUsageEnvGate.allRequiredProductsEnabled(
+            qoderPresent: false, qwenWorkPresent: true,
+            enabledEnvNames: QoderUsageEnvGate.enabledEnvNames(inProfileText: qwenOnly)))
+    }
+
     func testLegacyQoderOnlyBlockDoesNotClaimQwenIsEnabled() {
         let legacy = """
         # BEGIN usageBar-qodercli-usage
