@@ -32,6 +32,31 @@ enum QoderCliSegmentSource {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".qoder/logs/sessions")
     }
+
+    /// 从 segment 事件流里取该会话的**工作目录**（`session.config.loaded` 的 `project_root` / `target_dir`）。
+    ///
+    /// 仅用于「这个会话在 `~/.qoder/projects` 里没有 transcript、拿不到正式标题」时的兜底显示名，
+    /// **绝不参与任何 token 汇总**——token 口径仍然只认 `model.response.completed`（issue #8 的不变量）。
+    ///
+    /// ⚠️ 刻意**不解析** `input.prompt.received/submitted` 的 `text_preview`：它是从 prompt **开头**截断的，
+    /// SDK / 桥接场景下前 1999 字符往往是 host 前言和旧对话历史（issue #10 报告人本机 27/37 条
+    /// `truncated=true`），拿来当标题会显示误导内容，还可能把 system prompt、工具结果或敏感片段带到 UI 上。
+    /// 宁可显示项目名。
+    static func projectRoot(in url: URL) -> String? {
+        var found: String?
+        try? JSONLReader.forEachLine(at: url) { obj in
+            guard found == nil,
+                  (obj["type"] as? String) == "session.config.loaded",
+                  let data = obj["data"] as? [String: Any] else { return }
+            for key in ["project_root", "target_dir"] {
+                if let raw = data[key] as? String {
+                    let v = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !v.isEmpty { found = v; return }
+                }
+            }
+        }
+        return found
+    }
 }
 
 /// Qoder CLI segments 的按文件缓存 + 跨文件去重（与 `QwenWorkEventStore` 同构，各管各的根目录）。
@@ -45,33 +70,55 @@ actor QoderCliSegmentStore {
         let mtime: Date
         let size: Int
         let events: [QwenWorkUsageEvent]
+        /// 该文件所属会话的工作目录（`session.config.loaded`），同一趟解析顺带取，供兜底标题用
+        let projectRoot: String?
+    }
+
+    /// 一次扫描的产物：token 事件 + 会话展示元信息，两者职责分开、互不影响。
+    struct Scan: Sendable {
+        let events: [QwenWorkUsageEvent]
+        /// sessionId → 工作目录绝对路径（v0.3.34 起，issue #10 的兜底标题来源）
+        let projectRoots: [String: String]
     }
 
     private var cache: [String: CacheEntry] = [:]
 
-    /// 读取该根目录下全部 segment 事件，按 (会话, 请求) 跨文件去重。
+    /// 读取该根目录下全部 segment 事件（按 (会话, 请求) 跨文件去重）+ 各会话的工作目录。
     ///
     /// 会话重启后可能新增 segment 文件并重放尾部事件，只按单文件去重会虚高，
     /// 故与千问一致：合并后统一去重。
-    func events(under root: URL) -> [QwenWorkUsageEvent] {
+    ///
+    /// v0.3.34：顺带产出 `projectRoots`。**只在缓存未命中时多读一遍该文件**，
+    /// 稳态（文件没变）零额外 IO；且工作目录不进任何 token 计算，纯展示用。
+    func scan(under root: URL) -> Scan {
         var combined: [QwenWorkUsageEvent] = []
+        var roots: [String: String] = [:]
 
         for url in QwenWorkSegmentParser.files(under: root).sorted(by: { $0.path < $1.path }) {
             let path = url.path
             guard let meta = FileMetadata.read(at: path) else { continue }
+            // sessionId 直接来自路径 `<sessionId>/segments/*.jsonl`，与解析器同源
+            let sessionId = url.deletingLastPathComponent()
+                .deletingLastPathComponent().lastPathComponent
+
             if let cached = cache[path], cached.mtime == meta.mtime, cached.size == meta.size {
                 combined.append(contentsOf: cached.events)
+                if let r = cached.projectRoot { roots[sessionId] = roots[sessionId] ?? r }
                 continue
             }
             let parsed = (try? QwenWorkSegmentParser.parseFile(url: url)) ?? []
-            cache[path] = CacheEntry(mtime: meta.mtime, size: meta.size, events: parsed)
+            let projectRoot = QoderCliSegmentSource.projectRoot(in: url)
+            cache[path] = CacheEntry(mtime: meta.mtime, size: meta.size,
+                                     events: parsed, projectRoot: projectRoot)
             combined.append(contentsOf: parsed)
+            if let r = projectRoot { roots[sessionId] = roots[sessionId] ?? r }
         }
 
         var seen = Set<String>()
-        return combined
+        let events = combined
             .sorted { $0.timestamp < $1.timestamp }
             .filter { seen.insert("\($0.sessionId)\u{0}\($0.requestId)").inserted }
+        return Scan(events: events, projectRoots: roots)
     }
 
     func invalidate() { cache.removeAll() }

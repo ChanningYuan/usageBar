@@ -60,15 +60,20 @@ public struct QoderCliProvider: UsageProvider {
         var allRecords: [FileDailyRecord] = []
 
         // ── 源① 旧 transcript（保留读取，见文件头时间线）──────────────────
-        // 先扫它，把见过的 request_id 收集起来，供源② 跨源去重。
+        // 先扫它，收两样东西给源② 用：① 见过的 request_id（跨源去重）；② 会话标题（issue #10）。
         var seenRequestIds = Set<String>()
+        var sessionTitles: [String: String] = [:]
         if FileManager.default.fileExists(atPath: projectsDir.path) {
             let jsonlFiles = JSONLReader.findFiles(under: projectsDir) { $0.pathExtension == "jsonl" }
             for url in jsonlFiles {
                 let path = url.path
                 guard let meta = FileMetadata.read(at: path) else { continue }
 
-                seenRequestIds.formUnion(Self.requestIds(in: url))
+                // ⚠️ 这一趟必须在 mtime 缓存 lookup **之前**：命中缓存的文件下面会直接 continue，
+                // 放到后面会让「标题索引」在文件没变的那些轮里恒为空 —— 表现就是标题时有时无。
+                let index = ClaudeDetailScanner.index(url: url)
+                seenRequestIds.formUnion(index.requestIds)
+                sessionTitles.merge(index.titles) { _, new in new }
 
                 if let entry = await FileMtimeCache.shared.lookup(filePath: path, mtime: meta.mtime, size: meta.size) {
                     allRecords.append(contentsOf: entry.records)
@@ -89,15 +94,17 @@ public struct QoderCliProvider: UsageProvider {
         // ── 源② segments 诊断日志（v0.3.33 新增，issue #8）────────────────
         // `--no-session-persistence` 的桥接/非交互调用只在这里留 token 真值。
         // ⚠️ 跨源去重：同一请求若已被源① 计过（持久化会话两边都写），这里必须跳过，否则翻倍。
-        let events = await QoderCliSegmentStore.shared.events(under: QoderCliSegmentSource.defaultRoot)
+        let scan = await QoderCliSegmentStore.shared.scan(under: QoderCliSegmentSource.defaultRoot)
         var segTotals: [String: Int] = [:]
         var segCached: [String: Int] = [:]
-        for e in events where e.tokens.total > 0 && !seenRequestIds.contains(e.requestId) {
+        for e in scan.events where e.tokens.total > 0 && !seenRequestIds.contains(e.requestId) {
             segTotals[e.date, default: 0] += e.tokens.total
             segCached[e.date, default: 0] += e.tokens.cacheRead
             // 一请求一条账本 key：同一请求被多个 segment 重放时覆盖同一条、不翻倍；
             // 原始 segment 轮转/删除后历史仍在（与千问办公同款做法）。
-            await FileMtimeCache.shared.store(Self.segmentLedgerEntry(from: e))
+            let title = Self.sessionTitle(for: e.sessionId,
+                                          transcripts: sessionTitles, roots: scan.projectRoots)
+            await FileMtimeCache.shared.store(Self.segmentLedgerEntry(from: e, title: title))
         }
         allRecords.append(contentsOf: segTotals.keys.sorted().map { date in
             FileDailyRecord(provider: id, date: date,
@@ -107,26 +114,32 @@ public struct QoderCliProvider: UsageProvider {
         return allRecords
     }
 
-    /// 旧 transcript 里这一份文件用到的全部 `request_id`（跨源去重用）。
+    /// segment 会话的标题解析顺序（v0.3.34，GitHub issue #10）。
     ///
-    /// Qoder CLI 的 transcript 把 request_id 放在 `message.usage.request_id`
-    /// （见 `_notes/docs/0419-数据源与协议/data-sources.md` 的实测样例）。
-    /// 拿不到就返回空集——此时该请求只能靠 segment 侧自身去重，宁可少去重也不误删。
-    private static func requestIds(in url: URL) -> Set<String> {
-        var ids = Set<String>()
-        try? JSONLReader.forEachLine(at: url) { obj in
-            guard (obj["type"] as? String) == "assistant",
-                  let message = obj["message"] as? [String: Any],
-                  let usage = message["usage"] as? [String: Any],
-                  let rid = usage["request_id"] as? String, !rid.isEmpty
-            else { return }
-            ids.insert(rid)
+    /// ① **同 sessionId 的 Qoder transcript 标题** —— 就是 Qoder 自己 `Chat Sessions` 列表里显示的那个
+    ///    （自定义改名 > AI 标题 > 首条用户输入，见 `ClaudeDetailScanner.resolvedTitle`）。
+    ///    ⚠️ transcript 的 usage 可能全是 0（gate 没开），token 真值在 segments 里——
+    ///    所以标题必须走 `ClaudeDetailScanner.index(url:)` 这条不依赖 token 的出口取。
+    /// ② **`session.config.loaded` 的工作目录末级名** —— `--no-session-persistence` 的会话
+    ///    压根没有 transcript，只能靠它。比 8 位 UUID 强得多。
+    /// ③ 空串 —— 交给 `LedgerDetailAggregator` 统一兜底成「(无标题会话)」，别在这里造文案。
+    ///
+    /// 📌 **不做也不打算做**：从 `input.prompt.*.text_preview` 猜标题（会显示 host 前言/旧历史，
+    /// 且可能带出敏感片段，理由见 `QoderCliSegmentSource.projectRoot(in:)`）；
+    /// 继承 Claude Code 等宿主会话的标题（要先有 issue #9 的跨 provider 映射，那条已判定暂不修）。
+    static func sessionTitle(for sessionId: String,          // internal：被 QoderSessionTitleTests 锁住
+                             transcripts: [String: String],
+                             roots: [String: String]) -> String {
+        if let t = transcripts[sessionId], !t.isEmpty { return t }
+        if let root = roots[sessionId] {
+            let name = (root as NSString).lastPathComponent
+            if !name.isEmpty, name != "/", name != "." { return name }
         }
-        return ids
+        return ""
     }
 
     /// 把一条 segment 请求事件写成账本条目（总量 + 明细各一份）。
-    private static func segmentLedgerEntry(from e: QwenWorkUsageEvent) -> FileCacheEntry {
+    private static func segmentLedgerEntry(from e: QwenWorkUsageEvent, title: String) -> FileCacheEntry {
         let key = QoderCliSegmentSource.defaultRoot
             .appendingPathComponent(".usagebar-request-ledger", isDirectory: true)
             .appendingPathComponent(e.sessionId, isDirectory: true)
@@ -136,9 +149,13 @@ public struct QoderCliProvider: UsageProvider {
             filePath: key, mtime: e.timestamp, size: e.tokens.total,
             records: [FileDailyRecord(provider: "qoder-cli", date: e.date,
                                       token: e.tokens.total, cachedToken: e.tokens.cacheRead)],
-            // segment 无会话标题（诊断日志不含 user_message），标题留空由详情页兜底显示。
+            // v0.3.34：标题由 `sessionTitle(for:transcripts:roots:)` 解析后传进来。
+            // ⚠️ 旧注释「segment 无会话标题」只对**这条 token 事件本身**成立，
+            // 不代表这个 sessionId 在 Qoder 的持久化 transcript 里没有标题——v0.3.33 把两件事
+            // 混为一谈，导致所有 Qoder 会话一律显示「(无标题会话)」（issue #10）。
+            // 同一 sessionId 的每条请求写入同一标题；下轮刷新按同 key 覆盖，改名/AI 标题能跟上。
             details: [FileDetailRecord(provider: "qoder-cli", date: e.date,
-                                       sessionId: e.sessionId, title: "",
+                                       sessionId: e.sessionId, title: title,
                                        model: e.model, lastActivity: e.timestamp,
                                        tokens: e.tokens)])
     }

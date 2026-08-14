@@ -34,6 +34,19 @@ public actor ClaudeDetailScanner {
     fileprivate struct FileParse {
         let units: [Unit]
         let metas: [String: SessionMeta]
+        /// 该文件里出现过的全部上游 `message.usage.request_id`（Qoder CLI 跨源去重用）
+        let requestIds: Set<String>
+    }
+
+    /// 单个 transcript 的**会话索引**——只有标题和请求 ID，不含任何 token 数据。
+    ///
+    /// 给「只要标题 / 只要请求 ID」的调用方用（当前是 Qoder CLI）。存在的理由见 `index(url:)`。
+    public struct TranscriptIndex: Sendable {
+        /// sessionId → 已按优先级解析好的会话标题（解析不出标题的会话不入表）
+        public let titles: [String: String]
+        /// 该文件用到的全部上游 request_id。
+        /// Claude 官方 transcript **没有**这个字段（本机 6,555 条实测全无），只有 Qoder 的 fork 版会写。
+        public let requestIds: Set<String>
     }
 
     private struct CacheEntry {
@@ -112,18 +125,53 @@ public actor ClaudeDetailScanner {
         let fp = parseTranscript(url: url)
         return fp.units.map { u in
             let m = fp.metas[u.sessionId]
-            let title = m?.customTitle
-                ?? m?.aiTitle
-                ?? m?.firstUserText
-                ?? m?.cwd.map { ($0 as NSString).lastPathComponent }
-                ?? ""
             return FileDetailRecord(
                 provider: providerId, date: u.date, sessionId: u.sessionId,
-                title: title, model: u.model,
+                title: resolvedTitle(m), model: u.model,
                 lastActivity: m?.lastActivity ?? .distantPast,
                 tokens: u.tokens,
                 source: attachSource ? u.source.rawValue : nil)
         }
+    }
+
+    /// 解析单个 transcript 的**会话索引**（标题 + 请求 ID），一趟读完，不产出 token 数据。
+    ///
+    /// ## 为什么不能用 `detailRecords` 代替（GitHub issue #10 的根）
+    ///
+    /// `detailRecords` 是 `fp.units.map { … }`——**usage 全 0 的 transcript 产出 0 条记录，
+    /// 会话标题随之一起丢掉**。Qoder CLI 恰恰是这种情况：没开 `QODER_EXPOSE_TOKEN_USAGE` 时
+    /// transcript 里 usage 全是 0，而它的 token 真值在 segments 里。于是「Qoder 自己
+    /// Chat Sessions 明明有标题、usageBar 却一律显示 (无标题会话)」。标题必须走这条独立出口取。
+    ///
+    /// ## 为什么和 request_id 合并成一个出口
+    ///
+    /// Qoder CLI 每轮刷新都要完整读一遍 `~/.qoder/projects/**`（跨源去重要收集 request_id，
+    /// 这一步在 mtime 缓存 lookup **之前**、不受缓存保护）。标题若另开一趟就是**每轮多读一遍全部
+    /// transcript**。合成一个出口 = 读盘趟数不变。
+    ///
+    /// ⚠️ `requestIds` 的收集时机刻意放在所有 token 判据**之前**，与 v0.3.33 的
+    /// `QoderCliProvider.requestIds(in:)` 口径逐字一致——合并解析趟数不允许顺手改动 token 数字。
+    nonisolated public static func index(url: URL) -> TranscriptIndex {
+        let fp = parseTranscript(url: url)
+        return TranscriptIndex(
+            titles: fp.metas.compactMapValues { meta in
+                let t = resolvedTitle(meta)
+                return t.isEmpty ? nil : t
+            },
+            requestIds: fp.requestIds)
+    }
+
+    /// 会话标题的**唯一**判定处：自定义改名 > AI 标题 > 首条用户输入 > cwd 末级名。
+    ///
+    /// 与 Qoder Agent SDK `SDKSessionInfo.summary` 的 `customTitle || aiTitle || firstPrompt`
+    /// 逐级对应——usageBar 不另发明一套标题算法，否则会和 Qoder / Claude 自己的会话列表对不上。
+    /// `detailRecords` 和 `index` 共用它，两个出口不会漂移。
+    fileprivate static func resolvedTitle(_ m: SessionMeta?) -> String {
+        m?.customTitle
+            ?? m?.aiTitle
+            ?? m?.firstUserText
+            ?? m?.cwd.map { ($0 as NSString).lastPathComponent }
+            ?? ""
     }
 
     // MARK: - 文件枚举（与 ClaudeJsonlScanner 同源）
@@ -150,6 +198,7 @@ public actor ClaudeDetailScanner {
         var acc: [String: Unit] = [:]          // key = source|session|model|date
         var metas: [String: SessionMeta] = [:]
         var seenIds = Set<String>()
+        var requestIds = Set<String>()
 
         try? JSONLReader.forEachLine(at: url) { obj in
             let type = obj["type"] as? String
@@ -159,8 +208,15 @@ public actor ClaudeDetailScanner {
             switch type {
             case "assistant":
                 guard let message = obj["message"] as? [String: Any],
-                      let usage = message["usage"] as? [String: Any],
-                      let tsStr = obj["timestamp"] as? String,
+                      let usage = message["usage"] as? [String: Any] else { return }
+
+                // 上游请求 ID（Qoder CLI 跨源去重用）。
+                // ⚠️ 收在这里 = 在 message.id 去重、模型过滤、token 归零判据**全部之前**，
+                // 与 v0.3.33 那版 `QoderCliProvider.requestIds(in:)` 的口径逐字一致。
+                // 往后挪一行都会改变 Qoder CLI 的去重集合，进而悄悄改动它的 token 数字。
+                if let rid = usage["request_id"] as? String, !rid.isEmpty { requestIds.insert(rid) }
+
+                guard let tsStr = obj["timestamp"] as? String,
                       let ts = ISODateParser.parse(tsStr) else { return }
 
                 let messageId = (message["id"] as? String) ?? ""
@@ -241,7 +297,7 @@ public actor ClaudeDetailScanner {
             }
         }
 
-        return FileParse(units: Array(acc.values), metas: metas)
+        return FileParse(units: Array(acc.values), metas: metas, requestIds: requestIds)
     }
 
     /// 从 user `message.content` 提取可读首句（跳过命令 / caveat / 工具结果块）。
