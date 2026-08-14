@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import usageBarCore
 
 /// Qoder CLI(npm 主线)provider(mtime 增量版)
@@ -56,18 +57,43 @@ public struct QoderCliProvider: UsageProvider {
 
     public init() {}
 
+    private static let requestLedgerDir = "/.usagebar-request-ledger/"
+
     public func fetchDailyRecords() async throws -> [FileDailyRecord] {
         var allRecords: [FileDailyRecord] = []
+
+        // ── 计量口径（v0.3.35）：**只统计有持久化会话的调用** ────────────────────
+        //
+        // 判据 = 这个 sessionId 在 `~/.qoder/projects` 里有没有 transcript。
+        // 有 → 是你在 Qoder 里发起的一次正经会话（交互式，或你自己敲的 `qodercli -p`），算 Qoder 的量；
+        // 无 → 只可能来自 `--no-session-persistence`，而 Claude Code 那类宿主的 Agent SDK 桥接
+        //      **一定**带这个参数。那笔账已经记在宿主名下，这里再记一次就是跨 provider
+        //      重复计数（GitHub issue #9，报告人实测 6 个请求 289 万 token 被算了两遍）。
+        //
+        // ⚠️ **这等于把 issue #8 的症状② 撤回一半**：#8 当初要求补上 `--no-session-persistence`
+        // 的漏统，现在按用户口径改回不计。代价是：你自己带该参数跑的脚本 / CI 调用不再统计。
+        // 症状①（列表有量、详情空）由 v0.3.33 的账本改造修复，不受影响。
+        //
+        // 为什么不用 segment 里的 `query_source`（tui/sdk）当判据：那个字段**只存在于 segment
+        // 诊断日志，而 Qoder 会定期把它轮转删掉**（本机 7/14 的两份 8/14 就没了），
+        // 判据会随日志清理而漂移，必须再自建一套持久标记去对抗它。transcript 不轮转，判据天然稳定。
 
         // ── 源① 旧 transcript（保留读取，见文件头时间线）──────────────────
         // 先扫它，收两样东西给源② 用：① 见过的 request_id（跨源去重）；② 会话标题（issue #10）。
         var seenRequestIds = Set<String>()
         var sessionTitles: [String: String] = [:]
+        var persistedSessions = Set<String>()      // 有 transcript 的会话（v0.3.35 的计量判据）
+        var projectsDirReadable = false
         if FileManager.default.fileExists(atPath: projectsDir.path) {
             let jsonlFiles = JSONLReader.findFiles(under: projectsDir) { $0.pathExtension == "jsonl" }
+            projectsDirReadable = !jsonlFiles.isEmpty
             for url in jsonlFiles {
                 let path = url.path
                 guard let meta = FileMetadata.read(at: path) else { continue }
+
+                // transcript 文件名就是 sessionId
+                persistedSessions.insert((path as NSString).lastPathComponent
+                    .replacingOccurrences(of: ".jsonl", with: ""))
 
                 // ⚠️ 这一趟必须在 mtime 缓存 lookup **之前**：命中缓存的文件下面会直接 continue，
                 // 放到后面会让「标题索引」在文件没变的那些轮里恒为空 —— 表现就是标题时有时无。
@@ -97,7 +123,9 @@ public struct QoderCliProvider: UsageProvider {
         let scan = await QoderCliSegmentStore.shared.scan(under: QoderCliSegmentSource.defaultRoot)
         var segTotals: [String: Int] = [:]
         var segCached: [String: Int] = [:]
-        for e in scan.events where e.tokens.total > 0 && !seenRequestIds.contains(e.requestId) {
+        for e in scan.events where e.tokens.total > 0
+            && !seenRequestIds.contains(e.requestId)
+            && persistedSessions.contains(e.sessionId) {     // v0.3.35：只记有持久化会话的
             segTotals[e.date, default: 0] += e.tokens.total
             segCached[e.date, default: 0] += e.tokens.cacheRead
             // 一请求一条账本 key：同一请求被多个 segment 重放时覆盖同一条、不翻倍；
@@ -111,7 +139,41 @@ public struct QoderCliProvider: UsageProvider {
                             token: segTotals[date] ?? 0, cachedToken: segCached[date] ?? 0)
         })
 
+        await Self.purgeNonPersistedLedger(persistedSessions: persistedSessions,
+                                           projectsDirReadable: projectsDirReadable,
+                                           projectsDirExists: FileManager.default
+                                               .fileExists(atPath: projectsDir.path))
         return allRecords
+    }
+
+    /// 清掉 v0.3.34 及以前按旧口径写进账本的「无持久化会话」用量。
+    ///
+    /// 必须清：账本是持久账本，这些条目**不再有人写、也就永远不会被覆盖**，
+    /// 留着就是一笔按当前口径不该存在、却一直挂在主列表上的数。
+    ///
+    /// ⚠️ **权限保护**：`~/.qoder/projects` 存在却一个 transcript 都读不到时（issue #8 报告人
+    /// 本机就遇到过 `Operation not permitted`），`persistedSessions` 会是空集 —— 此时若照常清理，
+    /// 会把**全部** Qoder 历史抹掉。所以这种情况下整段跳过，宁可暂时多算。
+    /// 目录压根不存在则是可信的「确实没有持久化会话」，正常清理。
+    private static func purgeNonPersistedLedger(persistedSessions: Set<String>,
+                                                projectsDirReadable: Bool,
+                                                projectsDirExists: Bool) async {
+        guard projectsDirReadable || !projectsDirExists else { return }
+        let removed = await FileMtimeCache.shared.remove { entry in
+            // 只碰 segment 合成条目：`…/.usagebar-request-ledger/<会话>/<请求>`。
+            // transcript 条目按定义就是持久化会话，永远保留。
+            guard entry.filePath.contains(requestLedgerDir),
+                  entry.records.contains(where: { $0.provider == "qoder-cli" })
+                    || entry.details.contains(where: { $0.provider == "qoder-cli" })
+            else { return false }
+            let sid = entry.details.first?.sessionId
+                ?? ((entry.filePath as NSString).deletingLastPathComponent as NSString).lastPathComponent
+            return !sid.isEmpty && !persistedSessions.contains(sid)
+        }
+        if removed > 0 {
+            Logger(subsystem: "com.yuanchenyu.usageBar", category: "qoder-cli")
+                .info("计量口径=仅持久化会话：清理 \(removed) 条无 transcript 的历史账本条目")
+        }
     }
 
     /// segment 会话的标题解析顺序（v0.3.34，GitHub issue #10）。

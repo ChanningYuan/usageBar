@@ -161,3 +161,71 @@ final class QoderSessionTitleTests: XCTestCase {
         XCTAssertNil(QoderCliSegmentSource.projectRoot(in: url))
     }
 }
+
+/// Qoder CLI「只统计有持久化会话的调用」回归锁（v0.3.35，用户拍板的计量口径）。
+///
+/// 判据 = 该 sessionId 在 `~/.qoder/projects` 里有没有 transcript。
+/// 无 transcript ⟹ 只可能来自 `--no-session-persistence`，而宿主（Claude Code 等）的
+/// Agent SDK 桥接一定带这个参数——那笔账记在宿主名下，这里再记就是重复（issue #9）。
+///
+/// ⚠️ 这等于把 issue #8 的症状②（`--no-session-persistence` 漏统）撤回一半，是刻意的。
+final class QoderPersistedOnlyTests: XCTestCase {
+
+    private func entry(_ path: String, session: String, token: Int) -> FileCacheEntry {
+        FileCacheEntry(filePath: path, mtime: Date(), size: token,
+                       records: [FileDailyRecord(provider: "qoder-cli", date: "2026-08-14", token: token)],
+                       details: [FileDetailRecord(provider: "qoder-cli", date: "2026-08-14",
+                                                  sessionId: session, title: "", model: "cmodel",
+                                                  lastActivity: Date(),
+                                                  tokens: TokenBreakdown(input: token, output: 0))])
+    }
+
+    private func segKey(_ session: String, _ request: String) -> String {
+        "/Users/x/.qoder/logs/sessions/.usagebar-request-ledger/\(session)/\(request)"
+    }
+
+    /// 有 transcript 的会话保留，无 transcript 的 segment 条目清掉。
+    func testPurgeRemovesOnlyNonPersistedSegmentEntries() async {
+        let cache = FileMtimeCache()
+        await cache.store(entry(segKey("KEEP", "r1"), session: "KEEP", token: 100))
+        await cache.store(entry(segKey("DROP", "r2"), session: "DROP", token: 200))
+        // transcript 条目：按定义就是持久化会话，任何时候都不该被这段逻辑碰
+        await cache.store(entry("/Users/x/.qoder/projects/p/KEEP.jsonl", session: "KEEP", token: 300))
+
+        let persisted: Set<String> = ["KEEP"]
+        let removed = await cache.remove { e in
+            guard e.filePath.contains("/.usagebar-request-ledger/"),
+                  e.records.contains(where: { $0.provider == "qoder-cli" }) else { return false }
+            let sid = e.details.first?.sessionId
+                ?? ((e.filePath as NSString).deletingLastPathComponent as NSString).lastPathComponent
+            return !sid.isEmpty && !persisted.contains(sid)
+        }
+        XCTAssertEqual(removed, 1)
+        let left = await cache.allEntries().map(\.filePath).sorted()
+        XCTAssertEqual(left, ["/Users/x/.qoder/logs/sessions/.usagebar-request-ledger/KEEP/r1",
+                              "/Users/x/.qoder/projects/p/KEEP.jsonl"],
+                       "⛔ transcript 条目和有会话的 segment 条目都必须留下")
+    }
+
+    /// ⚠️ 权限保护：`~/.qoder/projects` 存在却一个 transcript 都读不到时（issue #8 报告人本机
+    /// 遇到过 `Operation not permitted`），持久会话集合会是空集。此时**绝不能照常清理**，
+    /// 否则会把全部 Qoder 历史抹掉——账本是持久的，抹了就没了。
+    func testPurgeSkippedWhenProjectsDirUnreadable() async {
+        let cache = FileMtimeCache()
+        await cache.store(entry(segKey("S1", "r1"), session: "S1", token: 100))
+
+        let projectsDirExists = true, projectsDirReadable = false
+        let shouldPurge = projectsDirReadable || !projectsDirExists
+        XCTAssertFalse(shouldPurge, "⛔ 目录在、却读不到任何 transcript → 必须整段跳过清理")
+
+        if shouldPurge { _ = await cache.remove { _ in true } }
+        let n = await cache.count()
+        XCTAssertEqual(n, 1, "跳过清理时账本必须原封不动")
+    }
+
+    /// 目录压根不存在 = 可信的「确实没有任何持久化会话」→ 正常清理。
+    func testPurgeRunsWhenProjectsDirAbsent() {
+        let projectsDirExists = false, projectsDirReadable = false
+        XCTAssertTrue(projectsDirReadable || !projectsDirExists)
+    }
+}

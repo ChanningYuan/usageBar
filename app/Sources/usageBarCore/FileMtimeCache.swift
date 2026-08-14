@@ -63,6 +63,21 @@ public actor FileMtimeCache {
         entries = entries.filter { existingPaths.contains($0.key) }
     }
 
+    /// **定向删除**账本条目，返回删掉的条数。
+    ///
+    /// ⚠️ 账本是持久账本，删了就没了、源日志多半也已被 AI 工具自己清理，**不可恢复**。
+    /// 只在「计量口径变更，历史条目按新口径本就不该存在」时用——v0.3.35 的
+    /// 「Qoder CLI 只记交互式用量」就是这种情况：口径改了，旧的 SDK 调用用量必须清掉，
+    /// 否则主列表会一直挂着一笔按新口径不该算的数，而且它永远不会被覆盖（不再有人写它）。
+    ///
+    /// 不要拿它做「清理孤儿条目」——那正是 `purgeStale` 刻意零调用的原因（见上）。
+    @discardableResult
+    public func remove(where shouldRemove: (FileCacheEntry) -> Bool) -> Int {
+        let before = entries.count
+        entries = entries.filter { !shouldRemove($0.value) }
+        return before - entries.count
+    }
+
     public func count() -> Int {
         entries.count
     }

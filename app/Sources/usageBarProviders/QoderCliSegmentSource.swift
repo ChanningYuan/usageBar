@@ -42,6 +42,12 @@ enum QoderCliSegmentSource {
     /// SDK / 桥接场景下前 1999 字符往往是 host 前言和旧对话历史（issue #10 报告人本机 27/37 条
     /// `truncated=true`），拿来当标题会显示误导内容，还可能把 system prompt、工具结果或敏感片段带到 UI 上。
     /// 宁可显示项目名。
+    /// 📌 **不用 `input.prompt.*.query_source`（`tui` / `sdk`）当计量判据**（2026-08-14 评估后否掉）：
+    /// 它确实能区分「人亲手敲的」和「非交互调用」，但**只存在于 segment 诊断日志，
+    /// 而 Qoder 会定期把 segment 轮转删掉**（本机 7/14 的两份 8/14 就没了），
+    /// transcript 却不会删 —— 判据会随日志清理而漂移，用量哪天自己涨回来且查不出原因，
+    /// 除非再自建一套持久标记去对抗它。改用「有没有 transcript」，判据天然稳定。
+    /// 详见 `QoderCliProvider.fetchDailyRecords` 的口径说明。
     static func projectRoot(in url: URL) -> String? {
         var found: String?
         try? JSONLReader.forEachLine(at: url) { obj in
@@ -96,22 +102,22 @@ actor QoderCliSegmentStore {
 
         for url in QwenWorkSegmentParser.files(under: root).sorted(by: { $0.path < $1.path }) {
             let path = url.path
-            guard let meta = FileMetadata.read(at: path) else { continue }
+            guard let fileMeta = FileMetadata.read(at: path) else { continue }
             // sessionId 直接来自路径 `<sessionId>/segments/*.jsonl`，与解析器同源
             let sessionId = url.deletingLastPathComponent()
                 .deletingLastPathComponent().lastPathComponent
 
-            if let cached = cache[path], cached.mtime == meta.mtime, cached.size == meta.size {
-                combined.append(contentsOf: cached.events)
-                if let r = cached.projectRoot { roots[sessionId] = roots[sessionId] ?? r }
-                continue
+            let entry: CacheEntry
+            if let cached = cache[path], cached.mtime == fileMeta.mtime, cached.size == fileMeta.size {
+                entry = cached
+            } else {
+                entry = CacheEntry(mtime: fileMeta.mtime, size: fileMeta.size,
+                                   events: (try? QwenWorkSegmentParser.parseFile(url: url)) ?? [],
+                                   projectRoot: QoderCliSegmentSource.projectRoot(in: url))
+                cache[path] = entry
             }
-            let parsed = (try? QwenWorkSegmentParser.parseFile(url: url)) ?? []
-            let projectRoot = QoderCliSegmentSource.projectRoot(in: url)
-            cache[path] = CacheEntry(mtime: meta.mtime, size: meta.size,
-                                     events: parsed, projectRoot: projectRoot)
-            combined.append(contentsOf: parsed)
-            if let r = projectRoot { roots[sessionId] = roots[sessionId] ?? r }
+            combined.append(contentsOf: entry.events)
+            if let r = entry.projectRoot { roots[sessionId] = roots[sessionId] ?? r }
         }
 
         var seen = Set<String>()
