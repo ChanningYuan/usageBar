@@ -5,23 +5,25 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.34</h3>
-<p><b>修复</b></p>
+<h3>usageBar 0.3.35</h3>
+<p><b>变更</b></p>
 <ul>
-<li><b>Qoder CLI 的会话不再全是「(无标题会话)」（#10）</b>：0.3.33 接入新日志后，Qoder CLI 详情页「按会话」里每行都只有 8 位编号，看不出是哪项工作。其实这些会话在 Qoder 自己的会话列表里是有名字的，只是没被读进来。现在直接沿用 Qoder 自己的会话名（你手动改的名字 &gt; 自动生成的标题 &gt; 首句提问），和 Qoder 里看到的一致。</li>
-<li><b>没有会话记录的调用也能看出是哪个项目</b>：带 `--no-session-persistence` 的调用（各类桥接、脚本、非交互调用）本来就不留会话记录、拿不到名字，现在退而显示它的项目目录名，不再是一串编号。</li>
+<li><b>Qoder CLI 只统计你亲手用的那部分（#9）</b>：只有在 Qoder CLI 交互界面里发起的对话才算 Qoder 的用量。通过 `-p`、脚本、或别的 AI 工具当后端调过来的（Agent SDK 桥接）不再计入——那类调用的用量会记在发起它的工具名下（比如 Claude Code），两边都记就重复了。</li>
 </ul>
-<p>&gt; 本次只补会话名称，<b>不改动任何用量数字</b>。</p>
+<p>  &gt; ⚠️ <b>代价</b>：如果你在脚本或 CI 里直接跑 `qodercli -p`，而没有别的工具在记账，这部分用量将不再出现在统计里。</p>
+<ul>
+<li><b>历史数据会一并调整</b>：升级后首次刷新，Qoder CLI 过去按旧口径记入的这类用量会被清理，累计数字会相应减少。</li>
+</ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.34</title>
-            <pubDate>Fri, 14 Aug 2026 16:37:44 +0800</pubDate>
-            <sparkle:version>0.3.34</sparkle:version>
-            <sparkle:shortVersionString>0.3.34</sparkle:shortVersionString>
+            <title>0.3.35</title>
+            <pubDate>Fri, 14 Aug 2026 17:30:44 +0800</pubDate>
+            <sparkle:version>0.3.35</sparkle:version>
+            <sparkle:shortVersionString>0.3.35</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.34/usageBar.zip" length="2601898" type="application/octet-stream" sparkle:edSignature="f8cDtJ7pRaUjIFW7zC9w1aaB1WXD4waPXnIfDvvRiZ7PLtf/IqZsobFGzdES4u5/2SqtQCfW23/TwzL/ThjQAg=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.35/usageBar.zip" length="2604464" type="application/octet-stream" sparkle:edSignature="LGGio2Ot58AE4IRKehfcVYcsi0eIb/34wnYGVaLFZVTRHEpw7emphi9s7jps5vZw5lnglB01LObXbva2J9ysCA=="/>
         </item>
     </channel>
 </rss>
