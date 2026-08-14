@@ -5,35 +5,23 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.33</h3>
-<p><b>新增</b></p>
-<ul>
-<li><b>统计明细现在会存下来了</b>：每次扫描时把「哪个会话、用了哪个模型、各类 token 各多少」一并记录，全部 9 个数据源都覆盖。此前这些只在打开详情页时临时算一遍，原始日志被 AI 工具自己清理掉、或系统权限读不到，详情页就展不开了。</li>
-</ul>
+<h3>usageBar 0.3.34</h3>
 <p><b>修复</b></p>
 <ul>
-<li><b>Qoder CLI 的用量不再「列表有、点进去空」（#8）</b>：详情页过去每次都重新读一遍原始日志，日志被工具自己清理掉、或系统权限读不到时，就会显示成「该周期这个来源没有用量」，和主列表的数字对不上。现在统计明细会随扫描一并存下来，点进详情直接读它——原始日志没了也能正常展开，主列表、总量、分模型、分会话四处数字永远一致。</li>
-<li><b>Codex 分支会话的用量不再丢失</b>：用 `codex fork` 分出来的会话，其用量此前不会进入统计账本，主列表少算（开发机实测某天少了 87 万 token）。</li>
-<li><b>补上 Qoder CLI 漏统的一部分用量（#8）</b>：带 `--no-session-persistence` 的调用（各类桥接、脚本、非交互调用）不会留下会话记录，此前完全没被计入。现在这部分也会统计，且与原有记录按请求编号去重，不会重复计算。</li>
+<li><b>Qoder CLI 的会话不再全是「(无标题会话)」（#10）</b>：0.3.33 接入新日志后，Qoder CLI 详情页「按会话」里每行都只有 8 位编号，看不出是哪项工作。其实这些会话在 Qoder 自己的会话列表里是有名字的，只是没被读进来。现在直接沿用 Qoder 自己的会话名（你手动改的名字 &gt; 自动生成的标题 &gt; 首句提问），和 Qoder 里看到的一致。</li>
+<li><b>没有会话记录的调用也能看出是哪个项目</b>：带 `--no-session-persistence` 的调用（各类桥接、脚本、非交互调用）本来就不留会话记录、拿不到名字，现在退而显示它的项目目录名，不再是一串编号。</li>
 </ul>
-<p><b>变更</b></p>
-<ul>
-<li><b>下架 4 个数据源</b>：QoderWork 与悟空（由千问办公替代）、OpenClaw 与 Hermes Agent（未使用）。主列表与设置页不再出现。</li>
-<li><b>Qoder CLI 与千问办公的统计开关拆开</b>：此前「一键开启」会把两个环境变量一起写进 `~/.zshrc`、撤销时一起删；现在各产品的开关挂在各自数据源行下，各开各的、互不影响。</li>
-<li><b>名称简化</b>：`Qoder (CLI)` → `Qoder CLI`、`Qoder (IDE)` → `Qoder IDE`、`Codex (OpenAI)` → `Codex`。</li>
-</ul>
-<p><b>⚠️ 升级须知（历史「累计」数字会减少）</b></p>
-<p>本次统计升级需要<b>重建一次历史索引</b>。重建只能扫回<b>现在还存在</b>的原始日志——那些已被各 AI 工具自己清理、轮转掉的旧日志无法恢复，对应的历史用量会从「累计」中消失（开发机实测减少约 23%，主要是 6-7 月的 Claude Code 记录）。这是一次性的，升级后新数据不受影响。</p>
+<p>&gt; 本次只补会话名称，<b>不改动任何用量数字</b>。</p>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.33</title>
-            <pubDate>Fri, 14 Aug 2026 03:03:14 +0800</pubDate>
-            <sparkle:version>0.3.33</sparkle:version>
-            <sparkle:shortVersionString>0.3.33</sparkle:shortVersionString>
+            <title>0.3.34</title>
+            <pubDate>Fri, 14 Aug 2026 16:37:44 +0800</pubDate>
+            <sparkle:version>0.3.34</sparkle:version>
+            <sparkle:shortVersionString>0.3.34</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.33/usageBar.zip" length="2596307" type="application/octet-stream" sparkle:edSignature="Prn06u6vOxiym/4LxGO7qRGuIs46O3BzdCRbDP+GXCSz3nPM+x87L+9sLy2Oj1bsiXOjRpE04aKWv/NFB9mjBw=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.34/usageBar.zip" length="2601898" type="application/octet-stream" sparkle:edSignature="f8cDtJ7pRaUjIFW7zC9w1aaB1WXD4waPXnIfDvvRiZ7PLtf/IqZsobFGzdES4u5/2SqtQCfW23/TwzL/ThjQAg=="/>
         </item>
     </channel>
 </rss>
