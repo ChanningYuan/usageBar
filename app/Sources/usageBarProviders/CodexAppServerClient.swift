@@ -2,7 +2,7 @@ import Foundation
 
 /// 通过官方 CLI 查询 Codex 账号额度（0812 spec §三，取代 JSONL 扫描）。
 ///
-/// 做法：拉起 `codex -s read-only -a untrusted app-server`（stdio 上的 JSON-RPC），
+/// 做法：拉起 `codex -s read-only -a on-request app-server`（stdio 上的 JSON-RPC），
 /// 依次发 `initialize` → `account/read` → `account/rateLimits/read`，拿到按池分好的
 /// `rateLimitsByLimitId` + 重置券后立即结束进程。凭据刷新完全由 CLI 自己完成
 /// （它管理 ~/.codex/auth.json 的 token 轮换），usageBar 零钥匙串、零自管凭据。
@@ -10,6 +10,11 @@ import Foundation
 /// ⚠️ 二进制发现链（顺序即优先级）：PATH 常见安装位 → npm 全局 → Codex Desktop 内嵌
 /// → VS Code/Cursor 扩展内嵌。每个候选都要 `--version` 验真——npm 装坏（原生二进制丢失、
 /// shim 报 ENOENT）在本机实测出现过，光看文件存在会误判。验真结果进程内缓存，失败时重探。
+///
+/// ⚠️ 启动参数会随 CLI 版本漂移：0.149.0-alpha.4（2026-08-24 随 ChatGPT.app 自动更新下发）把
+/// `--ask-for-approval` 的 `untrusted` / `on-failure` 两个值删了，旧参数直接被拒、进程退出码 2。
+/// 这类「用法错误」单独归类成 `.incompatibleCLI`，别混进 `.processFailed`→「连接不上」——
+/// 它不会自愈，冒充网络问题会让用户一直等（本机 2026-08-24～27 就这么白等了 3 天）。
 enum CodexAppServerClient {
 
     enum RPCError: Error {
@@ -18,6 +23,7 @@ enum CodexAppServerClient {
         case notLoggedIn
         case timeout
         case processFailed
+        case incompatibleCLI     // CLI 拒绝了 usageBar 的启动参数（新版改了命令行接口）→ 要升级 usageBar
     }
 
     /// [String: Any] 不是编译期 Sendable，但本结构构造后只读、跨 Task 只传一次 → unchecked 安全
@@ -86,14 +92,20 @@ enum CodexAppServerClient {
     /// 完整一问：拉起 app-server，拿额度 + 账号信息。阻塞最多 `timeout` 秒（调用方放后台线程）。
     static func fetch(timeout: TimeInterval = 15) -> Swift.Result<Result, RPCError> {
         guard let bin = discoverBinary() else { return .failure(.binaryNotFound) }
+        return fetch(binary: bin, timeout: timeout)
+    }
 
+    /// 指定二进制路径的版本（测试拿假 codex 走这里；线上一律经 `fetch(timeout:)` 走发现链）。
+    static func fetch(binary bin: String, timeout: TimeInterval = 15) -> Swift.Result<Result, RPCError> {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: bin)
-        p.arguments = ["-s", "read-only", "-a", "untrusted", "app-server"]
-        let stdin = Pipe(), stdout = Pipe()
+        // ⚠️ `-a` 只认新旧版本都有的 on-request（untrusted 已于 0.149 被删）。usageBar 只问账号、
+        // 从不开 thread，审批策略实际不会生效，这里只是显式声明安全姿态。
+        p.arguments = ["-s", "read-only", "-a", "on-request", "app-server"]
+        let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
         p.standardInput = stdin
         p.standardOutput = stdout
-        p.standardError = Pipe()
+        p.standardError = stderr
         do { try p.run() } catch {
             cachedBinary = nil   // 起不来 → 缓存失效，下轮重探
             return .failure(.processFailed)
@@ -164,6 +176,27 @@ enum CodexAppServerClient {
         let waited = done.wait(timeout: .now() + timeout)
         // 信号量的内存屏障保证：signal 前对 box 的写在 wait 返回后可见；timeout 分支只读 nil。
         if waited == .timedOut { return .failure(.timeout) }
-        return box.outcome ?? .failure(.processFailed)
+        let outcome = box.outcome ?? .failure(.processFailed)
+        if case .failure(.processFailed) = outcome {
+            // 进程没答就退了：看退出码 + stderr，把「启动参数被 CLI 拒绝」从泛泛的 processFailed 里挑出来。
+            // stdout 已 EOF，进程通常已退或正在退；最多等 2s，仍在跑就不猜（维持 processFailed）。
+            let deadline = Date().addingTimeInterval(2)
+            while p.isRunning && Date() < deadline { usleep(20_000) }
+            if !p.isRunning {
+                let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                if isUsageError(status: p.terminationStatus, stderr: err) { return .failure(.incompatibleCLI) }
+            }
+        }
+        return outcome
+    }
+
+    /// 「用法错误」判据：进程非零退出，且 stderr 长得像命令行参数解析失败（Codex 用 Rust 的 clap，
+    /// 形如 `error: invalid value 'untrusted' for '--ask-for-approval'` / `error: unexpected argument`，
+    /// 尾巴带 `For more information, try '--help'`）。崩溃（panic）或没有 stderr 证据的一律不算。
+    static func isUsageError(status: Int32, stderr: String) -> Bool {
+        guard status != 0 else { return false }
+        let s = stderr.lowercased()
+        let markers = ["invalid value", "unexpected argument", "unrecognized subcommand", "try '--help'"]
+        return markers.contains { s.contains($0) }
     }
 }

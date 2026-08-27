@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 与 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.36] - 2026-08-27
+
+### 修复
+- **Codex 更新后额度一直显示「连接不上 Codex」（其实不是网络问题）**：8 月 24 日随 ChatGPT.app 自动更新下发的 Codex 0.149 删掉了 usageBar 启动它时用的一个参数，Codex 一启动就拒绝退出，usageBar 误当成断网、顶着几天前的旧数字持续显示「更新于 Xd 前 · 连接不上 Codex」。现在改用新旧版本都认的参数，额度恢复实时刷新。
+- **以后 Codex 再改接口会明说**：Codex 拒绝 usageBar 的启动参数时，不再冒充「连接不上」，改为提示「Codex 更新后接口有变 — 升级 usageBar 后可显示额度」，也不再拿旧数字充数。
+
 ## [0.3.35] - 2026-08-14
 
 ### 变更

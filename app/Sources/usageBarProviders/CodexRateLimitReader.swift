@@ -12,6 +12,7 @@ import usageBarCore
 /// - 断网/超时/进程失败 → `.network`（RateLimitStore 保留上次快照，UI 显示「更新于 Xh 前 · 连接不上 Codex」）
 /// - 发现链全空 → `.binaryNotFound`；版本太老无此方法 → `.versionTooOld`
 /// - 未登录 → `.credentialUnavailable`；API Key 登录 → `.noQuotaData`
+/// - 启动参数被 CLI 拒绝（新版删了旧参数，2026-08-24 Codex 0.149 实踩）→ `.cliIncompatible`（不自愈，提示升级 usageBar）
 ///
 /// ⚠️ token 用量统计与本文件无关（CodexDetailScanner 继续读 JSONL——那是纯累加，无猜池问题）。
 public struct CodexRateLimitReader {
@@ -38,6 +39,7 @@ public struct CodexRateLimitReader {
             case .notLoggedIn:    return Self.fail(.credentialUnavailable, now: now)
             case .timeout, .processFailed:
                 return Self.fail(.network, now: now)
+            case .incompatibleCLI: return Self.fail(.cliIncompatible, now: now)
             }
         }
     }

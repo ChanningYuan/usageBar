@@ -227,4 +227,7 @@ public enum RateLimitError: String, Codable, Sendable, Equatable {
     case binaryNotFound
     /// CLI 版本太老、没有额度查询接口（JSON-RPC method not found）—— 升级后自动恢复
     case versionTooOld
+    /// CLI 拒绝了 usageBar 的启动参数（Codex 新版改了命令行接口，如 0.149 删掉 `-a untrusted`）——
+    /// 不会自愈、要升级 usageBar。与 `.network` 不同：store 不保留旧快照，别拿几天前的数字充数
+    case cliIncompatible
 }

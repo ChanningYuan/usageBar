@@ -240,6 +240,7 @@ enum QuotaFormat {
         case .awaitingData:          return "打开 Claude 会话后自动显示，或切「联网 API」立即看"
         case .binaryNotFound:        return "未找到 Codex — 安装 CLI 或 Codex Desktop 后自动显示"
         case .versionTooOld:         return "Codex 版本过老，升级后可显示额度"
+        case .cliIncompatible:       return "Codex 更新后接口有变 — 升级 usageBar 后可显示额度"
         }
     }
 }
