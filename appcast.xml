@@ -5,25 +5,22 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.35</h3>
-<p><b>变更</b></p>
+<h3>usageBar 0.3.36</h3>
+<p><b>修复</b></p>
 <ul>
-<li><b>Qoder CLI 只统计你亲手用的那部分（#9）</b>：只有在 Qoder CLI 交互界面里发起的对话才算 Qoder 的用量。通过 `-p`、脚本、或别的 AI 工具当后端调过来的（Agent SDK 桥接）不再计入——那类调用的用量会记在发起它的工具名下（比如 Claude Code），两边都记就重复了。</li>
-</ul>
-<p>  &gt; ⚠️ <b>代价</b>：如果你在脚本或 CI 里直接跑 `qodercli -p`，而没有别的工具在记账，这部分用量将不再出现在统计里。</p>
-<ul>
-<li><b>历史数据会一并调整</b>：升级后首次刷新，Qoder CLI 过去按旧口径记入的这类用量会被清理，累计数字会相应减少。</li>
+<li><b>Codex 更新后额度一直显示「连接不上 Codex」（其实不是网络问题）</b>：8 月 24 日随 ChatGPT.app 自动更新下发的 Codex 0.149 删掉了 usageBar 启动它时用的一个参数，Codex 一启动就拒绝退出，usageBar 误当成断网、顶着几天前的旧数字持续显示「更新于 Xd 前 · 连接不上 Codex」。现在改用新旧版本都认的参数，额度恢复实时刷新。</li>
+<li><b>以后 Codex 再改接口会明说</b>：Codex 拒绝 usageBar 的启动参数时，不再冒充「连接不上」，改为提示「Codex 更新后接口有变 — 升级 usageBar 后可显示额度」，也不再拿旧数字充数。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.35</title>
-            <pubDate>Fri, 14 Aug 2026 17:30:44 +0800</pubDate>
-            <sparkle:version>0.3.35</sparkle:version>
-            <sparkle:shortVersionString>0.3.35</sparkle:shortVersionString>
+            <title>0.3.36</title>
+            <pubDate>Thu, 27 Aug 2026 12:03:27 +0800</pubDate>
+            <sparkle:version>0.3.36</sparkle:version>
+            <sparkle:shortVersionString>0.3.36</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.35/usageBar.zip" length="2604464" type="application/octet-stream" sparkle:edSignature="LGGio2Ot58AE4IRKehfcVYcsi0eIb/34wnYGVaLFZVTRHEpw7emphi9s7jps5vZw5lnglB01LObXbva2J9ysCA=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.36/usageBar.zip" length="2614391" type="application/octet-stream" sparkle:edSignature="YFMUq3zjhSMEdsTSb1Mo9otRP6dfmidGwoh2Y2H1cWx3hY48nrPA+Mo/OJMwRs+0ApEoHHsqRf0D7ySq4P9NCw=="/>
         </item>
     </channel>
 </rss>
