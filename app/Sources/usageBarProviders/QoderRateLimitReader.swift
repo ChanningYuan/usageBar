@@ -20,9 +20,25 @@ import usageBarCore
 ///    （值是 `{"type":"Buffer","data":[v10…]}`）→ 钥匙串 `Qoder Safe Storage` 解同款 safeStorage。
 ///
 /// 每档先做**免费的存在性检查**（文件/DB 在不在），命中才碰对应钥匙串 → 各弹一次；解出的凭证内存缓存跨刷新复用。
-/// （Qoder CLI `~/.qoder/.auth/user` 用原生二进制里的固定密钥加密，机器码派生试过均不中、破解需反汇编 → 见调研 §Qoder降级，暂缓；
-/// CLI 行的额度跟随 QoderWork 账号，见调度层 `storeQoder`。）
-public struct QoderRateLimitReader {
+/// （Qoder CLI `~/.qoder/.auth/user` 用原生二进制里的固定密钥加密，机器码派生试过均不中、破解需反汇编 → 见调研 §Qoder降级，暂缓。）
+///
+/// ## ⚠️ v0.3.37：CLI 行不再无条件由 Work / IDE 凭证代领
+///
+/// 外部用户 2026-08-28 报「Qoder CLI 能正常调用，usageBar 却说『登录凭证已失效』」——因为 CLI 行
+/// 显示的从来就是 Work / IDE 凭证的查询结果，那边 401 就被原样挂到 CLI 行，再被 UI 统一翻译成
+/// 「登录凭证已失效」。**界面标题是 Qoder CLI，验证的却是另一个产品的登录**。
+///
+/// 现在 `readAll` 给 CLI / IDE 两行**各出各的快照**（不再一份铺两行），且 CLI 行按这个优先级取数：
+/// 1. Work / IDE 凭证实时查——但能**确凿证明**是别的账号就跳过（`QoderCliQuotaReader.sameAccount`）；
+/// 2. CLI 自己日志里的额度（`QoderCliQuotaReader`，归属天然正确，采集时间用日志里的真实时刻）；
+/// 3. `qodercli status -o json` 判登录态 → 已登录给中性的 `.quotaUnavailable`、未登录给 `.notLoggedIn`；
+/// 4. CLI 没装 / 跑不起来 → 回落老行为 `.credentialUnavailable`，但带上 `sourceLabel` 说清是谁失效。
+///
+/// 顺序是刻意的：**1 在 2 前面**，保证现在能看到实时数字的人行为完全不变（零回归）；
+/// 只有在 1 拿不到时才轮到 2 —— 那正是报告人的处境。
+/// ⚠️ `Sendable` 是显式写的：public 类型不享受隐式 Sendable 推断，
+/// 而 `readAll` 用 `async let` 并发跑 CLI / IDE 两行，缺了它编译器会报「sending 'self' risks data races」。
+public struct QoderRateLimitReader: Sendable {
     public init() {}
 
     /// Qoder 家族的 provider 实例共享同一份账号级快照。
@@ -42,34 +58,86 @@ public struct QoderRateLimitReader {
     nonisolated(unsafe) private static var cachedIde: Credential?
 
     /// 取消授权/重置时清缓存 → 下次读重新解密（重新授权）
-    public static func clearCache() { cachedWork = nil; cachedIde = nil }
+    public static func clearCache() {
+        cachedWork = nil; cachedIde = nil
+        clearBackoff()
+        QoderCliQuotaReader.clearCache()
+    }
 
     /// token + 账号指纹（用于判断 Work / IDE 是否同一账号）
     typealias Credential = (token: String, account: String)
 
-    private enum Source { case work, ide }
+    enum Source { case work, ide }
 
-    /// 按凭证分账号采集（issue #4）。返回 1 或 2 个快照：
-    /// - 仅一份凭证登录，或双登录但**账号指纹相同** → 1 个「代表账号」快照（providerId "qoder-cli"），
-    ///   调度层复制到各 qoder 实例——即原有行为；
-    /// - QoderWork 客户端与 Qoder IDE 登录了**不同账号** → 2 个快照各查各的（"qoder-cli" / "qoder-ide"），
-    ///   行标签与数据来源账号对齐，不再把一个账号的额度标成另一个的。
+    /// 采集 Qoder 家族额度。**恒返回 2 个快照**（qoder-cli / qoder-ide），各归各的，调度层不再复制。
     ///
-    /// ⚠️ v0.3.33：QoderWork **provider 已下架**，但它的本机凭证仍是可用的额度来源之一
-    /// （很多人 CLI 与 Work 是同一个账号）。所以这里继续读 `.work` 凭证，只是代表账号快照
-    /// 改挂 `qoder-cli`——CLI 行的额度由此跟随 Work 凭证，与下架前口径一致。
+    /// 取数优先级见类型文档。IDE 行只认 IDE 自己的凭证——读不到就说读不到，
+    /// 不再拿 Work 的额度冒充（那是 issue #4 同一个 bug 的另一半：当时只修了「两边都登录且不同账号」）。
     public func readAll(now: Date = Date()) async -> [RateLimitSnapshot] {
         let work = credential(.work)
         let ide = credential(.ide)
-        if let w = work, let i = ide, w.account != i.account {
-            return [await readSource(.work, providerId: "qoder-cli", now: now),
-                    await readSource(.ide, providerId: "qoder-ide", now: now)]
-        }
-        if work != nil { return [await readSource(.work, providerId: "qoder-cli", now: now)] }
-        if ide != nil { return [await readSource(.ide, providerId: "qoder-cli", now: now)] }
-        return [RateLimitSnapshot(providerId: "qoder-cli", windows: [], capturedAt: now,
-                                  error: .credentialUnavailable)]
+        async let cli = readCli(work: work, ide: ide, now: now)
+        async let ideRow = readIde(ide: ide, now: now)
+        return [await cli, await ideRow]
     }
+
+    /// Qoder IDE 行：只由 IDE 凭证供数。
+    private func readIde(ide: Credential?, now: Date) async -> RateLimitSnapshot {
+        guard ide != nil else {
+            return RateLimitSnapshot(providerId: "qoder-ide", windows: [], capturedAt: now,
+                                     error: .credentialUnavailable, sourceLabel: Self.ideLabel)
+        }
+        return await readSource(.ide, providerId: "qoder-ide", now: now, sourceLabel: Self.ideLabel)
+    }
+
+    /// Qoder CLI 行：四级回落，见类型文档。
+    private func readCli(work: Credential?, ide: Credential?, now: Date) async -> RateLimitSnapshot {
+        let cliReader = QoderCliQuotaReader()
+        // 免费（只读日志、不起进程、不碰钥匙串）：顺带拿到 CLI 登录的账号 id
+        let logged = cliReader.latestLoggedQuota()
+        let cliAccount = logged?.userId
+
+        // ① 凭证实时查；能确凿证明是别的账号就不代领
+        for (src, cred, label) in [(Source.work, work, Self.workLabel),
+                                   (Source.ide, ide, Self.ideLabel)] {
+            guard let cred else { continue }
+            if let acct = cliAccount,
+               !QoderCliQuotaReader.sameAccount(credential: cred.account, cliUserId: acct) { continue }
+            let snap = await readSource(src, providerId: "qoder-cli", now: now, sourceLabel: label)
+            if snap.error == nil || snap.error == .noQuotaData { return snap }
+        }
+
+        // ② CLI 自己日志里的额度（capturedAt = 日志里的真实时刻，不粉饰成"刚刚"）
+        if let logged { return logged.snapshot }
+
+        // ③④ 都拿不到数字时的定性——抽成纯函数，见 `cliFallback`
+        return Self.cliFallback(identity: cliReader.identity(now: now),
+                                hasWork: work != nil, hasIde: ide != nil, now: now)
+    }
+
+    /// 一个额度数字都拿不到时，CLI 行到底该说什么。**纯函数**，把外部用户报的场景锁进回归测试。
+    ///
+    /// ⚠️ 这里是本次 bug 的落点：老版本无论哪种情况都给 `.credentialUnavailable`，
+    /// UI 再统一翻译成「登录凭证已失效」——于是「QoderWork 凭证过期」被说成了「Qoder CLI 掉登录」。
+    static func cliFallback(identity: QoderCliQuotaReader.Identity?,
+                            hasWork: Bool, hasIde: Bool, now: Date) -> RateLimitSnapshot {
+        // ③ CLI 自己说了算：登录着就只是没数据（中性），没登录就直说没登录
+        if let id = identity {
+            return RateLimitSnapshot(providerId: "qoder-cli", windows: [], planType: id.userType,
+                                     capturedAt: now,
+                                     error: id.loggedIn ? .quotaUnavailable : .notLoggedIn,
+                                     sourceLabel: cliLabel)
+        }
+        // ④ CLI 没装 / status 跑不起来 → 只能沿用老结论，但必须点名是谁的凭证不可用
+        let label = hasWork ? workLabel : (hasIde ? ideLabel : nil)
+        return RateLimitSnapshot(providerId: "qoder-cli", windows: [], capturedAt: now,
+                                 error: .credentialUnavailable, sourceLabel: label)
+    }
+
+    /// 界面上对来源的称呼（`RateLimitSnapshot.sourceLabel`）
+    static let workLabel = "QoderWork"
+    static let ideLabel = "Qoder IDE"
+    static let cliLabel = "Qoder CLI"
 
     // MARK: - 凭证获取（分来源，带缓存）
 
@@ -86,17 +154,60 @@ public struct QoderRateLimitReader {
     }
 
     /// 某来源查一次额度；401 时清缓存重新解密（用户重新登录后 token 变了）、换到新 token 才重试一次。
-    private func readSource(_ s: Source, providerId: String, now: Date) async -> RateLimitSnapshot {
-        guard let c = credential(s) else {
-            return RateLimitSnapshot(providerId: providerId, windows: [], capturedAt: now,
-                                     error: .credentialUnavailable)
+    ///
+    /// ⚠️ v0.3.37 加了**退避**：401/403 是不会自愈的（凭证过期了，得用户重新登录），
+    /// 而刷新节拍最快 1 分钟——原来每一轮都要去打一次注定失败的请求。
+    /// 现在按来源指数退避（5min → 最多 1h），用户点「重试」或 `clearCache()` 立即解除。
+    private func readSource(_ s: Source, providerId: String, now: Date,
+                            sourceLabel: String?) async -> RateLimitSnapshot {
+        func fail(_ e: RateLimitError) -> RateLimitSnapshot {
+            RateLimitSnapshot(providerId: providerId, windows: [], capturedAt: now,
+                              error: e, sourceLabel: sourceLabel)
         }
-        let snap = await request(token: c.token, providerId: providerId, now: now)
-        guard snap.error == .credentialUnavailable else { return snap }
+        guard let c = credential(s) else { return fail(.credentialUnavailable) }
+        if Self.isBackedOff(s, now: now) { return fail(.credentialUnavailable) }
+
+        let snap = await request(token: c.token, providerId: providerId, now: now,
+                                 sourceLabel: sourceLabel)
+        guard snap.error == .credentialUnavailable else {
+            Self.clearBackoff(s)
+            return snap
+        }
         switch s { case .work: Self.cachedWork = nil; case .ide: Self.cachedIde = nil }
-        guard let fresh = credential(s), fresh.token != c.token else { return snap }
-        return await request(token: fresh.token, providerId: providerId, now: now)
+        guard let fresh = credential(s), fresh.token != c.token else {
+            Self.noteAuthFailure(s, now: now)
+            return snap
+        }
+        let retry = await request(token: fresh.token, providerId: providerId, now: now,
+                                  sourceLabel: sourceLabel)
+        if retry.error == .credentialUnavailable { Self.noteAuthFailure(s, now: now) }
+        else { Self.clearBackoff(s) }
+        return retry
     }
+
+    // MARK: - 401/403 退避（不会自愈的错误，别每轮空打）
+
+    /// 每个来源的连败次数与解禁时刻
+    nonisolated(unsafe) private static var backoff: [String: (until: Date, streak: Int)] = [:]
+
+    private static func key(_ s: Source) -> String { s == .work ? "work" : "ide" }
+
+    static func isBackedOff(_ s: Source, now: Date) -> Bool {
+        guard let b = backoff[key(s)] else { return false }
+        return now < b.until
+    }
+
+    static func noteAuthFailure(_ s: Source, now: Date) {
+        let streak = (backoff[key(s)]?.streak ?? 0) + 1
+        // 5min、10min、20min、40min、封顶 60min
+        let delay = min(60.0 * 60, 5 * 60 * pow(2, Double(streak - 1)))
+        backoff[key(s)] = (now.addingTimeInterval(delay), streak)
+    }
+
+    static func clearBackoff(_ s: Source) { backoff[key(s)] = nil }
+
+    /// 用户主动重试 / 取消授权时调用——立刻解除所有退避
+    public static func clearBackoff() { backoff.removeAll() }
 
     /// A 档 · QoderWork：解 auth-v2.dat / auth.dat（钥匙串 `QoderWork Safe Storage`）
     private func credentialFromQoderWork() -> Credential? {
@@ -175,9 +286,11 @@ public struct QoderRateLimitReader {
         return nil
     }
 
-    private func request(token tok: String, providerId: String, now: Date) async -> RateLimitSnapshot {
+    private func request(token tok: String, providerId: String, now: Date,
+                         sourceLabel: String?) async -> RateLimitSnapshot {
         func fail(_ e: RateLimitError) -> RateLimitSnapshot {
-            RateLimitSnapshot(providerId: providerId, windows: [], capturedAt: now, error: e)
+            RateLimitSnapshot(providerId: providerId, windows: [], capturedAt: now,
+                              error: e, sourceLabel: sourceLabel)
         }
         guard let url = URL(string: Self.endpoint) else { return fail(.network) }
         var req = URLRequest(url: url, timeoutInterval: 12)
@@ -196,7 +309,8 @@ public struct QoderRateLimitReader {
             guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 return fail(.network)
             }
-            return Self.snapshot(fromQuota: obj, now: now, providerId: providerId)
+            return Self.snapshot(fromQuota: obj, now: now, providerId: providerId,
+                                 sourceLabel: sourceLabel)
         } catch {
             return fail(.network)
         }
@@ -206,14 +320,16 @@ public struct QoderRateLimitReader {
     /// 字段语义与坑（percentage 双量纲 / orgResourcePackage / expiresAt 归属）
     /// 见 KB `docs/0715-QoderTeams额度修复/Qoder额度API实录.md`。
     static func snapshot(fromQuota obj: [String: Any], now: Date,
-                         providerId: String = "qoder-cli") -> RateLimitSnapshot {
+                         providerId: String = "qoder-cli",
+                         sourceLabel: String? = nil) -> RateLimitSnapshot {
         let plan = obj["userType"] as? String   // API 响应自带 userType，无需本地兜底
         let quota = obj["userQuota"] as? [String: Any]
         let total = (quota?["total"] as? NSNumber)?.doubleValue ?? 0
         if total <= 0 {
             // 免费版（Community）无信用点额度概念
             return RateLimitSnapshot(providerId: providerId, windows: [],
-                                     capturedAt: now, error: .noQuotaData)
+                                     capturedAt: now, error: .noQuotaData,
+                                     sourceLabel: sourceLabel)
         }
         let used = (quota?["used"] as? NSNumber)?.doubleValue ?? 0
         // ⚠️ 不能信 API 的 percentage 字段——同一字段两种量纲：personal 账号回 0–100（37 = 37%），
@@ -237,7 +353,8 @@ public struct QoderRateLimitReader {
                                            used: pUsed, total: cap))
         }
         return RateLimitSnapshot(providerId: providerId, windows: windows,
-                                 planType: plan, capturedAt: now, error: nil)
+                                 planType: plan, capturedAt: now, error: nil,
+                                 sourceLabel: sourceLabel)
     }
 
     /// expiresAt 是 ms epoch；253402214400000（year 9999）等哨兵值当作"无重置"→ nil

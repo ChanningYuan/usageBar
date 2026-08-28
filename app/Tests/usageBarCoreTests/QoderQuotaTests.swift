@@ -68,6 +68,143 @@ final class QoderQuotaTests: XCTestCase {
         XCTAssertNil(ClaudeStatuslineReader.planLabel(fromConfig: [:]))
     }
 
+    // MARK: - v0.3.37：CLI 行的归属与文案（外部用户 2026-08-28 报的误报）
+
+    /// 2026-08-28 本机 qodercli 1.1.21 `status -o json` 实测原文
+    private static let statusJSON = """
+    {"logged_in":true,"version":"1.1.21","allow_byok":0,"username":"原晨瑜",
+     "email":"user@example.com",
+     "avatar_url":"https://qoder.com/users/019efc88-48a7-708b-b5ca-80643e713b67/default/avatars",
+     "user_type":"personal_standard"}
+    """
+
+    /// 2026-08-28 本机 `~/.qoder/logs/runs/…/qodercli.log` 实测原文（含前后噪声行）
+    private static let logSample = """
+    2026-08-28T10:08:37.981+08:00 INFO  debug.message [qoder-server-request] --> operation=getQuotaUsage method=GET url=https://openapi.qoder.sh/api/v2/quota/usage
+    2026-08-28T10:08:38.870+08:00 INFO  debug.message [qoder-server-request] <-- operation=getQuotaUsage status=200 duration=889ms
+    2026-08-28T10:08:38.871+08:00 INFO  debug.message [qoderApi] GET https://openapi.qoder.sh/api/v2/quota/usage response: {"userId":"019efc88-48a7-708b-b5ca-80643e713b67","userType":"personal_standard","usageType":"credits","totalUsagePercentage":37.0,"expiresAt":253402214400000,"userQuota":{"total":5000,"used":1850,"remaining":3150,"percentage":37,"unit":"credits"}}
+    2026-08-28T10:08:39.000+08:00 INFO  debug.message [tui] ready
+    """
+
+    func testStatusJSONParsesLoginAndAccountId() {
+        let id = QoderCliQuotaReader.parseStatus(Data(Self.statusJSON.utf8))
+        XCTAssertEqual(id?.loggedIn, true)
+        XCTAssertEqual(id?.userType, "personal_standard")
+        // 账号 id 从 avatar_url 的 /users/<uuid>/ 段取——这是判「Work 凭证是不是同一个账号」的依据
+        XCTAssertEqual(id?.userId, "019efc88-48a7-708b-b5ca-80643e713b67")
+    }
+
+    func testCliLogYieldsQuotaWithRealCaptureTime() throws {
+        let hit = QoderCliQuotaReader.parseLatestQuota(in: Self.logSample)
+        XCTAssertNotNil(hit)
+        XCTAssertEqual(hit?.userId, "019efc88-48a7-708b-b5ca-80643e713b67")
+        XCTAssertNil(hit?.snapshot.error)
+        XCTAssertEqual(hit?.snapshot.windows.first?.detail, "1,850/5,000")
+        // ⚠️ capturedAt 必须是日志里那条的真实时刻，不能粉饰成 now——否则「更新于 3d 前」会骗人
+        let capturedAt = try XCTUnwrap(hit?.snapshot.capturedAt)
+        XCTAssertEqual(capturedAt.timeIntervalSince1970,
+                       1_787_882_918.871, accuracy: 0.01)   // 2026-08-28 10:08:38.871 +0800
+    }
+
+    func testCliLogTakesTheLatestEntryNotTheFirst() {
+        // 一个 run 里打了两次额度，必须取**后**那条
+        let later = "2026-08-28T11:00:00.000+08:00 INFO  debug.message [qoderApi] GET "
+            + "https://openapi.qoder.sh/api/v2/quota/usage response: "
+            + #"{"userId":"019efc88-48a7-708b-b5ca-80643e713b67","userType":"personal_standard","#
+            + #""expiresAt":253402214400000,"userQuota":{"total":5000,"used":4000,"remaining":1000}}"#
+        let hit = QoderCliQuotaReader.parseLatestQuota(in: Self.logSample + "\n" + later)
+        XCTAssertEqual(hit?.snapshot.windows.first?.detail, "4,000/5,000")
+    }
+
+    func testMalformedLogNeverThrowsOrLies() {
+        // 日志格式没有兼容承诺——认不出就当没有，绝不因此报错
+        XCTAssertNil(QoderCliQuotaReader.parseLatestQuota(in: "毫无关系的日志"))
+        XCTAssertNil(QoderCliQuotaReader.parseLatestQuota(
+            in: "2026-08-28T10:08:38.871+08:00 quota/usage response: {\"userQuota\": 断掉了"))
+        // 有响应体但没有行首时间戳 → 宁可不用，也不谎报采集时间
+        XCTAssertNil(QoderCliQuotaReader.parseLatestQuota(
+            in: "quota/usage response: {\"userQuota\":{\"total\":5000,\"used\":10}}"))
+    }
+
+    func testSameAccountOnlyRejectsWhenProvablyDifferent() {
+        let cli = "019efc88-48a7-708b-b5ca-80643e713b67"
+        // 相等 → 同账号
+        XCTAssertTrue(QoderCliQuotaReader.sameAccount(credential: cli, cliUserId: cli))
+        // 两边都是 UUID 且不等 → **确凿**不同账号，不许代领
+        XCTAssertFalse(QoderCliQuotaReader.sameAccount(
+            credential: "019cf7c1-0000-4000-8000-000000000000", cliUserId: cli))
+        // 指纹是 email / 数字 uid / token 原文 → 形态不可比，判不出就沿用老行为（不回归）
+        XCTAssertTrue(QoderCliQuotaReader.sameAccount(credential: "a@b.com", cliUserId: cli))
+        XCTAssertTrue(QoderCliQuotaReader.sameAccount(credential: "88123", cliUserId: cli))
+    }
+
+    func testAvatarURLWithoutUUIDGivesNoAccountId() {
+        // 认不出就给 nil——nil 的语义是「判不出」，会让 sameAccount 放行，方向安全
+        XCTAssertNil(QoderCliQuotaReader.userId(fromAvatarURL: "https://qoder.com/users/me/avatars"))
+        XCTAssertNil(QoderCliQuotaReader.userId(fromAvatarURL: "https://qoder.com/avatars.png"))
+    }
+
+    /// ⭐️ 本次线上 bug 的回归锁：外部用户 2026-08-28 报的原始场景。
+    /// QoderWork 凭证过期（401）、Qoder CLI 登录完好 —— CLI 行**绝不能**再说「登录凭证已失效」。
+    func testWorkCredentialExpiredMustNotBlameTheCLI() {
+        let loggedInCli = QoderCliQuotaReader.Identity(
+            loggedIn: true, userId: "019efc88-48a7-708b-b5ca-80643e713b67",
+            userType: "personal_standard")
+        let snap = QoderRateLimitReader.cliFallback(
+            identity: loggedInCli, hasWork: true, hasIde: false, now: Date())
+
+        XCTAssertEqual(snap.providerId, "qoder-cli")
+        XCTAssertEqual(snap.error, .quotaUnavailable)          // 中性态
+        XCTAssertNotEqual(snap.error, .credentialUnavailable)  // ← 就是这一条在线上说错了话
+        // sourceLabel 指向 CLI 自己——UI 据此说「Qoder CLI 已登录 · 暂无额度数据」
+        // （文案本体按项目约定在 UI 层 `QuotaFormat.errorText`，Core 测试够不到，这里锁它的输入契约）
+        XCTAssertEqual(snap.sourceLabel, "Qoder CLI")
+    }
+
+    func testCliNotLoggedInSaysSoPlainly() {
+        let out = QoderCliQuotaReader.Identity(loggedIn: false, userId: nil, userType: nil)
+        let snap = QoderRateLimitReader.cliFallback(
+            identity: out, hasWork: true, hasIde: true, now: Date())
+        XCTAssertEqual(snap.error, .notLoggedIn)
+        XCTAssertEqual(snap.sourceLabel, "Qoder CLI")   // → UI:「Qoder CLI 未登录 ·」
+    }
+
+    /// CLI 没装 / status 跑不起来 → 沿用老结论，但必须点名是**谁**的凭证不可用
+    func testWithoutCliFallsBackButNamesTheSource() {
+        let work = QoderRateLimitReader.cliFallback(
+            identity: nil, hasWork: true, hasIde: false, now: Date())
+        XCTAssertEqual(work.error, .credentialUnavailable)
+        XCTAssertEqual(work.sourceLabel, "QoderWork")   // → UI:「QoderWork 额度凭证已失效 ·」
+
+        let ide = QoderRateLimitReader.cliFallback(
+            identity: nil, hasWork: false, hasIde: true, now: Date())
+        XCTAssertEqual(ide.sourceLabel, "Qoder IDE")
+
+        // 一份凭证都没有 → 没有来源可点名，UI 退回原来的笼统文案
+        let none = QoderRateLimitReader.cliFallback(
+            identity: nil, hasWork: false, hasIde: false, now: Date())
+        XCTAssertNil(none.sourceLabel)
+    }
+
+    /// 401 退避：连败要拉长间隔，用户主动重试立即解除
+    func testAuthFailureBacksOffAndUserRetryClearsIt() {
+        let t0 = Date()
+        QoderRateLimitReader.clearBackoff()
+        XCTAssertFalse(QoderRateLimitReader.isBackedOff(.work, now: t0))
+
+        QoderRateLimitReader.noteAuthFailure(.work, now: t0)
+        XCTAssertTrue(QoderRateLimitReader.isBackedOff(.work, now: t0.addingTimeInterval(60)))
+        XCTAssertFalse(QoderRateLimitReader.isBackedOff(.work, now: t0.addingTimeInterval(6 * 60)))
+        // 退避是**按来源**的，别把 IDE 一起连坐
+        XCTAssertFalse(QoderRateLimitReader.isBackedOff(.ide, now: t0.addingTimeInterval(60)))
+
+        QoderRateLimitReader.noteAuthFailure(.work, now: t0)   // 第二次连败 → 10 分钟
+        XCTAssertTrue(QoderRateLimitReader.isBackedOff(.work, now: t0.addingTimeInterval(6 * 60)))
+
+        QoderRateLimitReader.clearBackoff()                    // 用户点「重试」
+        XCTAssertFalse(QoderRateLimitReader.isBackedOff(.work, now: t0))
+    }
+
     func testCommunityNoQuota() {
         // 免费版 total=0 → 无信用点额度概念
         let obj = parse("""

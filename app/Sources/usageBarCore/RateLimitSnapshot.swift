@@ -170,12 +170,20 @@ public struct RateLimitSnapshot: Codable, Sendable, Equatable {
     public let rateLimitReachedType: String?
     /// 重置券（含非 available 的；展示层过滤）
     public let resetCoupons: [RateLimitResetCoupon]?
+    /// **这份数据（或这个失败）是谁给的**——如 "QoderWork" / "Qoder IDE" / "Qoder CLI"（v0.3.37 新增）。
+    ///
+    /// ⚠️ 为什么必须有：Qoder 家族里一行的额度可能由**另一个产品的凭证**代领（三端同账号时共用一个额度池）。
+    /// 没有这个字段，UI 就只能说「登录凭证已失效」——可失效的其实是 QoderWork 的凭证，
+    /// Qoder CLI 本身好好的。外部用户 2026-08-28 报的就是这个误报。
+    /// 可选字段，老快照 JSON 解码自动得 nil，向后兼容。
+    public let sourceLabel: String?
 
     public init(providerId: String, windows: [RateLimitWindow], planType: String? = nil,
                 capturedAt: Date, error: RateLimitError? = nil,
                 credits: RateLimitCredits? = nil, spendCap: RateLimitSpendCap? = nil,
                 spendControlReached: Bool? = nil, rateLimitReachedType: String? = nil,
-                resetCoupons: [RateLimitResetCoupon]? = nil) {
+                resetCoupons: [RateLimitResetCoupon]? = nil,
+                sourceLabel: String? = nil) {
         self.providerId = providerId
         self.windows = windows
         self.planType = planType
@@ -186,6 +194,7 @@ public struct RateLimitSnapshot: Codable, Sendable, Equatable {
         self.spendControlReached = spendControlReached
         self.rateLimitReachedType = rateLimitReachedType
         self.resetCoupons = resetCoupons
+        self.sourceLabel = sourceLabel
     }
 
     /// 可用的重置券（详情页逐张列出、主列表 "券 ×N"）
@@ -198,20 +207,25 @@ public struct RateLimitSnapshot: Codable, Sendable, Equatable {
         windows.max { $0.usedPercent < $1.usedPercent }
     }
 
-    /// 复制成另一个 providerId（Qoder 一次 read → 复制到 CLI/Work/IDE 三实例）
+    /// 复制成另一个 providerId。
+    ///
+    /// ⚠️ v0.3.37 起 Qoder 家族**不再**用它把一个快照铺到 CLI / IDE 两行——那正是「Work 凭证失败
+    /// 被显示成 Qoder CLI 登录失效」的成因（见 `QoderRateLimitReader.readAll`）。保留此方法给别处用。
     public func with(providerId newId: String) -> RateLimitSnapshot {
         RateLimitSnapshot(providerId: newId, windows: windows, planType: planType,
                           capturedAt: capturedAt, error: error,
                           credits: credits, spendCap: spendCap,
                           spendControlReached: spendControlReached,
                           rateLimitReachedType: rateLimitReachedType,
-                          resetCoupons: resetCoupons)
+                          resetCoupons: resetCoupons,
+                          sourceLabel: sourceLabel)
     }
 }
 
 /// 采集失败的分类（对应 spec §2.5 状态机的错误态）
 public enum RateLimitError: String, Codable, Sendable, Equatable {
-    /// 凭证读不到 / 钥匙串拒绝 / 401 过期 —— 用户「用一次工具后自动恢复」或点重试
+    /// 凭证读不到 / 钥匙串拒绝 / 401 过期 —— 用户「用一次工具后自动恢复」或点重试。
+    /// ⚠️ 配 `RateLimitSnapshot.sourceLabel` 一起看：失效的是**那个来源**的凭证，不一定是本行这个工具
     case credentialUnavailable
     /// 用户在钥匙串授权框点了「拒绝」—— 不再自动重试，给重新授权入口
     case authDenied
@@ -230,4 +244,13 @@ public enum RateLimitError: String, Codable, Sendable, Equatable {
     /// CLI 拒绝了 usageBar 的启动参数（Codex 新版改了命令行接口，如 0.149 删掉 `-a untrusted`）——
     /// 不会自愈、要升级 usageBar。与 `.network` 不同：store 不保留旧快照，别拿几天前的数字充数
     case cliIncompatible
+    /// 工具**本身确认未登录**（`qodercli status -o json` 回 `logged_in:false`）——去登录即可恢复。
+    /// 与 `.credentialUnavailable` 的区别：那个说的是「某个额度凭证不可用」（可能是别的产品的），
+    /// 这个是对本工具登录态的**确凿判定**（v0.3.37）
+    case notLoggedIn
+    /// **已登录，但暂时没有额度数字**——不是错误，是中性等待态（v0.3.37）。
+    /// 典型场景：Qoder CLI 登录正常，但本机没装 QoderWork / Qoder IDE，CLI 自己也还没跑出过额度日志。
+    /// ⚠️ 这一档存在的意义就是不让它被压进 `.credentialUnavailable` ——
+    /// 「我明明能用，你说我掉登录」是外部用户 2026-08-28 报的原始观感
+    case quotaUnavailable
 }

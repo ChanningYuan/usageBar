@@ -52,7 +52,7 @@ struct QuotaPillsRow: View {
                 Spacer(minLength: 0)
             }
         } else if let err = snap.error {
-            grayLine(err)
+            grayLine(err, source: snap.sourceLabel)
         }
     }
 
@@ -102,9 +102,9 @@ struct QuotaPillsRow: View {
     }
 
     @ViewBuilder
-    private func grayLine(_ err: RateLimitError) -> some View {
+    private func grayLine(_ err: RateLimitError, source: String? = nil) -> some View {
         HStack(spacing: 4) {
-            Text(QuotaFormat.errorText(err))
+            Text(QuotaFormat.errorText(err, source: source))
                 .font(.system(size: 8.5))
                 .foregroundStyle(.tertiary)
             if err == .authDenied {
@@ -117,7 +117,9 @@ struct QuotaPillsRow: View {
                 .font(.system(size: 8.5, weight: .semibold))
                 .foregroundStyle(Color(hex: "#007AFF"))
             } else if err == .credentialUnavailable {
-                // 凭证失效 / 401 → 原地重试一次（多为瞬时）
+                // 凭证失效 / 401 → 原地重试一次（顺带解除退避）。
+                // ⚠️ .quotaUnavailable / .notLoggedIn 刻意**不给**重试按钮：
+                // 前者重试也变不出数据，后者要去 `qodercli login`——给个按不出结果的按钮只会让人白点。
                 Button("重试 ›") {
                     if let key = RateLimitSettings.logicalKey(forProvider: providerId) {
                         Task { await RateLimitCoordinator.refreshOne(key) }
@@ -230,9 +232,22 @@ enum QuotaFormat {
         return "\(cd) 后重置"
     }
 
-    static func errorText(_ err: RateLimitError) -> String {
+    /// 失败文案。**`source` 必须传**（`RateLimitSnapshot.sourceLabel`）——
+    /// 额度可能是别的产品的凭证代领的，不说清是谁失效，就会变成「我明明能用，你说我掉登录」
+    /// （外部用户 2026-08-28 报的原始观感，v0.3.37 修）。
+    static func errorText(_ err: RateLimitError, source: String? = nil) -> String {
         switch err {
-        case .credentialUnavailable: return "登录凭证已失效 ·"
+        case .credentialUnavailable:
+            // 有来源就点名：「QoderWork 额度凭证已失效 ·」——而不是笼统的「登录凭证已失效」
+            if let source { return "\(source) 额度凭证已失效 ·" }
+            return "登录凭证已失效 ·"
+        case .notLoggedIn:
+            if let source { return "\(source) 未登录 ·" }
+            return "未登录 ·"
+        case .quotaUnavailable:
+            // 中性态：已登录，只是这会儿没有额度数字。不给「重试」——重试也变不出数据
+            if let source { return "\(source) 已登录 · 暂无额度数据" }
+            return "已登录 · 暂无额度数据"
         case .authDenied:            return "未获钥匙串授权 ·"
         case .network:               return "暂时无法获取额度"
         case .noQuotaData:           return "该账号类型不提供配额数据"

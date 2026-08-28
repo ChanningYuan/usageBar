@@ -80,7 +80,11 @@ enum RateLimitCoordinator {
         case "codex":       snap = await CodexRateLimitReader().read(now: now)
         case "claude-code": snap = await readClaude(source: RateLimitSettings.shared.dataSource(for: "claude-code"), now: now)
         case "cursor":      snap = await CursorRateLimitReader().read(now: now)
-        case "qoder":       store(await QoderRateLimitReader().readAll(now: now)); return
+        case "qoder":
+            // 用户主动点「重试 / 刷新」→ 立刻解除 401 退避，别让他等到下一个退避窗口
+            QoderRateLimitReader.clearBackoff()
+            store(await QoderRateLimitReader().readAll(now: now))
+            return
         case "qwen-work":   snap = await readQwenWork(now: now, force: true)
         case "workbuddy":   snap = await WorkBuddyRateLimitReader().read(now: now)
         default:            snap = nil
@@ -169,30 +173,31 @@ enum RateLimitCoordinator {
         }
     }
 
-    /// Qoder 快照落库（issue #4，按账号归属）：
-    /// - 单快照（仅一份凭证登录 / 双登录同账号）→ 复制到各实例（原有行为），历史记一次逻辑 id "qoder"；
-    /// - 双快照（QoderWork 凭证与 Qoder IDE 登录了**不同账号**）→ 各写各行；历史**分池**记
-    ///   （"qoder" / "qoder-ide"），否则两个账号的数值在同一个池里来回踩、每轮刷新都被记成一次假变化。
+    /// Qoder 快照落库：**各写各的，绝不跨行复制**。
     ///
-    /// ⚠️ v0.3.33：QoderWork provider 已下架，`qoder-work` 这个 id 不再存在 —— 代表账号快照
-    /// 直接挂 `qoder-cli`（CLI 行的额度跟随 Work 凭证，与下架前口径一致）。
+    /// ⚠️ v0.3.37 改（外部用户 2026-08-28 报「Qoder CLI 能用却显示登录凭证已失效」）：
+    /// 老版本在「只有一份凭证」时把那**一个**快照铺到 `qoder-cli` 和 `qoder-ide` 两行——
+    /// 于是 QoderWork 凭证 401 的失败，被同时写成了「Qoder CLI 登录凭证已失效」。
+    /// 现在 reader 恒返回两个各归各的快照（见 `QoderRateLimitReader.readAll`），这里只负责原样落库。
+    ///
+    /// 历史仍**分池**记（"qoder" / "qoder-ide"）：两个账号的数值混在一个池里会来回踩，
+    /// 每轮刷新都被记成一次假变化（issue #4 的老教训，别改回去）。
     private static func storeQoder(_ snaps: [RateLimitSnapshot]) {
-        if snaps.count == 1, let snap = snaps.first {
-            recordHistory(snap, logical: "qoder")
-            for id in QoderRateLimitReader.providerIds {
-                RateLimitStore.shared.put(snap.with(providerId: id))
-            }
-            return
-        }
+        purgeRetiredQoderWork()
         for snap in snaps {
-            if snap.providerId == "qoder-ide" {
-                recordHistory(snap, logical: "qoder-ide")
-                RateLimitStore.shared.put(snap)
-            } else {
-                recordHistory(snap, logical: "qoder")
-                RateLimitStore.shared.put(snap.with(providerId: "qoder-cli"))
-            }
+            recordHistory(snap, logical: snap.providerId == "qoder-ide" ? "qoder-ide" : "qoder")
+            RateLimitStore.shared.put(snap)
         }
+    }
+
+    /// v0.3.33 下架 QoderWork 时没清缓存里的旧快照，`rate-limit-snapshot.json` 至今可能还留着一条
+    /// `qoder-work`（外部报告人机器上是 2026-08-14 那条）。它不对应任何在售 provider，
+    /// 只会让人以为还有个来源在活动。每进程清一次即可。
+    private static var purgedQoderWork = false
+    private static func purgeRetiredQoderWork() {
+        guard !purgedQoderWork else { return }
+        purgedQoderWork = true
+        RateLimitStore.shared.remove("qoder-work")
     }
 
     /// 额度历史流水（v0.3.26）：所有 provider 的额度池，变化才落一行（0717 定稿）。

@@ -193,7 +193,7 @@ struct ProviderDetailView: View {
                     quotaExtras(snap)
                 }
             } else if let err = snap?.error {
-                quotaBox { quotaNoteRow(QuotaFormat.errorText(err), action: nil) }
+                quotaBox { quotaNoteRow(QuotaFormat.errorText(err, source: snap?.sourceLabel), action: nil) }
             }
         }
     }

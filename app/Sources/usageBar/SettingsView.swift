@@ -482,8 +482,9 @@ struct SettingsView: View {
         let dot: Color
         if let snap {
             if !snap.windows.isEmpty { dot = Color(hex: "#1F8A54") }                       // 有数据 = 绿
-            else if snap.error == .credentialUnavailable || snap.error == .authDenied { dot = Color(hex: "#D97706") }  // 授权失败 = 橙
-            else { dot = .secondary }                                                        // noQuotaData / 加载中 = 灰
+            else if snap.error == .credentialUnavailable || snap.error == .authDenied
+                        || snap.error == .notLoggedIn { dot = Color(hex: "#D97706") }        // 授权失败 / 未登录 = 橙
+            else { dot = .secondary }                              // noQuotaData / quotaUnavailable / 加载中 = 灰
         } else { dot = .secondary }
         let text: String
         switch id {
