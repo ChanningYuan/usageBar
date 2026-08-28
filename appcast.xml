@@ -5,22 +5,29 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.36</h3>
+<h3>usageBar 0.3.37</h3>
 <p><b>修复</b></p>
 <ul>
-<li><b>Codex 更新后额度一直显示「连接不上 Codex」（其实不是网络问题）</b>：8 月 24 日随 ChatGPT.app 自动更新下发的 Codex 0.149 删掉了 usageBar 启动它时用的一个参数，Codex 一启动就拒绝退出，usageBar 误当成断网、顶着几天前的旧数字持续显示「更新于 Xd 前 · 连接不上 Codex」。现在改用新旧版本都认的参数，额度恢复实时刷新。</li>
-<li><b>以后 Codex 再改接口会明说</b>：Codex 拒绝 usageBar 的启动参数时，不再冒充「连接不上」，改为提示「Codex 更新后接口有变 — 升级 usageBar 后可显示额度」，也不再拿旧数字充数。</li>
+<li><b>Qoder CLI 明明能正常用，却显示「登录凭证已失效」</b>（外部用户报告）：这一行的额度过去<b>根本不是 Qoder CLI 自己的</b>——usageBar 读的是 QoderWork / Qoder IDE 的登录凭证，那两处过期或读不到时，失败被原样挂到了 Qoder CLI 这一行。于是「QoderWork 的凭证过期了」被说成了「你的 Qoder CLI 掉登录了」，而 CLI 其实一直好好的。现在 Qoder CLI 有了自己的额度来源，也不再替别人背锅。</li>
+<li><b>Qoder IDE 行不再显示 QoderWork 账号的额度</b>：以前只登录了 QoderWork 时，那个额度会被同时写到 Qoder IDE 行上——数字看着有，归属是错的。现在每一行只显示自己那份。</li>
+</ul>
+<p>  &gt; ⚠️ <b>代价</b>：如果你装了 Qoder IDE 但没在里面登录、只登录了 QoderWork，Qoder IDE 那行会从「有数字」变成「凭证已失效」。那个数字本来就不是它的。</p>
+<p><b>变更</b></p>
+<ul>
+<li><b>额度取不到时，会说清是谁取不到</b>：文案从笼统的「登录凭证已失效」改成点名到来源，例如「QoderWork 额度凭证已失效」「Qoder CLI 已登录 · 暂无额度数据」「Qoder CLI 未登录」。已登录但暂时没有额度数字属于中性状态，不再当成错误报警，也不再给一个按了也没用的「重试」。</li>
+<li><b>凭证过期后不再每轮空跑</b>：登录凭证被服务端拒绝是不会自己好的，以前每次刷新都要去打一次注定失败的请求。现在按来源退避（5 分钟起、最长 1 小时），你手动点刷新会立即解除。</li>
+<li>清理了 v0.3.33 下架 QoderWork 时残留在本地缓存里的旧额度记录。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.36</title>
-            <pubDate>Thu, 27 Aug 2026 12:03:27 +0800</pubDate>
-            <sparkle:version>0.3.36</sparkle:version>
-            <sparkle:shortVersionString>0.3.36</sparkle:shortVersionString>
+            <title>0.3.37</title>
+            <pubDate>Fri, 28 Aug 2026 13:59:23 +0800</pubDate>
+            <sparkle:version>0.3.37</sparkle:version>
+            <sparkle:shortVersionString>0.3.37</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.36/usageBar.zip" length="2614391" type="application/octet-stream" sparkle:edSignature="YFMUq3zjhSMEdsTSb1Mo9otRP6dfmidGwoh2Y2H1cWx3hY48nrPA+Mo/OJMwRs+0ApEoHHsqRf0D7ySq4P9NCw=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.37/usageBar.zip" length="2633958" type="application/octet-stream" sparkle:edSignature="4QcVM6AgM1SJaP/08l2GzmCITlvd45MeKJS7fW+ype8dgfkw/FIbvZpdPGBgs9GWgfYZpNGTHKlZ3rhnRLrnCg=="/>
         </item>
     </channel>
 </rss>
