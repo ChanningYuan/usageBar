@@ -351,7 +351,9 @@ enum ProviderDetailRegistry {
             // （对比 WorkBuddy：那是协议里**根本没有**缓存写字段，所以它只有 3 块。）
             metricRows: [[.tile(.input), .tile(.output)],
                          [.tile(.cacheRead), .tile(.cacheCreate)]],
-            hasSources: false, hasSessions: true, hasQuotaModule: false,
+            // v0.3.38：额度模块要画（每日 / 周期 / 长期三行 + 各包小字，照 Codex 的样式）。
+            // 之前 false 是因为「只有一个剩余可用、主列表已经显示过」，现在三类各有已用/额度/到期。
+            hasSources: false, hasSessions: true, hasQuotaModule: true,
             ring: .ofTotal, costUnit: .creditsTotalOnly,
             accentDark: "#45E59A", accentLight: "#147A52",
             scanner: .qwenWork),

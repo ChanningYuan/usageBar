@@ -39,13 +39,27 @@ final class RateLimitSettings: ObservableObject {
     static let claudeSources = ["statusline", "cli", "oauth"]
     static let defaultDataSources = ["claude-code": "statusline"]
 
+    /// 千问办公「精确模式 · 读取 Chrome 里的网页登录」（v0.3.38）。默认关：开了才碰 Chrome 的 cookie 库
+    /// （首次弹一次「Chrome Safe Storage」钥匙串授权）。只影响详情页的「今日已用 / 按会话积分」，
+    /// 主列表三颗药丸（每日 / 周期 / 长期）走桌面令牌，与它无关。
+    @Published private(set) var qwenWorkPreciseMode: Bool {
+        didSet { UserDefaults.standard.set(qwenWorkPreciseMode, forKey: Keys.qwenWorkPreciseMode) }
+    }
+
     private enum Keys {
         static let enabled = "usagebar.rateLimitEnabled.v1"
         static let dataSources = "usagebar.rateLimitDataSources.v1"
         static let configured = "usagebar.rateLimitConfigured.v1"
+        static let qwenWorkPreciseMode = "usagebar.qwenWorkPreciseMode.v1"
+    }
+
+    func setQwenWorkPreciseMode(_ on: Bool) {
+        guard qwenWorkPreciseMode != on else { return }
+        qwenWorkPreciseMode = on
     }
 
     private init() {
+        qwenWorkPreciseMode = UserDefaults.standard.bool(forKey: Keys.qwenWorkPreciseMode)
         if let arr = UserDefaults.standard.array(forKey: Keys.enabled) as? [String] {
             enabled = Set(arr.filter { Self.logicalIds.contains($0) })
         } else {

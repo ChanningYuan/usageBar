@@ -41,11 +41,17 @@ public struct RateLimitWindow: Codable, Sendable, Equatable {
     /// 且与官方页面对不上账。所以这类 provider 直接展示余额/已用的绝对值。
     /// 详见 `docs/0804-千问办公接入/千问办公接入-spec.md` §2a（含百分比方案的否决理由）。
     public let valueText: String?
+    /// 「重置」这个动词换成别的（千问办公的周期包是「到期」而不是「重置」）；nil = 「重置」。
+    /// 可选字段，老快照 JSON 解码自动得 nil（v0.3.38）。
+    public let resetVerb: String?
+    /// 行下小字：这一类额度里的每个积分包（「注册赠送 · 额度 2,000 · 已用 62.98 · 剩 1,937.02」）。
+    /// 只有详情页额度模块渲染，主列表药丸不渲染。可选字段（v0.3.38）。
+    public let notes: [String]?
 
     public init(kind: String, label: String, windowMinutes: Int? = nil, usedPercent: Double,
                 resetsAt: Date? = nil, severity: String? = nil, scopeModel: String? = nil,
                 detail: String? = nil, used: Double? = nil, total: Double? = nil,
-                valueText: String? = nil) {
+                valueText: String? = nil, resetVerb: String? = nil, notes: [String]? = nil) {
         self.kind = kind
         self.label = label
         self.windowMinutes = windowMinutes
@@ -57,6 +63,8 @@ public struct RateLimitWindow: Codable, Sendable, Equatable {
         self.used = used
         self.total = total
         self.valueText = valueText
+        self.resetVerb = resetVerb
+        self.notes = notes
     }
 
     /// "6,000/6,000" —— `detail` 字段的统一紧凑格式（千分位、无单位；单位在信用点语境下自明）
@@ -177,13 +185,16 @@ public struct RateLimitSnapshot: Codable, Sendable, Equatable {
     /// Qoder CLI 本身好好的。外部用户 2026-08-28 报的就是这个误报。
     /// 可选字段，老快照 JSON 解码自动得 nil，向后兼容。
     public let sourceLabel: String?
+    /// 详情页额度模块区头右侧的一句话（千问办公放「剩余 2,037.02 积分」= 三类之和）。可选字段（v0.3.38）。
+    public let headline: String?
 
     public init(providerId: String, windows: [RateLimitWindow], planType: String? = nil,
                 capturedAt: Date, error: RateLimitError? = nil,
                 credits: RateLimitCredits? = nil, spendCap: RateLimitSpendCap? = nil,
                 spendControlReached: Bool? = nil, rateLimitReachedType: String? = nil,
                 resetCoupons: [RateLimitResetCoupon]? = nil,
-                sourceLabel: String? = nil) {
+                sourceLabel: String? = nil, headline: String? = nil) {
+        self.headline = headline
         self.providerId = providerId
         self.windows = windows
         self.planType = planType
@@ -218,7 +229,7 @@ public struct RateLimitSnapshot: Codable, Sendable, Equatable {
                           spendControlReached: spendControlReached,
                           rateLimitReachedType: rateLimitReachedType,
                           resetCoupons: resetCoupons,
-                          sourceLabel: sourceLabel)
+                          sourceLabel: sourceLabel, headline: headline)
     }
 }
 

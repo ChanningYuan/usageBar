@@ -71,13 +71,15 @@ struct QuotaPillsRow: View {
             Text(w.valueText ?? "\(Int(w.usedPercent.rounded()))%")
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)   // 三颗药丸挤不下时轻微缩字，别截成「63/2,0…」
             // used/total 数字（0715 对焦稿定稿 P1）：Qoder 双药丸带数字实测 ~325pt < 可用 340pt
             if let d = w.detail {
                 Text(d)
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
                     .foregroundStyle(labelColor)
             }
-            if !hideReset, let reset = QuotaFormat.resetText(w.resetsAt) {
+            if !hideReset, let reset = QuotaFormat.resetText(w) {
                 Text(reset)
                     .font(.system(size: 8))
                     .foregroundStyle(resetColor)
@@ -230,6 +232,37 @@ enum QuotaFormat {
         guard resetsAt != nil else { return nil }
         guard let cd = countdown(resetsAt, now: now) else { return "已重置" }
         return "\(cd) 后重置"
+    }
+
+    /// 带动词的版本（v0.3.38）：千问办公的每日包是「清零」、周期包是「到期」（给日期，不给倒计时）。
+    static func resetText(_ w: RateLimitWindow, now: Date = Date()) -> String? {
+        guard let r = w.resetsAt else { return nil }
+        switch w.resetVerb {
+        case "到期": return "(\(shortDate(r)) 到期)"
+        case "清零":
+            guard let cd = countdownCoarse(r, now: now) else { return "(已清零)" }
+            return "(\(cd) 清零)"
+        default: return resetText(r, now: now)
+        }
+    }
+
+    static func resetTextLong(_ w: RateLimitWindow, now: Date = Date()) -> String? {
+        guard let r = w.resetsAt else { return nil }
+        switch w.resetVerb {
+        case "到期": return "\(shortDate(r)) 到期"
+        case "清零":
+            guard let cd = countdown(r, now: now) else { return "已清零" }
+            return "\(cd) 后清零"
+        default: return resetTextLong(r, now: now)
+        }
+    }
+
+    /// "10-23"（本地时区，月-日）
+    static func shortDate(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "M-d"
+        return f.string(from: d)
     }
 
     /// 失败文案。**`source` 必须传**（`RateLimitSnapshot.sourceLabel`）——

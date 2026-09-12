@@ -14,6 +14,7 @@ struct ProviderDetailView: View {
     let providerId: String
     @ObservedObject private var quotaStore = RateLimitStore.shared
     @ObservedObject private var quotaSettings = RateLimitSettings.shared
+    @ObservedObject private var qwenWeb = QwenWorkWebSessionStatus.shared
 
     @Environment(\.colorScheme) private var scheme
     @ObservedObject private var tabSettings = TabSettings.shared
@@ -177,13 +178,24 @@ struct ProviderDetailView: View {
                         if stale {
                             Text(QuotaFormat.staleNote(snap.capturedAt) + Self.staleHint(for: snap))
                                 .font(.system(size: 9)).foregroundStyle(pal.text3)
+                        } else if let h = snap.headline {
+                            // 千问办公：三类之和 = 官方「剩余可用」（v0.3.38）
+                            Text(h).font(.system(size: 9, weight: .medium)).foregroundStyle(pal.text2)
                         } else if let t = QuotaFormat.resetTextLong(hoisted) {
                             Text(t)
                                 .font(.system(size: 9)).foregroundStyle(pal.text3)
                         }
                     }
                     ForEach(Array(snap.windows.enumerated()), id: \.offset) { _, w in
-                        quotaWindowRow(w, stale: stale, hideReset: hoisted != nil)
+                        VStack(alignment: .leading, spacing: 3) {
+                            quotaWindowRow(w, stale: stale, hideReset: hoisted != nil)
+                            // 行下小字：这一类里的每个积分包（千问办公，v0.3.38）
+                            ForEach(w.notes ?? [], id: \.self) { note in
+                                Text(note)
+                                    .font(.system(size: 9)).foregroundStyle(pal.text3)
+                                    .padding(.leading, 60)
+                            }
+                        }
                     }
                     // 限流原因（rate_limit_reached_type，5 种文案映射，0812 Lane E 定稿）
                     if let reached = snap.rateLimitReachedType {
@@ -243,10 +255,11 @@ struct ProviderDetailView: View {
                 }
             }
             .frame(height: 5)
-            Text("\(Int(w.usedPercent.rounded()))%")
+            // 无分母的金额型窗口（千问办公「剩 X」）直接显示原样值，不编一个 0%
+            Text(w.total == nil && w.valueText != nil ? w.valueText! : "\(Int(w.usedPercent.rounded()))%")
                 .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(color)
-                .frame(width: 34, alignment: .trailing)
+                .frame(minWidth: 34, alignment: .trailing)
             // used/total 数字列（Qoder 有 detail，Claude/Codex 无 → 列整体缺席，不占宽）
             // 0715 对焦稿定稿 B1：行内一列、mono 右对齐；进度条变短的代价已过目拍板
             if let d = w.detail {
@@ -256,7 +269,7 @@ struct ProviderDetailView: View {
                     .frame(width: 86, alignment: .trailing)
             }
             if !hideReset {
-                Text(QuotaFormat.resetTextLong(w.resetsAt) ?? "")
+                Text(QuotaFormat.resetTextLong(w) ?? "")
                     .font(.system(size: 9))
                     .foregroundStyle(pal.text3)
                     .frame(width: 92, alignment: .trailing)
@@ -492,6 +505,48 @@ struct ProviderDetailView: View {
     // MARK: Hero
 
     private func hero(_ d: ProviderDetail) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            heroMain(d)
+            // 千问办公：积分未同步时说清原因 + 给主操作（spec 0910 §3.2 B）
+            if providerId == "qwen-work", spec.costUnit == .creditsTotalOnly, !d.costAvailable {
+                qwenWorkHeroHint
+            }
+        }
+    }
+
+    private var qwenWorkHeroHint: some View {
+        let hint = qwenWeb.heroHint
+        return HStack(spacing: 4) {
+            Text(hint.text).font(.system(size: 9)).foregroundStyle(pal.text3)
+            if let action = hint.action {
+                Button(action.title) { Self.performQwenWorkAction(action.kind) }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
+        }
+    }
+
+    /// 「截至」时间戳：今天只给时分，跨天带月日
+    static func syncStamp(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = Calendar.current.isDateInToday(d) ? "HH:mm" : "M-d HH:mm"
+        return f.string(from: d)
+    }
+
+    /// 网页令牌相关的操作点（详情页 Hero 与设置页共用）
+    static func performQwenWorkAction(_ kind: QwenWorkWebSessionStatus.Chip.Action) {
+        switch kind {
+        case .openUsagePage:
+            NSWorkspace.shared.open(QwenWorkBillingStore.usagePageURL)
+        case .reauthorize, .pasteManually:
+            SettingsNavigation.shared.requestFocusQuota()
+            SettingsWindowController.shared.showWindow()
+        }
+    }
+
+    private func heroMain(_ d: ProviderDetail) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(fmtTok(d.tokens.total))
@@ -516,7 +571,11 @@ struct ProviderDetailView: View {
     /// Hero 副行金额段。四档各自的措辞。
     private func heroCostLabel(_ detail: ProviderDetail) -> String {
         if spec.costUnit == .creditsTotalOnly, !detail.costAvailable {
-            return "积分未同步"
+            // 有缓存：照显示，但标「截至 HH:mm」（不是实时数）；从没同步过：积分未同步
+            guard let at = detail.costSyncedAt else { return "积分未同步" }
+            let c = detail.cost
+            let n = c >= 1 ? String(format: "%.2f", c) : String(format: "%.4f", c)
+            return "\(n) 积分（截至 \(Self.syncStamp(at))）"
         }
         let c = detail.cost
         switch spec.costUnit {

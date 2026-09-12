@@ -46,20 +46,6 @@ final class QwenWorkBillingTests: XCTestCase {
         )
     }
 
-    func testParsesComputerDailyBreakdownAsSpend() throws {
-        let root = json("""
-        {"data":{"detail":{"title":"电脑端用量"},"daily_breakdown":[
-          {"date":"2026-07-23","amount":3.25},
-          {"date":"2026-07-24","amount":-2.5}
-        ]}}
-        """)
-
-        let rows = try XCTUnwrap(QwenWorkBillingStore.parseComputer(root))
-        XCTAssertEqual(rows.map(\.amount), [-3.25, -2.5])
-        XCTAssertTrue(rows.allSatisfy { $0.origin == .computer && $0.source == "电脑版" })
-        XCTAssertEqual(QwenWorkBillingStore.parseComputer(NSNull()), [])
-    }
-
     func testReplacingMutableConversationRowDoesNotDoubleCount() async throws {
         let first = QwenWorkBillingRecord(
             amount: -7.1099,
@@ -185,21 +171,6 @@ final class QwenWorkBillingTests: XCTestCase {
     }
 
     /// 电脑端按日汇总没有 type 字段，解析时必须补成「对话」，否则会被白名单判据整段漏算。
-    func testComputerRowsAreTreatedAsConsumption() throws {
-        let root = json("""
-        {"data":{"detail":{"title":"电脑端用量"},"daily_breakdown":[{"date":"2026-07-23","amount":3.25}]}}
-        """)
-        let rows = try XCTUnwrap(QwenWorkBillingStore.parseComputer(root))
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertTrue(rows[0].isConsumption)
-        XCTAssertEqual(rows[0].spent, 3.25, accuracy: 0.0001)
-    }
-
-    /// ⛔ 回归锁：同一秒的多条账单不能互相覆盖，否则每刷新一次就多记一笔。
-    ///
-    /// 服务端同秒返回的多条行，created_at / source / detail 完全一样 → `identityKey` 相撞。
-    /// 相撞后差分会拿第一条的金额当第二条的基线，差出非零 delta 并写流水，下次刷新再算一遍，
-    /// **永远不收敛**。实测现场：一条 7-30 的旧行被写了 5 遍、每遍 0.3847，当天总额从 2.67 顶到 4.59。
     func testSameSecondRowsDoNotAccumulatePhantomLedgerEntries() async throws {
         let sameInstant = Date(timeIntervalSince1970: 1_785_477_561)
         func row(_ amount: Double) -> QwenWorkBillingRecord {

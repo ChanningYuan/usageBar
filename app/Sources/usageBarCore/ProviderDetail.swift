@@ -135,6 +135,9 @@ public struct ProviderDetail: Sendable, Equatable {
     public let cost: Double
     /// 金额数据是否已成功取得。默认 true；用于区分“真实为 0”和“尚未同步”（千问办公积分）。
     public let costAvailable: Bool
+    /// 金额最后一次成功同步的时刻（千问办公积分）。`costAvailable == false` 而它非空 = 显示的是缓存，
+    /// UI 要标「截至 HH:mm」而不是当实时数（2026-09-12 用户拍板 1a）。
+    public let costSyncedAt: Date?
     /// 分来源（固定顺序：官方直连 → 中转/代理；无流量来源不输出）
     public let sources: [SourceDetailRecord]
     /// 分模型（token 降序），已过滤 `<synthetic>`
@@ -148,7 +151,7 @@ public struct ProviderDetail: Sendable, Equatable {
     public var sessionCount: Int { sessions.count }
 
     public init(providerId: String, windowId: String, tokens: TokenBreakdown,
-                cost: Double, costAvailable: Bool = true,
+                cost: Double, costAvailable: Bool = true, costSyncedAt: Date? = nil,
                 sources: [SourceDetailRecord] = [],
                 models: [ModelDetailRecord], sessions: [SessionDetailRecord]) {
         self.providerId = providerId
@@ -156,6 +159,7 @@ public struct ProviderDetail: Sendable, Equatable {
         self.tokens = tokens
         self.cost = cost
         self.costAvailable = costAvailable
+        self.costSyncedAt = costSyncedAt
         self.sources = sources
         self.models = models
         self.sessions = sessions

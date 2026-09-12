@@ -190,7 +190,7 @@ struct RateLimitGuideSheet: View {
 
     static let qwenWorkOption = Option(
         source: "", title: "缓存真实积分账单",
-        desc: "读取本机千问办公登录凭证，向 qwenwork.cn 获取积分历史。usageBar 持久化最近一次成功结果，并按今日、本周、近 7 天、本月等周期汇总实际扣减；不会上传会话内容。",
+        desc: "读取本机千问办公登录凭证，向 qwenwork.cn 查每日 / 周期 / 长期积分的已用与额度（主列表三颗药丸、详情页额度模块）。今日已用与按会话积分只有网页登录能查到，另在设置页开启「精确模式」；不会上传会话内容。",
         recommended: false, needsKeychain: true)
 
     private var selectedOption: Option {

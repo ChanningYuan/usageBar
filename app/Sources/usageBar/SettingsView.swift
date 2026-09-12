@@ -38,6 +38,10 @@ struct SettingsView: View {
     @State private var tabsExpanded = true
     /// 正在展示引导 sheet 的逻辑开关（claude-code / qoder / qwen-work）；nil = 不展示
     @State private var guideFor: String?
+    @ObservedObject private var qwenWeb = QwenWorkWebSessionStatus.shared
+    @State private var showQwenPaste = false
+    @State private var qwenPasteText = ""
+    @State private var qwenPasteError: String?
     /// 价目表新鲜度（打开设置时取一次，避免每次重绘都去读磁盘）
     @State private var pricingFreshness: RemotePricing.Freshness?
 
@@ -399,7 +403,7 @@ struct SettingsView: View {
         .init(id: "qoder", icon: "qoder-cli", name: "Qoder",
               desc: "读取本机 Qoder 登录凭证并请求 qoder.com（首次弹一次钥匙串授权框）。CLI 与 IDE 登录同一账号时共用一份额度；登录了不同账号时各行显示各自账号的额度。"),
         .init(id: "qwen-work", icon: "qwen-work", name: "千问办公额度与积分",
-              desc: "读取千问办公登录凭证并请求 qwenwork.cn：查当前剩余可用积分（显示在主列表药丸），并缓存历史消耗流水（详情页按今日、本周、本月等周期查看）。"),
+              desc: "读取本机千问办公登录凭证，查每日 / 周期 / 长期积分的已用与额度（主列表三颗药丸、详情页额度模块）。今日已用与按会话积分只有网页登录能查到，见下面的「精确模式」。"),
         .init(id: "cursor", icon: "cursor", name: "Cursor",
               desc: "读取本机 Cursor 登录凭证并请求 cursor.com。与「数据源 → Cursor」用同一份凭证。"),
         .init(id: "workbuddy", icon: "workbuddy", name: "WorkBuddy",
@@ -421,6 +425,13 @@ struct SettingsView: View {
                     }
                     .padding(.horizontal, 5).padding(.vertical, 1)
                     .background(Capsule().fill(Color.primary.opacity(0.06)))
+                }
+                // 千问办公真掉登录（余额接口也 401）：操作点紧跟 chip（spec 0910 §3.2 C）
+                if id == "qwen-work", quotaStore.snapshot(for: "qwen-work")?.error == .credentialUnavailable {
+                    Button("打开千问办公 ›") { Self.openQwenWorkApp() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(Color(hex: "#007AFF"))
                 }
                 Spacer()
                 Toggle("", isOn: Binding(
@@ -469,6 +480,10 @@ struct SettingsView: View {
                 }
                 .padding(.leading, 32)
             }
+            // 千问办公：网页令牌线的子行（精确模式开关 + chip + 操作点），v0.3.38
+            if id == "qwen-work", quotaSettings.isEnabled("qwen-work") {
+                qwenWorkPreciseRows
+            }
         }
     }
 
@@ -494,9 +509,134 @@ struct SettingsView: View {
             case "oauth": text = "联网 API"
             default: text = "statusline"
             }
+        case "qwen-work":
+            // 主行 chip 只表示桌面令牌这条线；网页令牌线的状态在子行（spec 0910 §3.2 C）
+            text = snap?.error == .credentialUnavailable ? "凭证已失效" : "已连接"
         default: text = "联网 API"
         }
         return (text, dot)
+    }
+
+    // MARK: - 千问办公 · 精确模式子行（网页令牌线，v0.3.38）
+
+    private var qwenWorkPreciseRows: some View {
+        let chip = qwenWeb.chip
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Text("精确模式 · 读取 Chrome 里的网页登录")
+                    .font(.system(size: 10.5, weight: .medium))
+                HStack(spacing: 3) {
+                    Circle().fill(qwenChipColor(chip.tone)).frame(width: 5, height: 5)
+                    Text(chip.text).font(.system(size: 8.5, weight: .medium)).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 5).padding(.vertical, 1)
+                .background(Capsule().fill(Color.primary.opacity(0.06)))
+                if let action = chip.action {
+                    Button(action.title) { performQwenAction(action.kind) }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(Color(hex: "#007AFF"))
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { quotaSettings.qwenWorkPreciseMode },
+                    set: { on in RateLimitCoordinator.setQwenWorkPreciseMode(on) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .tint(Color(hex: "#007AFF"))
+            }
+            Text("今日已用与按会话积分只有网页登录能查到。开启后读取 Chrome 里 qwenwork.cn 的登录（首次弹一次「Chrome Safe Storage」钥匙串授权，选「始终允许」后不再弹），只取 token 一条，缓存进 usageBar 自己的钥匙串条目；授权被拒后 6 小时内不再自动尝试。网页登录 48 小时一换，过期后在 Chrome 打开一次用量明细页即可恢复。")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 12) {
+                Button("手动粘贴 Cookie / cURL ›") { qwenPasteError = nil; showQwenPaste = true }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Color(hex: "#007AFF"))
+                // 精确模式关着时「打开用量明细页」没意义（没人去读 cookie），只留手动粘贴（设计稿 S1）
+                if quotaSettings.qwenWorkPreciseMode {
+                    Button("打开用量明细页 ›") { NSWorkspace.shared.open(QwenWorkBillingStore.usagePageURL) }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Color(hex: "#007AFF"))
+                }
+                Spacer()
+            }
+        }
+        .padding(.leading, 32)
+        .padding(.top, 4)
+        .sheet(isPresented: $showQwenPaste) { qwenPasteSheet }
+    }
+
+    private func qwenChipColor(_ tone: QwenWorkWebSessionStatus.Chip.Tone) -> Color {
+        switch tone {
+        case .green: return Color(hex: "#1F8A54")
+        case .gray: return .secondary
+        case .orange: return Color(hex: "#D97706")
+        }
+    }
+
+    private func performQwenAction(_ kind: QwenWorkWebSessionStatus.Chip.Action) {
+        switch kind {
+        case .openUsagePage: NSWorkspace.shared.open(QwenWorkBillingStore.usagePageURL)
+        case .reauthorize: RateLimitCoordinator.retryQwenWorkChromeAuthorization()
+        case .pasteManually: qwenPasteError = nil; showQwenPaste = true
+        }
+    }
+
+    /// 唤起千问办公 app 让用户重新登录；没装就退到网页版。
+    private static func openQwenWorkApp() {
+        let url = URL(fileURLWithPath: "/Applications/QwenWorkCN.app")
+        if FileManager.default.fileExists(atPath: url.path) {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        } else {
+            NSWorkspace.shared.open(QwenWorkBillingStore.usagePageURL)
+        }
+    }
+
+    private var qwenPasteSheet: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("粘贴千问办公的网页登录").font(.system(size: 13, weight: .semibold))
+            Text("在 Chrome 打开 qwenwork.cn 的「用量明细」页 → 开发者工具 Network → 任一 /user/ 请求右键「Copy as cURL」，整段粘贴到下面；也可以只粘贴 Cookie 头或 token=… 那一段。usageBar 只保留 token 一项，存进自己的钥匙串条目，不上传。网页登录 48 小时一换，过期后再粘一次或在 Chrome 打开一次用量明细页。")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            TextEditor(text: $qwenPasteText)
+                .font(.system(size: 10, design: .monospaced))
+                .frame(height: 120)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.15)))
+            if let err = qwenPasteError {
+                Text(err).font(.system(size: 10)).foregroundStyle(.orange)
+            }
+            HStack {
+                Spacer()
+                Button("取消") { qwenPasteText = ""; showQwenPaste = false }
+                Button("保存") { saveQwenPaste() }.keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(width: 440)
+    }
+
+    private func saveQwenPaste() {
+        let text = qwenPasteText
+        Task {
+            let exp = await QwenWorkBillingStore.shared.setManualWebToken(text)
+            await MainActor.run {
+                if exp != nil {
+                    qwenPasteText = ""
+                    qwenPasteError = nil
+                    showQwenPaste = false
+                    quotaSettings.setQwenWorkPreciseMode(true)
+                } else {
+                    qwenPasteError = "没找到有效的 token（或已过期）。请确认粘贴的是 qwenwork.cn 的 cURL / Cookie 头。"
+                }
+            }
+            if exp != nil { await RateLimitCoordinator.refreshOne("qwen-work") }
+        }
     }
 
     // MARK: - 时间标签（popover tab 栏配置，折叠段）

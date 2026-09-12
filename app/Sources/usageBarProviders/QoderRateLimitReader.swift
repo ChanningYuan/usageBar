@@ -415,6 +415,13 @@ public struct QoderRateLimitReader: Sendable {
     /// 钥匙串读指定 safeStorage 密码 → PBKDF2-SHA1(salt="saltysalt", 1003, 16) → AES key。
     /// ⚠️ 首次调用弹系统授权框（`QoderWork Safe Storage` / `Qoder Safe Storage` 各弹各的）。
     static func deriveKey(service: String) -> Data? {
+        var status: OSStatus = errSecSuccess
+        return deriveKey(service: service, status: &status)
+    }
+
+    /// 同上，但把钥匙串的返回码带出来：调用方要区分「条目不存在」（没装那个 app）与
+    /// 「用户点了拒绝 / 不可交互」（要退避、别反复弹框）。v0.3.38 Chrome cookie 导入用。
+    static func deriveKey(service: String, status: inout OSStatus) -> Data? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -422,8 +429,8 @@ public struct QoderRateLimitReader: Sendable {
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let pwData = item as? Data else { return nil }
+        status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess, let pwData = item as? Data else { return nil }
 
         var key = Data(count: 16)
         let salt = Array("saltysalt".utf8)

@@ -92,32 +92,70 @@ enum RateLimitCoordinator {
         if let snap { store([snap]) }
     }
 
-    /// 千问办公额度快照：剩余可用（`/user/balance`）+ 当日真实消耗（账单里 `type == 对话` 的合计）。
+    /// 千问办公额度快照（v0.3.38）：每日 / 周期 / 长期三类，各自「已用/额度 · 到期」（spec 0910 §3.2 A）。
     ///
-    /// ⚠️ 这里给的是**金额不是百分比**（走 `RateLimitWindow.valueText`）：官方「我的积分」页没有「总额」
-    /// 这个概念，分母只能从流水反推、而且每天都在变（平时每日赠 100、搞活动 500），显示百分比会跳得
-    /// 没道理、也和官方页面对不上账。详见 spec §2a 里百分比方案的否决理由。
+    /// - 三类全走桌面令牌；有分母就给百分比（套色档），没分母（充值包、活动多送）就中性色显示「剩 X」。
+    /// - 「今日已用」不再做主列表药丸：它靠网页令牌，与三类额度是两条线，只在详情页 Hero 显示。
+    /// - 区头右侧 `headline` = 三类之和 = 官方「剩余可用」。
     private static func readQwenWork(now: Date = Date(), force: Bool = false) async -> RateLimitSnapshot {
         let store = QwenWorkBillingStore.shared
-        _ = await store.refresh(now: now, force: force)
+        let precise = await MainActor.run { RateLimitSettings.shared.qwenWorkPreciseMode }
+        _ = await store.refresh(now: now, force: force, preciseMode: precise)
         let quota = await store.quota(now: now)
-        var windows: [RateLimitWindow] = []
-        if let balance = quota.balance {
-            windows.append(RateLimitWindow(
-                kind: "balance", label: "剩余", usedPercent: 0,
-                severity: neutralSeverity, detail: "积分",
-                valueText: QwenWorkBillingStore.formatCredits(balance)))
+        await MainActor.run {
+            QwenWorkWebSessionStatus.shared.update(quota.webSession, todaySpent: quota.todaySpent)
         }
-        // 余额读不到时也把「今日已用」显示出来——它来自账单缓存，离线照样有值。
-        if quota.balance != nil || quota.error == nil {
-            windows.append(RateLimitWindow(
-                kind: "spent_today", label: "今日已用", usedPercent: 0,
-                severity: neutralSeverity, detail: "积分",
-                valueText: QwenWorkBillingStore.formatCredits(quota.todaySpent)))
+        let windows = quota.categories.map { cat -> RateLimitWindow in
+            let notes = cat.packs.map { pack -> String in
+                var parts = [pack.title]
+                if let g = pack.grant { parts.append("额度 \(QwenWorkBillingStore.formatCredits(g))") }
+                if let g = pack.grant { parts.append("已用 \(QwenWorkBillingStore.formatCredits(max(0, g - pack.remaining)))") }
+                parts.append("剩 \(QwenWorkBillingStore.formatCredits(pack.remaining))")
+                return parts.joined(separator: " · ")
+            }
+            if let grant = cat.grant, grant > 0, let used = cat.used {
+                // 药丸里不用千分位、整数不带小数：三颗并排只有 340pt，「63/2,000」会被截成「63/2,0…」（9/12 验收实拍）
+                let ratio = "\(Self.compact(used))/\(Self.compact(grant))"
+                return RateLimitWindow(
+                    kind: cat.id, label: cat.label, usedPercent: min(100, used / grant * 100),
+                    resetsAt: cat.resetsAt, used: used, total: grant,
+                    valueText: "已用 " + ratio, resetVerb: cat.resetVerb, notes: notes)
+            }
+            return RateLimitWindow(
+                kind: cat.id, label: cat.label, usedPercent: 0, resetsAt: cat.resetsAt,
+                severity: neutralSeverity,
+                valueText: "剩 " + Self.compact(cat.remaining),
+                resetVerb: cat.resetVerb, notes: notes)
         }
+        let headline = quota.remainingTotal.map { "剩余 \(QwenWorkBillingStore.formatCredits($0)) 积分" }
         return RateLimitSnapshot(
-            providerId: "qwen-work", windows: windows, capturedAt: now,
-            error: windows.isEmpty ? (quota.error ?? .network) : nil)
+            providerId: "qwen-work", windows: windows, planType: quota.planName, capturedAt: now,
+            error: windows.isEmpty ? (quota.error ?? .network) : nil,
+            sourceLabel: "千问办公", headline: headline)
+    }
+
+    /// 药丸用的紧凑数字：整数不带小数、不加千分位（"63" / "2000" / "1937.02"）。详情页小字仍用 `formatCredits`。
+    static func compact(_ v: Double) -> String {
+        let rounded = v.rounded()
+        if abs(v - rounded) < 0.005 { return String(Int(rounded)) }
+        return String(format: "%.2f", v)
+    }
+
+    /// 精确模式开关（设置页子行）。关掉时清网页令牌缓存与退避；开时立刻采一次（会弹一次 Chrome 钥匙串框）。
+    static func setQwenWorkPreciseMode(_ on: Bool) {
+        RateLimitSettings.shared.setQwenWorkPreciseMode(on)
+        Task {
+            if !on { await QwenWorkBillingStore.shared.clearWebToken() }
+            await refreshOne("qwen-work")
+        }
+    }
+
+    /// Chrome 授权被拒后的「重新授权」：解除退避并立刻再试一次。
+    static func retryQwenWorkChromeAuthorization() {
+        Task {
+            await QwenWorkBillingStore.shared.retryChromeAuthorization()
+            await refreshOne("qwen-work")
+        }
     }
 
     /// 金额型窗口用的中性色档：没有分母就没有「用了多少比例」，套绿/黄/红是无中生有。
@@ -156,7 +194,12 @@ enum RateLimitCoordinator {
         case "qoder":
             QoderRateLimitReader.clearCache()
         case "qwen-work":
-            Task { await QwenWorkBillingStore.shared.clearAuthCache() }
+            s.setQwenWorkPreciseMode(false)
+            Task {
+                await QwenWorkBillingStore.shared.clearAuthCache()
+                await QwenWorkBillingStore.shared.clearWebToken()
+                await MainActor.run { QwenWorkWebSessionStatus.shared.update(.off, todaySpent: nil) }
+            }
         default: break
         }
     }

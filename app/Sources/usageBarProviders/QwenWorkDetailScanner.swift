@@ -83,8 +83,11 @@ public actor QwenWorkDetailScanner {
         }
         return Self.compose(
             events: events,
+            // 网页线不可用（精确模式关 / 令牌过期）时**照样显示缓存的流水**，但 costAvailable=false + costSyncedAt
+            // 让 Hero 标「截至 HH:mm」——信息不丢、也不会被当成实时数（2026-09-12 用户拍板 1a）
             creditLedger: creditHistory.ledger,
             creditsAvailable: creditHistory.isAvailable,
+            creditsSyncedAt: creditHistory.lastSyncAt,
             metas: metas,
             window: window,
             weekStartMonday: weekStartMonday,
@@ -125,6 +128,7 @@ public actor QwenWorkDetailScanner {
         events: [QwenWorkUsageEvent],
         creditLedger: [QwenWorkCreditLedgerEntry],
         creditsAvailable: Bool = true,
+        creditsSyncedAt: Date? = nil,
         metas: [String: QwenWorkSessionMeta],
         window: TimeWindow,
         weekStartMonday: Bool,
@@ -198,6 +202,7 @@ public actor QwenWorkDetailScanner {
             tokens: total,
             cost: totalCredits,
             costAvailable: creditsAvailable,
+            costSyncedAt: creditsSyncedAt,
             models: models,
             sessions: sessions
         )
