@@ -19,6 +19,7 @@ app/.build/
 app/.swiftpm/
 app/Packages/
 app/dist/
+app/release-escrow/   # 应急发版（GitHub 不可用）时保管 zip/dmg 的目录，不进仓库；不能放 dist/ 下（build-app.sh 会清空）
 app/*.app/
 app/DerivedData/
 app/xcuserdata/
