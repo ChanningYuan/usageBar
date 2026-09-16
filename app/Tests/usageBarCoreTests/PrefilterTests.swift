@@ -84,8 +84,8 @@ final class PrefilterTests: XCTestCase {
         let withNeedle = p.parseRawEvents(url: url)
         let without = p.parseRawEvents(url: url, lineNeedle: nil)
         XCTAssertEqual(withNeedle.count, without.count, "预筛开/关事件数必须一致")
-        XCTAssertEqual(withNeedle.map(\.total), without.map(\.total))
-        XCTAssertEqual(withNeedle.map(\.cached), without.map(\.cached))
+        XCTAssertEqual(withNeedle.map(\.total.total), without.map(\.total.total))
+        XCTAssertEqual(withNeedle.map(\.total.cached), without.map(\.total.cached))
         XCTAssertEqual(withNeedle.count, 2)
     }
 
@@ -153,8 +153,8 @@ final class PrefilterTests: XCTestCase {
         for url in codexFiles {
             let a = p.parseRawEvents(url: url)
             let b = p.parseRawEvents(url: url, lineNeedle: nil)
-            if a.map({ "\($0.ts.timeIntervalSince1970)|\($0.total)|\($0.cached)" })
-                != b.map({ "\($0.ts.timeIntervalSince1970)|\($0.total)|\($0.cached)" }) {
+            if a.map({ "\($0.ts.timeIntervalSince1970)|\($0.total.total)|\($0.total.cached)" })
+                != b.map({ "\($0.ts.timeIntervalSince1970)|\($0.total.total)|\($0.total.cached)" }) {
                 codexMismatch.append(url.lastPathComponent)
             }
         }

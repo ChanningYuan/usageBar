@@ -41,6 +41,12 @@ public actor FileMtimeCache {
         Array(entries.values)
     }
 
+    /// 按 key 精确取一条（不校验 mtime/size）。给 provider 读自己写进账本的**标记类合成条目**用
+    /// （如 Codex 的账本算法版本标记，v0.3.39），不要拿它绕过 `lookup` 的 mtime 校验读真实文件条目。
+    public func entry(forPath filePath: String) -> FileCacheEntry? {
+        entries[filePath]
+    }
+
     /// 取某 provider 的全部**明细**条目（详情页聚合用，v0.3.33 起）。
     ///
     /// 详情页从这里取数，不再实时重扫源日志——源文件被清理 / 读不到也不影响展示，

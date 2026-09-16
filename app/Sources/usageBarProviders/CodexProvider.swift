@@ -1,43 +1,51 @@
 import Foundation
 import usageBarCore
 
-/// Codex（OpenAI 家）provider（mtime 增量 + fork/resume 跨文件去重版）
+/// Codex（OpenAI 家）provider（mtime 增量 + fork/resume 跨文件去重 + 谱系差分版）
 ///
 /// 数据源：`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
 /// `payload.info.total_token_usage.total_tokens` 是 session 累计值（非增量）。
-/// 基础算法：每个 session 内相邻 token_count event 间的差分 = 真实增量，按 event 时间归到日期桶。
+/// 差分核心在 `CodexLineage`（v0.3.39 起主行与详情共用；五条规则与实证见该文件头）：
+/// 峰值门 / 单次增量 min(last, 增幅) / 子代理继承快照不计 / 计数器重启从头计 / 乱序跳过。
 ///
-/// ── 计量口径（2026-07-10 起与详情页 CodexDetailScanner 统一）──
+/// ── 计量口径（2026-07-10 起与详情页统一）──
 /// 事件总量 = `input_tokens`(含cached) + `output_tokens`(含reasoning)。真实事件下恒等于
 /// `total_tokens`（本机 1567 事件对拍零偏差），但能天然排除 Codex Desktop「从其他 AI 应用导入」
 /// 生成的 replay 快照——那类文件单条 token_count 只有 total_tokens>0、四个细分字段全 0，认
 /// total 会把导入的历史会话整段计入导入当天（issue 实测：列表 4.3M vs 详情 1.8M 不一致）。
 /// 细分键完全缺失（未知旧格式）才回退 total_tokens。见 `eventTotal`。
-/// ⚠️ 不要改用 `info.last_token_usage`：每轮 last 把上下文/缓存输入重复计，累加会系统性高估 ~15%。
+/// ⚠️ `info.last_token_usage` 在 <0.142 的日志里会把上下文重复计（本机实测虚高 8–99%），所以
+/// 单次增量取 min(last, 累计增幅)，不是直接累加 last。
 ///
-/// ── fork / resume 跨文件去重（2026-06-26 实测定论，取代旧注释的「resume 不接续」结论）──
+/// ── fork / resume 跨文件去重（2026-06-26 实测定论）──
 /// `codex fork` 会新建一个 rollout 文件，**把父会话整段 token 历史 replay 进去**（total 从小爬到父
 /// final 再继续）。若每文件都从 0 差分，replay 段会被当新增 → 父会话 token 重复计（同事机实测 2~2.5x）。
-/// 修复 = 对 fork 文件用「父会话 final 作差分基线 baseline + 峰值跟踪（prev 只升不降）」，让 replay 段 delta=0。
+/// 修复 = 对 fork 文件用「父会话 final 作差分基线 baseline + 峰值门」，让 replay 段 delta=0。
+/// ⚠️ replay 段的 last>0（本机 8/11 fork 文件：42 条 replay 里 41 条 last>0、Σlast 正好等于父 final）
+/// ——所以**不能**像 ccusage 那样只累加 last，fork 必须保留父 final 基线。
 ///
 /// 三类文件的判定（优先级严格，见 `fetchDailyRecords`）：
-///   1. subagent（首条 `session_meta.source` 是 dict 且含 `subagent` 键）→ 独立计账，**绝不减基线**
-///      （baseline=0，短路）。减了会被整段清零。
-///   2. fork（首条 `session_meta.forked_from_id` 存在）→ baseline = 父会话 final（信号1，唯一可靠信号）。
-///   3. 其余（普通 / UI 重连多 meta / 交互 resume append）→ baseline=0，行为与旧算法逐天一致。
+///   1. subagent（首条 `session_meta.source` 是 dict 且含 `subagent` 键）→ baseline=0，**绝不减父基线**
+///      （thread_spawn 文件同时带 forked_from_id，减了会被整段清零）。它继承的父快照由
+///      `CodexLineage` 规则 3（last 全 0）识别、不计增量。
+///   2. fork（首条 `session_meta.forked_from_id` 存在）→ baseline = 父会话历史最大累计（信号1）。
+///   3. 其余（普通 / UI 重连多 meta / 交互 resume append）→ baseline=0。
 ///
 /// 实测依据（2026-06-26，本机 + 同事机）：
-///   - 交互式 & exec `codex resume` 都只 **append 回原文件**、不新建文件、不写 forked_from_id、total 接续
-///     累加（不 replay）→ 不产生重复计。**唯一产生 replay 新文件的是 `codex fork`，且必写 forked_from_id。**
-///     故信号1（forked_from_id）单独覆盖全部真实 replay。
+///   - 交互式 & exec `codex resume` 都只 **append 回原文件**、不新建文件、不写 forked_from_id。
+///     0.153 起 resume 会把计数器**从 0 重数**（同一文件内累计值断崖回落），由规则 4 处理。
 ///   - 「≥2 个 session_meta」**不能**当 fork 判据：UI 重连会在同一文件写多条同 own-id 的 meta（本机
 ///     5/11 那个 20.98M 会话有 36 条 meta，单调无重置、forked_from_id 为空），数 meta 会误伤它们。
-///   - 信号2（文件内嵌入「别人主文件的 session id」）作为纯跨版本/防同事旧版的兜底，当前 codex 行为下
-///     用不到，留作 TODO（实现时务必排在 subagent 短路之后，避免把 subagent 的 spawn 父 id 误当 fork）。
 ///
-/// 已知限制（罕见，保守少算、不虚高）：若先 fork、父会话之后又被 resume 增长，`sessionFinal[父]` 会反映
-/// 父 resume 后更大的 final，使该 fork 的新增被压缩。本机无 fork 文件、零影响；记为 TODO（精确解需存
-/// 「父在 fork 时刻的 final」快照）。
+/// 已知限制（罕见，保守少算、不虚高）：
+///   - 先 fork、父会话之后又被 resume 增长：`sessionFinal[父]` 反映父更大的 final，该 fork 的新增被压缩。
+///   - 父会话计数器重启后再 fork：replay 里会重放那次回落，父重启后的那段（本机场景 407 万）会被
+///     重复计一次；精确解需按事件序列匹配 replay 边界，暂不做。
+///
+/// ── 账本迁移（v0.3.39）──
+/// 旧版本按旧规则算好的条目，文件不变就永远命中 mtime 缓存，新规则永远轮不到。首次运行时把
+/// 「源文件仍在」的 Codex 条目删掉重算一次；源文件已被清理的条目保留原数（无法重算，宁可留旧数也不丢）。
+/// 见 `migrateLedgerIfNeeded`。
 public struct CodexProvider: UsageProvider {
     public let id = "codex"
     public let displayName = "Codex"
@@ -83,45 +91,40 @@ public struct CodexProvider: UsageProvider {
         return nil
     }
 
-    // MARK: - 差分核心（纯函数，可测）
+    // MARK: - 差分核心（纯函数，可测；实现在 CodexLineage）
 
-    /// 差分核心（文档 §4.4 对拍口径）：baseline 起点 + 峰值跟踪（prev 只升不降）。
-    /// 单测用它对拍真实 fork 序列；生产走 `computeDaily`（多一层按日归集）。
+    /// 只有累计值序列时的差分（无 last → 无重启检测，行为 = 旧算法「baseline + 峰值跟踪」）。
+    /// 单测用它对拍真实 fork 序列；生产走 `computeDaily`。
     static func diffSum(totals: [Int], baseline: Int) -> Int {
-        var prev = baseline
-        var sum = 0
-        for t in totals {
-            sum += max(0, t - prev)
-            prev = max(prev, t)  // 峰值跟踪：replay 段从小值再爬回父 final 也不重算
-        }
-        return sum
+        let t0 = Date(timeIntervalSince1970: 0)
+        let events = totals.map { CodexTokenEvent(ts: t0, total: CodexUsage(input: $0), last: nil) }
+        return CodexLineage.deltas(events: events, baseline: CodexUsage(input: baseline))
+            .deltas.reduce(0) { $0 + $1.delta.total }
     }
 
-    /// 把已收集的 (ts,total) 事件按 baseline+峰值跟踪差分，归到本地日期桶。
-    /// 返回 (按日增量, fileFinal=峰值)。非 fork（baseline=0）+ 单调数据时，结果与旧算法逐天一致。
+    /// 旧签名（(ts,total,cached) 三元组、无 last）——保留给回归测试；语义 = 差分模式。
     static func computeDaily(events: [(ts: Date, total: Int, cached: Int)], baseline: Int, cachedBaseline: Int)
         -> (daily: [String: Int], cachedDaily: [String: Int], fileFinal: Int, cachedFinal: Int) {
-        let sorted = events.sorted { $0.ts < $1.ts }
+        let evs = events.map {
+            CodexTokenEvent(ts: $0.ts, total: CodexUsage(input: $0.total, cached: $0.cached), last: nil)
+        }
+        let r = computeDaily(events: evs, baseline: CodexUsage(input: baseline, cached: cachedBaseline))
+        return (r.daily, r.cachedDaily, r.maxTotal.total, r.maxTotal.cached)
+    }
+
+    /// 把一个文件的事件按 `CodexLineage` 差分后归到本地日期桶。
+    /// 返回 (按日增量, 按日缓存命中, 历史最大累计)；`maxTotal` 给 fork 基线用。
+    static func computeDaily(events: [CodexTokenEvent], baseline: CodexUsage)
+        -> (daily: [String: Int], cachedDaily: [String: Int], maxTotal: CodexUsage) {
+        let r = CodexLineage.deltas(events: events, baseline: baseline)
         var daily: [String: Int] = [:]
         var cachedDaily: [String: Int] = [:]
-        var prev = baseline
-        var prevCached = cachedBaseline
-        for ev in sorted {
-            let date = DailyAggregator.dateString(for: ev.ts)
-            let delta = max(0, ev.total - prev)
-            // cached 是 total 子集,但逐 event 的 cached 增量可能 > total 增量(上一步缓存占比低时)。
-            // clamp 到 delta,保证 cachedToken ≤ token(浅色段不超过进度条总长)。
-            let cdelta = min(max(0, ev.cached - prevCached), delta)
-            prev = max(prev, ev.total)
-            prevCached = max(prevCached, ev.cached)
-            if delta > 0 {
-                daily[date, default: 0] += delta
-                if cdelta > 0 { cachedDaily[date, default: 0] += cdelta }
-            }
+        for d in r.deltas where d.delta.total > 0 {
+            let date = DailyAggregator.dateString(for: d.ts)
+            daily[date, default: 0] += d.delta.total
+            if d.delta.cached > 0 { cachedDaily[date, default: 0] += d.delta.cached }
         }
-        let peak = max(baseline, sorted.map { $0.total }.max() ?? 0)
-        let cachedPeak = max(cachedBaseline, sorted.map { $0.cached }.max() ?? 0)
-        return (daily, cachedDaily, peak, cachedPeak)
+        return (daily, cachedDaily, r.maxTotal)
     }
 
     // MARK: - 文件解析
@@ -130,20 +133,29 @@ public struct CodexProvider: UsageProvider {
     /// 与详情页同源；Codex Desktop 导入的 replay 快照（total>0、细分全0）自然归零。
     /// 细分键完全缺失（未知旧格式）才回退 total_tokens，不丢真实用量。
     static func eventTotal(_ usage: [String: Any]) -> Int {
+        usageVector(usage).total
+    }
+
+    /// `total_token_usage` / `last_token_usage` → 四维向量。与 `eventTotal` 同一套回退规则：
+    /// 细分键缺失时把 `total_tokens` 记到 input（total 仍对，cached/output 未知记 0）。
+    static func usageVector(_ usage: [String: Any]) -> CodexUsage {
         if usage["input_tokens"] != nil || usage["output_tokens"] != nil {
-            return ((usage["input_tokens"] as? Int) ?? 0) + ((usage["output_tokens"] as? Int) ?? 0)
+            return CodexUsage(input: (usage["input_tokens"] as? Int) ?? 0,
+                              cached: (usage["cached_input_tokens"] as? Int) ?? 0,
+                              output: (usage["output_tokens"] as? Int) ?? 0,
+                              reasoning: (usage["reasoning_output_tokens"] as? Int) ?? 0)
         }
-        return (usage["total_tokens"] as? Int) ?? 0
+        return CodexUsage(input: (usage["total_tokens"] as? Int) ?? 0)
     }
 
     /// 预筛子串（0709 spec R3）：目标行 `payload.type == "token_count"` 必含此串；
     /// 内容行恰好含 "token_count" 只是误放行多解析一行，由下面的结构 guard 兜住，不影响口径。
     static let lineNeedle = "token_count"
 
-    /// 遍历单个 rollout 文件，收集所有有效 token_count 事件的 (ts,total)。
+    /// 遍历单个 rollout 文件，收集所有有效 token_count 事件（累计 + 单次增量）。
     /// `info==null` 的 token_count 跳过（不变量2）。`lineNeedle: nil` = 关预筛（对拍测试用）。
-    func parseRawEvents(url: URL, lineNeedle: String? = CodexProvider.lineNeedle) -> [(ts: Date, total: Int, cached: Int)] {
-        var events: [(ts: Date, total: Int, cached: Int)] = []
+    func parseRawEvents(url: URL, lineNeedle: String? = CodexProvider.lineNeedle) -> [CodexTokenEvent] {
+        var events: [CodexTokenEvent] = []
         try? JSONLReader.forEachLine(at: url, lineNeedle: lineNeedle) { obj in
             guard let payload = obj["payload"] as? [String: Any],
                   (payload["type"] as? String) == "token_count",
@@ -152,17 +164,61 @@ public struct CodexProvider: UsageProvider {
                   let tsStr = obj["timestamp"] as? String,
                   let ts = ISODateParser.parse(tsStr)
             else { return }
-            let total = Self.eventTotal(usage)
-            let cached = (usage["cached_input_tokens"] as? Int) ?? 0   // 命中读取（input 子集）→ 浅色
-            events.append((ts, total, cached))
+            let last = (info["last_token_usage"] as? [String: Any]).map(Self.usageVector)
+            events.append(CodexTokenEvent(ts: ts, total: Self.usageVector(usage), last: last))
         }
         return events
+    }
+
+    // MARK: - 账本迁移（v0.3.39）
+
+    /// 账本算法版本：1 = 旧「差分 + 峰值跟踪」；2 = `CodexLineage`（继承快照不计 + 重启从头计）。
+    static let ledgerAlgoVersion = 2
+
+    /// 标记写在账本自身（合成条目，`size` = 版本号），而且**只在本轮重扫完成后才写**（见 `fetchDailyRecords` 末尾）。
+    /// 账本在扫描期间会节流落盘：标记若和删条目同时写，首扫中途被杀就会留下「标记已写、条目没重算」的账本，
+    /// 下次启动以为迁过了、旧数永远留着（2026-09-16 验收时抓到过这个中间态）。
+    /// 标记放最后：中途被杀 → 下次启动重新走一遍迁移（幂等：删的是「文件仍在」的条目，重扫会补回来）。
+    static func ledgerAlgoMarkerPath(sessionsDir: URL) -> String {
+        sessionsDir.appendingPathComponent(".usagebar-ledger-algo").path
+    }
+
+    /// 本账本是否还没按当前算法版本迁移过。
+    static func needsLedgerMigration(cache: FileMtimeCache, sessionsDir: URL) async -> Bool {
+        if let m = await cache.entry(forPath: ledgerAlgoMarkerPath(sessionsDir: sessionsDir)),
+           m.size >= ledgerAlgoVersion { return false }
+        return true
+    }
+
+    /// 首次以新算法运行：删掉「源文件仍在」的 Codex 真实文件条目（本轮会按新规则重算回来），
+    /// 保留源文件已消失的条目（无法重算）与合成条目（fork / 明细账本每轮都重写）。返回删掉的条数。
+    /// **不写标记**——标记由 `markLedgerMigrated` 在重扫完成后写。`fileExists` 可注入，方便单测。
+    @discardableResult
+    static func invalidateStaleEntries(cache: FileMtimeCache, sessionsDir: URL,
+                                       fileExists: @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) async -> Int {
+        let prefix = sessionsDir.path + "/"
+        return await cache.remove { e in
+            guard e.filePath.hasPrefix(prefix) else { return false }
+            guard !e.filePath.hasSuffix("#fork"), !e.filePath.hasPrefix(prefix + ".usagebar-") else { return false }
+            return fileExists(e.filePath)
+        }
+    }
+
+    /// 重扫完成后写标记（合成条目，不带任何用量）。
+    static func markLedgerMigrated(cache: FileMtimeCache, sessionsDir: URL) async {
+        await cache.store(FileCacheEntry(filePath: ledgerAlgoMarkerPath(sessionsDir: sessionsDir),
+                                         mtime: Date(), size: ledgerAlgoVersion, records: []))
     }
 
     // MARK: - 主入口
 
     public func fetchDailyRecords() async throws -> [FileDailyRecord] {
         guard FileManager.default.fileExists(atPath: sessionsDir.path) else { return [] }
+
+        let migrating = await Self.needsLedgerMigration(cache: FileMtimeCache.shared, sessionsDir: sessionsDir)
+        if migrating {
+            await Self.invalidateStaleEntries(cache: FileMtimeCache.shared, sessionsDir: sessionsDir)
+        }
 
         // 文件名 `rollout-{ISO时间}-{uuid}` 字典序 == 时间序 → 父会话一定排在它的 fork 之前，
         // 单遍即可在处理 fork 前把父的 final 填进 sessionFinal。
@@ -171,45 +227,36 @@ public struct CodexProvider: UsageProvider {
         }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
-        var sessionFinal: [String: Int] = [:]        // session id → total peak(=final)
-        var sessionCachedFinal: [String: Int] = [:]  // session id → cached peak(=final)（fork 的 cachedBaseline 用）
+        var sessionFinal: [String: CodexUsage] = [:]   // session id → 历史最大累计（fork 基线用）
         var allRecords: [FileDailyRecord] = []
 
         for url in files {
             let meta = readFirstSessionMeta(url: url)
 
             // —— baseline 决策（优先级：subagent 短路 > fork 信号1 > 默认0）——
-            var baseline = 0
-            var cachedBaseline = 0
-            if let meta {
-                if meta.isSubagent {
-                    baseline = 0; cachedBaseline = 0              // subagent 绝不减基线
-                } else if let parent = meta.forkedFromId {        // 信号1：显式 fork 指针
-                    baseline = sessionFinal[parent] ?? 0          // 父缺失 → 0 → 按全量算（自愈）
-                    cachedBaseline = sessionCachedFinal[parent] ?? 0
-                }
-                // 信号2（嵌入式父 id 兜底）：TODO，当前 codex 行为下用不到（见类型注释）。
+            var baseline = CodexUsage.zero
+            if let meta, !meta.isSubagent, let parent = meta.forkedFromId {
+                baseline = sessionFinal[parent] ?? .zero   // 父缺失 → 0 → 按全量算（自愈）
             }
 
-            let isFork = baseline > 0
+            let isFork = baseline.total > 0
             let path = url.path
             let records: [FileDailyRecord]
-            let fileFinal: Int
-            let cachedFinal: Int
+            let fileFinal: CodexUsage
 
             if !isFork,
                let m = FileMetadata.read(at: path),
                let entry = await FileMtimeCache.shared.lookup(filePath: path, mtime: m.mtime, size: m.size) {
-                // 非 fork 缓存命中：baseline 恒 0 且会话单调 → fileFinal=Σtoken、cachedFinal=Σcached
+                // 非 fork 缓存命中：baseline 恒 0 → 用 Σtoken / Σcached 近似历史最大累计
+                // （计数器重启过的文件会略大于真值——基线偏大只会让 fork 少算，是保守方向）。
                 records = entry.records
-                fileFinal = entry.records.reduce(0) { $0 + $1.token }
-                cachedFinal = entry.records.reduce(0) { $0 + $1.cachedToken }
+                fileFinal = CodexUsage(input: entry.records.reduce(0) { $0 + $1.token },
+                                       cached: entry.records.reduce(0) { $0 + $1.cachedToken })
             } else {
                 let events = parseRawEvents(url: url)
-                let (daily, cachedDaily, ff, cf) = Self.computeDaily(events: events, baseline: baseline, cachedBaseline: cachedBaseline)
+                let (daily, cachedDaily, maxTotal) = Self.computeDaily(events: events, baseline: baseline)
                 records = daily.map { FileDailyRecord(provider: id, date: $0.key, token: $0.value, cachedToken: cachedDaily[$0.key] ?? 0) }
-                fileFinal = ff
-                cachedFinal = cf
+                fileFinal = maxTotal
                 if let m = FileMetadata.read(at: path) {
                     if !isFork {
                         // 非 fork：正常按 (mtime,size) 缓存，下轮可命中跳过解析。
@@ -236,8 +283,7 @@ public struct CodexProvider: UsageProvider {
             }
 
             if let meta, !meta.ownId.isEmpty {
-                sessionFinal[meta.ownId] = max(sessionFinal[meta.ownId] ?? 0, fileFinal)
-                sessionCachedFinal[meta.ownId] = max(sessionCachedFinal[meta.ownId] ?? 0, cachedFinal)
+                sessionFinal[meta.ownId] = (sessionFinal[meta.ownId] ?? .zero).componentMax(fileFinal)
             }
             allRecords.append(contentsOf: records)
         }
@@ -254,6 +300,9 @@ public struct CodexProvider: UsageProvider {
                 records: [], details: details))
         }
 
+        if migrating {
+            await Self.markLedgerMigrated(cache: FileMtimeCache.shared, sessionsDir: sessionsDir)
+        }
         return allRecords
     }
 }

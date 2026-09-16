@@ -3,11 +3,13 @@ import usageBarCore
 
 /// Codex 详情懒加载扫描器（drill-in 展开分会话 / 分模型时才跑，独立于主刷新快路径）。
 ///
-/// 数据源 `~/.codex/sessions/**/rollout-*.jsonl`。与主行 `CodexProvider` 同源、同 fork 去重口径
-/// （baseline + 峰值跟踪），但按 (model, session, date) 聚出四维 token（净输入 / 缓存命中 / 输出 / 思考）。
+/// 数据源 `~/.codex/sessions/**/rollout-*.jsonl`。与主行 `CodexProvider` 同源、同一套差分状态机
+/// （`CodexLineage`：峰值门 / min(last,增幅) / 继承快照不计 / 重启从头计 / 乱序跳过），
+/// 但按 (model, session, date) 聚出四维 token（净输入 / 缓存命中 / 输出 / 思考）。
 ///
 /// ── 与 Claude 扫描器的关键差异 ──
-///  1. Codex 的 `token_count` 事件给的是**会话累计**（`total_token_usage`），需相邻事件差分求增量。
+///  1. Codex 的 `token_count` 事件给的是**会话累计**（`total_token_usage`），需差分求增量；
+///     差分**必须**走 `CodexLineage`，别在这里另写一套——两套口径一分叉，「列表总量 = 详情合计」就破了。
 ///  2. model 不在 token_count 里、而在 `turn_context.payload.model`；按出现顺序跟踪「当前模型」再归账。
 ///  3. 无 ai-title：标题取首条 `event_msg/user_message`（跳过 `<...>` 环境注入块），兜底 cwd 目录名。
 ///  4. fork：`session_meta.forked_from_id` 存在时用父会话 final 作差分基线（同 `CodexProvider` 信号1）。
@@ -18,19 +20,8 @@ public actor CodexDetailScanner {
     public static let shared = CodexDetailScanner()
     public init() {}
 
-    /// token_count.total_token_usage 的累计快照（四维）。
-    private struct Cumul {
-        var input = 0        // input_tokens（含 cached）
-        var cached = 0       // cached_input_tokens（input 子集）
-        var output = 0       // output_tokens（含 reasoning）
-        var reasoning = 0    // reasoning_output_tokens（output 子集）
-    }
-
-    private struct Ev {
-        let ts: Date
-        let model: String
-        let c: Cumul
-    }
+    /// 一条 token_count：累计 `total_token_usage` + 单次 `last_token_usage`（可能缺）+ 当时模型。
+    private typealias Ev = CodexTokenEvent
 
     private struct Meta {
         let ownId: String
@@ -70,7 +61,7 @@ public actor CodexDetailScanner {
         let inWindow = DailyAggregator.windowPredicate(window, weekStartMonday: weekStartMonday, now: now)
         let threadNames = loadThreadNames()   // sessionId → Codex 侧栏标题
 
-        var sessionFinal: [String: Cumul] = [:]   // ownId → 峰值累计（fork baseline 用）
+        var sessionFinal: [String: CodexUsage] = [:]   // ownId → 历史最大累计（fork baseline 用）
         var hero = TokenBreakdown(); var heroCost = 0.0
         var byModel: [String: TokenBreakdown] = [:]; var modelCost: [String: Double] = [:]
         var bySession: [String: TokenBreakdown] = [:]; var sessionCost: [String: Double] = [:]
@@ -91,31 +82,12 @@ public actor CodexDetailScanner {
             let meta = fp.meta
             let sid = meta.ownId.isEmpty ? path : meta.ownId
 
-            // baseline 决策（同 CodexProvider）：subagent 短路 > fork 信号1 > 默认 0。
-            var prev = Cumul()
-            if !meta.isSubagent, let parent = meta.forkedFromId, let pf = sessionFinal[parent] {
-                prev = pf
-            }
-            var fileFinal = prev
-
-            for ev in fp.events {
-                let dIn = max(0, ev.c.input - prev.input)
-                let dCa = max(0, ev.c.cached - prev.cached)
-                let dOut = max(0, ev.c.output - prev.output)
-                let dRe = max(0, ev.c.reasoning - prev.reasoning)
-                prev.input = max(prev.input, ev.c.input)
-                prev.cached = max(prev.cached, ev.c.cached)
-                prev.output = max(prev.output, ev.c.output)
-                prev.reasoning = max(prev.reasoning, ev.c.reasoning)
-                fileFinal = prev
-
-                let net = max(0, dIn - dCa)              // 净输入 = 增量输入 − 增量缓存命中
-                if net == 0 && dCa == 0 && dOut == 0 { continue }
-                let date = DailyAggregator.dateString(for: ev.ts)
+            let (deltas, maxTotal) = Self.lineage(fp, sessionFinal: sessionFinal)
+            for d in deltas {
+                let date = DailyAggregator.dateString(for: d.ts)
                 guard inWindow(date) else { continue }
-
-                let tb = TokenBreakdown(input: net, output: dOut, cacheRead: dCa, reasoning: min(dRe, dOut))
-                let model = ev.model.isEmpty ? meta.firstModel : ev.model
+                let tb = Self.breakdown(d.delta)
+                let model = d.model.isEmpty ? meta.firstModel : d.model
                 let c = UnifiedPricing.cost(tb, modelId: model)
                 hero.add(tb); heroCost += c
                 byModel[model, default: TokenBreakdown()].add(tb); modelCost[model, default: 0] += c
@@ -123,12 +95,7 @@ public actor CodexDetailScanner {
             }
 
             if !meta.ownId.isEmpty {
-                var f = sessionFinal[meta.ownId] ?? Cumul()
-                f.input = max(f.input, fileFinal.input)
-                f.cached = max(f.cached, fileFinal.cached)
-                f.output = max(f.output, fileFinal.output)
-                f.reasoning = max(f.reasoning, fileFinal.reasoning)
-                sessionFinal[meta.ownId] = f
+                sessionFinal[meta.ownId] = (sessionFinal[meta.ownId] ?? .zero).componentMax(maxTotal)
             }
             if let existing = sessMeta[sid] {
                 sessMeta[sid] = Meta(ownId: existing.ownId, forkedFromId: existing.forkedFromId,
@@ -179,7 +146,7 @@ public actor CodexDetailScanner {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         let threadNames = loadThreadNames()
 
-        var sessionFinal: [String: Cumul] = [:]
+        var sessionFinal: [String: CodexUsage] = [:]
         var acc: [String: TokenBreakdown] = [:]        // key = session|model|date
         var sessMeta: [String: Meta] = [:]
         var lastAt: [String: Date] = [:]
@@ -199,40 +166,16 @@ public actor CodexDetailScanner {
             let meta = fp.meta
             let sid = meta.ownId.isEmpty ? path : meta.ownId
 
-            var prev = Cumul()
-            if !meta.isSubagent, let parent = meta.forkedFromId, let pf = sessionFinal[parent] {
-                prev = pf
-            }
-            var fileFinal = prev
-
-            for ev in fp.events {
-                let dIn = max(0, ev.c.input - prev.input)
-                let dCa = max(0, ev.c.cached - prev.cached)
-                let dOut = max(0, ev.c.output - prev.output)
-                let dRe = max(0, ev.c.reasoning - prev.reasoning)
-                prev.input = max(prev.input, ev.c.input)
-                prev.cached = max(prev.cached, ev.c.cached)
-                prev.output = max(prev.output, ev.c.output)
-                prev.reasoning = max(prev.reasoning, ev.c.reasoning)
-                fileFinal = prev
-
-                let net = max(0, dIn - dCa)
-                if net == 0 && dCa == 0 && dOut == 0 { continue }
-                let date = DailyAggregator.dateString(for: ev.ts)
-                let model = ev.model.isEmpty ? meta.firstModel : ev.model
-                let tb = TokenBreakdown(input: net, output: dOut, cacheRead: dCa,
-                                        reasoning: min(dRe, dOut))
-                acc["\(sid)\u{0}\(model)\u{0}\(date)", default: TokenBreakdown()].add(tb)
-                lastAt[sid] = max(lastAt[sid] ?? .distantPast, ev.ts)
+            let (deltas, maxTotal) = Self.lineage(fp, sessionFinal: sessionFinal)
+            for d in deltas {
+                let date = DailyAggregator.dateString(for: d.ts)
+                let model = d.model.isEmpty ? meta.firstModel : d.model
+                acc["\(sid)\u{0}\(model)\u{0}\(date)", default: TokenBreakdown()].add(Self.breakdown(d.delta))
+                lastAt[sid] = max(lastAt[sid] ?? .distantPast, d.ts)
             }
 
             if !meta.ownId.isEmpty {
-                var f = sessionFinal[meta.ownId] ?? Cumul()
-                f.input = max(f.input, fileFinal.input)
-                f.cached = max(f.cached, fileFinal.cached)
-                f.output = max(f.output, fileFinal.output)
-                f.reasoning = max(f.reasoning, fileFinal.reasoning)
-                sessionFinal[meta.ownId] = f
+                sessionFinal[meta.ownId] = (sessionFinal[meta.ownId] ?? .zero).componentMax(maxTotal)
             }
             if let existing = sessMeta[sid] {
                 sessMeta[sid] = Meta(ownId: existing.ownId, forkedFromId: existing.forkedFromId,
@@ -257,6 +200,27 @@ public actor CodexDetailScanner {
                                     lastActivity: lastAt[sid] ?? mt?.lastActivity ?? .distantPast,
                                     tokens: tb)
         }
+    }
+
+    // MARK: - 差分（与 CodexProvider 同一状态机）
+
+    /// baseline 决策（同 CodexProvider）：subagent 短路 > fork 信号1 > 默认 0，然后交给 `CodexLineage`。
+    /// 返回 (真实增量, 历史最大累计)；后者写回 `sessionFinal` 给后续 fork 当基线。
+    private static func lineage(_ fp: FileParse, sessionFinal: [String: CodexUsage])
+        -> (deltas: [CodexDeltaEvent], maxTotal: CodexUsage) {
+        var baseline = CodexUsage.zero
+        if !fp.meta.isSubagent, let parent = fp.meta.forkedFromId, let pf = sessionFinal[parent] {
+            baseline = pf
+        }
+        let r = CodexLineage.deltas(events: fp.events, baseline: baseline)
+        return (r.deltas.filter { $0.delta.total > 0 }, r.maxTotal)
+    }
+
+    /// 四维增量 → 统一 5 列：净输入 = input − cached；缓存读 = cached；思考 ≤ 输出。
+    /// 恒等式 net + cacheRead + output == delta.total，与主行 `FileDailyRecord.token` 逐事件相等。
+    private static func breakdown(_ d: CodexUsage) -> TokenBreakdown {
+        TokenBreakdown(input: max(0, d.input - d.cached), output: d.output,
+                       cacheRead: min(d.cached, d.input), reasoning: min(d.reasoning, d.output))
     }
 
     // MARK: - 文件枚举（与 CodexProvider 同源）
@@ -331,12 +295,9 @@ public actor CodexDetailScanner {
                           let usage = info["total_token_usage"] as? [String: Any],
                           let tsStr = obj["timestamp"] as? String,
                           let ts = ISODateParser.parse(tsStr) {
-                    var c = Cumul()
-                    c.input = (usage["input_tokens"] as? Int) ?? 0
-                    c.cached = (usage["cached_input_tokens"] as? Int) ?? 0
-                    c.output = (usage["output_tokens"] as? Int) ?? 0
-                    c.reasoning = (usage["reasoning_output_tokens"] as? Int) ?? 0
-                    events.append(Ev(ts: ts, model: currentModel, c: c))
+                    // 与 CodexProvider.parseRawEvents 同一解析（含 total_tokens 回退、last 可缺）
+                    let last = (info["last_token_usage"] as? [String: Any]).map(CodexProvider.usageVector)
+                    events.append(Ev(ts: ts, total: CodexProvider.usageVector(usage), last: last, model: currentModel))
                     lastTs = max(lastTs, ts)
                 }
 
