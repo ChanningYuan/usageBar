@@ -5,30 +5,28 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.38</h3>
+<h3>usageBar 0.3.39</h3>
 <p><b>修复</b></p>
 <ul>
-<li><b>千问办公「今日已用」长期显示 0、详情页积分显示 0.0000</b>：8 月 20 日起千问办公桌面端自动换了一种登录令牌，qwenwork.cn 的积分账单接口不再认它（余额接口照常）。usageBar 没识别出来，一直拿 8 月 20 日之前的旧账本充数。现在旧账本不再冒充今日数字，拿不到就明说「积分未同步」并给出恢复入口。</li>
-<li><b>主列表不再把「账单接口不开放」误报成「凭证已失效」</b>：只有余额接口也拒绝时才是真的掉登录，并紧跟「打开千问办公 ›」入口。</li>
-<li>删除已被官方下线的 `/user/billings/computer` 调用（服务端返回 410）。</li>
+<li><b>Codex 子代理会话把父会话的历史整段算成自己的用量</b>：Codex 的子代理（guardian 审批评审、thread_spawn 并行子任务）日志第一条记的是父会话当时的累计快照，usageBar 一直把这个快照当成子代理的新增。本机实测 7/28 一个子代理会话因此多算 1.03 亿、7/26 一个多算 2716 万。现在识别出继承快照，只计子代理自己的请求。</li>
+<li><b>Codex 0.153 起续聊老会话后，那天起的用量全部记 0</b>：新版 Codex 续聊时会把会话累计计数器从 0 重数，usageBar 的「只认涨」规则把重数后的所有增量都当成 0（本机 9/12 一天 407 万记成 0）。现在识别出计数器重启，从头计。</li>
+<li>单次增量改为取 `last_token_usage` 与累计增幅两者中的较小值：新口径在正常数据上与旧口径逐条相等，永远不会比旧口径高；主列表与详情页共用同一套差分规则。</li>
 </ul>
-<p><b>新增</b></p>
+<p><b>变更</b></p>
 <ul>
-<li><b>千问办公主列表改为三颗额度药丸：每日 / 周期 / 长期</b>，各自显示「已用/额度 · 到期」，与 Claude、Codex 的窗口药丸同一语义；有分母就按已用比例套绿黄红。每日额度按套餐查（免费 100 / Plus 200 / Pro 300 / 企业 150），周期额度免费档按注册赠送、付费档按套餐月包、企业席位按服务端给的总额；充值包、活动多送等推不出分母时只显示「剩 X」，不编数。</li>
-<li><b>详情页新增「账号额度」模块</b>（样式同 Codex）：套餐徽标、三行进度条与到期、每行下面列出这一类里的每个积分包（来源、额度、已用、剩余）；区头右侧显示三类之和 = 官方「剩余可用」。</li>
-<li><b>「精确模式 · 读取 Chrome 里的网页登录」</b>（设置 → 账号额度与积分 → 千问办公，默认关）：今日已用与按会话积分只有网页登录能查到。开启后读取 Chrome 里 qwenwork.cn 的登录（首次弹一次「Chrome Safe Storage」钥匙串授权），只取 token 一条并缓存进 usageBar 自己的钥匙串条目；授权被拒后 6 小时内不再自动尝试。网页登录 48 小时一换，过期时设置页与详情页都给「打开用量明细页」一键恢复；不用 Chrome 的可以「手动粘贴 Cookie / cURL」。</li>
+<li><b>升级后首次启动会按新规则重算全部 Codex 日志</b>，期间 Codex 那一行先显示旧数字、扫完才更新（本机 168 个文件 / 720 MB 约 5 分钟）。源日志已被清理的历史条目无法重算，保留原数。</li>
 </ul>
-<p>  &gt; ⚠️ <b>代价</b>：不开精确模式时详情页没有「今日已用」和按会话积分（主列表三颗药丸不受影响）。</p>
+<p>  &gt; ⚠️ <b>代价</b>：用过子代理的用户，Codex「累计」会明显下降（本机 12.04 亿 → 10.78 亿）。降掉的是被重复计入的父会话历史，不是丢数据。</p>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.38</title>
-            <pubDate>Sat, 12 Sep 2026 17:28:17 +0800</pubDate>
-            <sparkle:version>0.3.38</sparkle:version>
-            <sparkle:shortVersionString>0.3.38</sparkle:shortVersionString>
+            <title>0.3.39</title>
+            <pubDate>Wed, 16 Sep 2026 17:00:57 +0800</pubDate>
+            <sparkle:version>0.3.39</sparkle:version>
+            <sparkle:shortVersionString>0.3.39</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.38/usageBar.zip" length="2748488" type="application/octet-stream" sparkle:edSignature="iHCMx0K8o0T719LSQMQtO0pOTX4g2wzGS8iKLv4Mvws1bUEQe6ucrNYc1d4t7qiiE+SdxDA3OMzy33zK3bK9Bg=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.39/usageBar.zip" length="2761805" type="application/octet-stream" sparkle:edSignature="/KkXhaygyMULTmQlY/RWBHuxr6DKv2dgP59bU3rLeMCmg0zE3aTE4cPirTQLhKyVjHLrXagt3HuUx2YhEkakCw=="/>
         </item>
     </channel>
 </rss>
