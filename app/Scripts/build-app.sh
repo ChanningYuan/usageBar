@@ -20,12 +20,24 @@ if [ "${SIGN:-1}" != "0" ] && security find-identity -v -p codesigning 2>/dev/nu
   DO_SIGN=1
 fi
 
+echo "→ 清空 release 编译目录（保证干净构建）..."
+# 2026-09-17 加：`.build/release` 只是指向 `.build/<架构>/release` 的软链接，手工 `rm -rf .build/release`
+# 只删链接、旧目标文件原样留着，0.3.39 / 0.3.40 都因此是增量构建。由脚本自己删真实目录，不再靠人记得。
+BUILD_STARTED_AT="$(date "+%Y-%m-%d %H:%M:%S")"
+cd "$PROJECT_DIR"
+RELEASE_BIN_DIR="$(swift build -c release --show-bin-path 2>/dev/null | tail -1)"
+if [ -n "$RELEASE_BIN_DIR" ] && [ -d "$RELEASE_BIN_DIR" ]; then
+  rm -rf "$RELEASE_BIN_DIR"
+  echo "   已删除 ${RELEASE_BIN_DIR#$PROJECT_DIR/}"
+fi
+
 echo "→ 跑全部单元测试（发版前必须全绿，不通过就停止构建）..."
 # 2026-09-17 加：此前 build-app.sh 不跑测试，是否跑全靠发版的人记得。测试不过的代码不该走到签名公证。
 cd "$PROJECT_DIR"
 TEST_LOG="$(mktemp -t usagebar-tests)"
 if swift test > "$TEST_LOG" 2>&1; then
-  grep -E "Executed [0-9]+ tests, with" "$TEST_LOG" | tail -1 | sed 's/^[[:space:]]*/   ✓ /'
+  TEST_SUMMARY="$(grep -E "Executed [0-9]+ tests, with" "$TEST_LOG" | tail -1 | sed 's/^[[:space:]]*//')"
+  echo "   ✓ ${TEST_SUMMARY}"
   rm -f "$TEST_LOG"
 else
   echo "   ❌ 单元测试没通过，停止构建。失败项："
@@ -62,6 +74,13 @@ swift build -c release
 echo "→ 清理旧 dist..."
 rm -rf "$DIST_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
+# 构建信息：发版自检脚本 release-check.sh 靠它核对「干净构建」「测试通过」
+{
+  echo "version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$PROJECT_DIR/Sources/usageBar/Info.plist")"
+  echo "build_started_at=${BUILD_STARTED_AT}"
+  echo "release_bin_dir=${RELEASE_BIN_DIR}"
+  echo "tests=${TEST_SUMMARY}"
+} > "$DIST_DIR/build-info.txt"
 mkdir -p "$APP_DIR/Contents/Resources"
 
 echo "→ 复制 binary..."
