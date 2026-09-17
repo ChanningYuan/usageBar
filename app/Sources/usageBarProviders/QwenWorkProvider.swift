@@ -165,14 +165,17 @@ public struct QwenWorkProvider: UsageProvider {
 
     private let sessionsRoot: URL
     private let ledger: FileMtimeCache
+    private let detailScanner: QwenWorkDetailScanner
 
     public init(
         sessionsRoot: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".qwenworkcn/logs/sessions"),
-        ledger: FileMtimeCache = .shared
+        ledger: FileMtimeCache = .shared,
+        detailScanner: QwenWorkDetailScanner = .shared
     ) {
         self.sessionsRoot = sessionsRoot
         self.ledger = ledger
+        self.detailScanner = detailScanner
     }
 
     public func fetchDailyRecords() async throws -> [FileDailyRecord] {
@@ -184,22 +187,23 @@ public struct QwenWorkProvider: UsageProvider {
         // 1. 同一 request 被多个 segment 重放时覆盖同一条，不会翻倍；
         // 2. 原始 segment 轮转/删除后，已经发生的历史消耗仍保留。
         // 只有真的记到了 token 才写账本；0-token 事件仅用于会话区间（见 parseFile 的注释）。
-        for event in events where event.tokens.total > 0 {
-            await ledger.store(Self.ledgerEntry(from: event, sessionsRoot: sessionsRoot))
+        //
+        // v0.3.41：**每个请求的明细和主列表数存进同一条记录**（积分不入账本——它来自联网账单且会原地增长，
+        // 见 QwenWorkDetailScanner.allDetails 的说明）。此前明细是一条每轮按现存日志整份重算的合成记录，
+        // 千问办公清理旧日志后（本机 2026-09-17 最早只剩 9/08）旧明细被覆盖掉，8/14 主列表 158,565 / 明细 98,587。
+        let counted = events.filter { $0.tokens.total > 0 }
+        let details = await detailScanner.detailRecords(for: counted)
+        for (event, detail) in zip(counted, details) {
+            await ledger.store(Self.ledgerEntry(from: event, detail: detail, sessionsRoot: sessionsRoot))
         }
-        // v0.3.33：token 明细落账本（积分不入账本——它来自联网账单且会原地增长，
-        // 见 QwenWorkDetailScanner.allDetails 的说明）。
-        let details = await QwenWorkDetailScanner.shared.allDetails()
-        if !details.isEmpty {
-            await ledger.store(FileCacheEntry(
-                filePath: "usagebar://detail-ledger/qwen-work", mtime: Date(), size: details.count,
-                records: [], details: details))
-        }
-        return Self.dailyRecords(from: events.filter { $0.tokens.total > 0 })
+        // 退役旧的整份明细记录（与上面逐请求的明细重复，留着详情页会算两遍）。每轮都删，幂等。
+        await ledger.removeEntry(forPath: "usagebar://detail-ledger/qwen-work")
+        return Self.dailyRecords(from: counted)
     }
 
-    private static func ledgerEntry(
+    static func ledgerEntry(
         from event: QwenWorkUsageEvent,
+        detail: FileDetailRecord,
         sessionsRoot: URL
     ) -> FileCacheEntry {
         let key = sessionsRoot
@@ -216,7 +220,8 @@ public struct QwenWorkProvider: UsageProvider {
                 date: event.date,
                 token: event.tokens.total,
                 cachedToken: event.tokens.cacheRead
-            )]
+            )],
+            details: [detail]
         )
     }
 

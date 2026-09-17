@@ -102,6 +102,12 @@ public actor QwenWorkDetailScanner {
     /// 账本只存 token —— 否则账单一变（同一会话的账单行金额会原地增长），账本里就是陈旧值。
     public func allDetails() async -> [FileDetailRecord] {
         let events = await QwenWorkEventStore.shared.events(under: sessionsRoot)
+        return detailRecords(for: events.filter { $0.tokens.total > 0 })
+    }
+
+    /// 给定请求事件逐条出明细，**与入参顺序一一对应**（v0.3.41）。
+    /// 主行把每个请求的明细和主列表数存进同一条账本记录，千问办公清理旧日志后明细也还在。
+    func detailRecords(for events: [QwenWorkUsageEvent]) -> [FileDetailRecord] {
         var metas = loadTranscriptMetas()
         for (sessionId, databaseMeta) in loadDatabaseMetas() {
             if var current = metas[sessionId] {
@@ -111,7 +117,7 @@ public actor QwenWorkDetailScanner {
                 metas[sessionId] = databaseMeta
             }
         }
-        return events.filter { $0.tokens.total > 0 }.map { e in
+        return events.map { e in
             FileDetailRecord(provider: "qwen-work", date: e.date, sessionId: e.sessionId,
                              title: metas[e.sessionId]?.resolvedTitle ?? "",
                              model: e.model, lastActivity: e.timestamp, tokens: e.tokens)

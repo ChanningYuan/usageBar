@@ -58,16 +58,20 @@ public actor ClaudeJsonlScanner {
             let path = url.path
             guard let meta = FileMetadata.read(at: path) else { continue }
 
-            if let entry = await FileMtimeCache.shared.lookup(filePath: path, mtime: meta.mtime, size: meta.size) {
+            // 命中缓存还要自检「主列表合计 = 明细合计」：旧版本两套解析各算各的，不等就按新口径重算一次（v0.3.41）。
+            if let entry = await FileMtimeCache.shared.lookup(filePath: path, mtime: meta.mtime, size: meta.size),
+               entry.recordsMatchDetails(provider: "claude-code") {
                 allRecords.append(contentsOf: entry.records)
                 continue
             }
 
-            let records = (try? parseFile(url: url)) ?? []
             // v0.3.33：同一次扫盘顺带落**明细**（会话 / 模型 / 5 列拆分）。
             // 详情页从此读账本，源日志被清理或读不到也能展开（issue #8 根治）。
+            // v0.3.41：主列表的数**直接由明细汇总**，不再另跑一套解析——两套各算各的，
+            // 缓存写入拆分与总数矛盾时主列表与详情对不上（2026-09-17 实测 5 个文件差 1,041,409）。
             let details = ClaudeDetailScanner.detailRecords(
                 url: url, providerId: "claude-code", attachSource: true)
+            let records = ClaudeDetailScanner.dailyRecords(from: details, provider: "claude-code")
             let entry = FileCacheEntry(filePath: path, mtime: meta.mtime, size: meta.size,
                                        records: records, details: details)
             await FileMtimeCache.shared.store(entry)
@@ -76,14 +80,12 @@ public actor ClaudeJsonlScanner {
 
         return allRecords
     }
-
-    /// 解析单个 jsonl 文件，统一按 `claude-code` 聚合 token。
-    private func parseFile(url: URL) throws -> [FileDailyRecord] {
-        try ClaudeTranscriptParser.parse(url: url) { _ in "claude-code" }
-    }
 }
 
-// MARK: - 共享 transcript 解析器（Claude Code + Cowork 共用）
+// MARK: - transcript 按日解析器
+//
+// ⚠️ v0.3.41 起 Claude Code / Cowork 的主列表改由明细汇总（`ClaudeDetailScanner.dailyRecords`），
+// 生产代码不再调用本解析器；保留它是为了预筛（lineNeedle）对拍测试 `PrefilterTests`。
 
 /// 解析一个 Claude Code 风格的 jsonl transcript，按 (provider, date) 聚合 token。
 ///

@@ -20,6 +20,20 @@ if [ "${SIGN:-1}" != "0" ] && security find-identity -v -p codesigning 2>/dev/nu
   DO_SIGN=1
 fi
 
+echo "→ 跑全部单元测试（发版前必须全绿，不通过就停止构建）..."
+# 2026-09-17 加：此前 build-app.sh 不跑测试，是否跑全靠发版的人记得。测试不过的代码不该走到签名公证。
+cd "$PROJECT_DIR"
+TEST_LOG="$(mktemp -t usagebar-tests)"
+if swift test > "$TEST_LOG" 2>&1; then
+  grep -E "Executed [0-9]+ tests, with" "$TEST_LOG" | tail -1 | sed 's/^[[:space:]]*/   ✓ /'
+  rm -f "$TEST_LOG"
+else
+  echo "   ❌ 单元测试没通过，停止构建。失败项："
+  grep -E "error:|failed" "$TEST_LOG" | head -20 | sed 's/^/     /'
+  echo "   完整日志：$TEST_LOG"
+  exit 1
+fi
+
 echo "→ 刷新内置价目快照 (pricing-snapshot.json)..."
 # 每次构建从线上表拉一份塞进 app 资源：用户机器拉不到 usagebar.cn 时（公司安全软件拦 app 进程、
 # 离线首启…）靠它兜底，不至于全员 $0。新鲜度 = 发版日；装上后 app 仍会照常拉线上表更新。

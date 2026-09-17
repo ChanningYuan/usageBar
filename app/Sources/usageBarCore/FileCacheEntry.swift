@@ -29,6 +29,18 @@ public struct FileCacheEntry: Codable, Sendable, Equatable {
     }
 }
 
+extension FileCacheEntry {
+    /// 这一条账本记录里，某来源的主列表合计是否等于明细合计（v0.3.41）。
+    ///
+    /// 按文件存明细的来源（Claude Code / Cowork）命中缓存时用它自检：旧版本主列表与明细是两套解析
+    /// 各算各的，缓存写入拆分与总数矛盾时两者不等；不等就当作未命中、按新口径重算一次（自愈）。
+    public func recordsMatchDetails(provider: String) -> Bool {
+        let listTotal = records.filter { $0.provider == provider }.reduce(0) { $0 + $1.token }
+        let detailTotal = details.filter { $0.provider == provider }.reduce(0) { $0 + $1.tokens.total }
+        return listTotal == detailTotal
+    }
+}
+
 /// 单文件内"某 provider 在某天的总 token"
 public struct FileDailyRecord: Codable, Sendable, Equatable {
     /// "claude-code" / "cowork" / "qoder-cli" / "qoder-ide" / "qwen-work" / "codex" 等

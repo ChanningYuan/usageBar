@@ -44,15 +44,18 @@ public struct CoworkProvider: UsageProvider {
             let path = url.path
             guard let meta = FileMetadata.read(at: path) else { continue }
 
-            if let entry = await FileMtimeCache.shared.lookup(filePath: path, mtime: meta.mtime, size: meta.size) {
+            // 命中缓存还要自检「主列表合计 = 明细合计」，不等就按新口径重算一次（v0.3.41，同 Claude Code）。
+            if let entry = await FileMtimeCache.shared.lookup(filePath: path, mtime: meta.mtime, size: meta.size),
+               entry.recordsMatchDetails(provider: "cowork") {
                 allRecords.append(contentsOf: entry.records)
                 continue
             }
 
-            let records = (try? ClaudeTranscriptParser.parse(url: url) { _ in "cowork" }) ?? []
             // v0.3.33：扫盘顺带落明细，详情页改读账本（issue #8 根治）
+            // v0.3.41：主列表的数直接由明细汇总（同 Claude Code），两边来自同一次解析。
             let details = ClaudeDetailScanner.detailRecords(
                 url: url, providerId: "cowork", attachSource: false)
+            let records = ClaudeDetailScanner.dailyRecords(from: details, provider: "cowork")
             let entry = FileCacheEntry(filePath: path, mtime: meta.mtime, size: meta.size,
                                        records: records, details: details)
             await FileMtimeCache.shared.store(entry)

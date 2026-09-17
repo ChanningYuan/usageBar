@@ -115,11 +115,13 @@ final class QwenWorkProviderTests: XCTestCase {
 
         XCTAssertEqual(mainRecords.reduce(0) { $0 + $1.token }, 130)
         XCTAssertEqual(mainRecords.reduce(0) { $0 + $1.cachedToken }, 40)
-        // 两次真实请求 = 两条**按请求**的账本记录（另有 1 条 v0.3.33 的明细账本合成条目，
-        // 它 records 为空、不参与主聚合，故这里只数带 records 的）。
+        // 两次真实请求 = 两条**按请求**的账本记录，每条同时存主列表数与明细（v0.3.41）。
+        // v0.3.33 那条整份重算的明细合成记录已退役：日志被清理后它会把旧明细覆盖掉。
         let requestEntryCount = await ledger.allEntries().filter { !$0.records.isEmpty }.count
         XCTAssertEqual(requestEntryCount, 2, "两次真实请求应对应两条持久账本记录")
-        XCTAssertEqual(ledgerEntryCount, 3, "外加一条明细账本条目（详情页数据源）")
+        XCTAssertEqual(ledgerEntryCount, 2, "明细与主列表数同存一条记录，不再有单独的明细记录")
+        let detailInLedger = await ledger.details(forProvider: "qwen-work").reduce(0) { $0 + $1.tokens.total }
+        XCTAssertEqual(detailInLedger, 130, "账本里的明细合计必须等于主列表合计")
         XCTAssertEqual(ledgerAll?.token, 130, "UsageViewModel 主聚合路径必须拿到千问办公用量")
         XCTAssertEqual(ledgerAll?.cachedToken, 40)
         XCTAssertEqual(detail.tokens.total, 130, "详情 Hero 必须与主列表合计完全一致")
@@ -183,6 +185,47 @@ final class QwenWorkProviderTests: XCTestCase {
         var merged = fallback
         if let databaseMeta = metas[sessionId] { merged.merge(databaseMeta) }
         XCTAssertEqual(merged.resolvedTitle, "数据库侧栏标题")
+    }
+
+    /// v0.3.41：每个请求的明细和主列表数存在同一条账本记录里。千问办公清理旧日志后，明细不能跟着消失；
+    /// 旧版本那条整份重算的明细记录要被退役，否则详情页会算两遍。
+    /// （2026-09-17 真实账本：日志最早只剩 9/08，8/14 主列表 158,565 / 明细 98,587。）
+    func testDetailsSurviveSegmentLogCleanupAndLegacyEntryIsRetired() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let ledger = FileMtimeCache()
+        let legacyKey = "usagebar://detail-ledger/qwen-work"
+        await ledger.store(FileCacheEntry(
+            filePath: legacyKey, mtime: Date(), size: 1, records: [],
+            details: [FileDetailRecord(provider: "qwen-work", date: "2026-07-23", sessionId: sessionId,
+                                       title: "", model: "qwork-lite", lastActivity: Date(),
+                                       tokens: TokenBreakdown(input: 999))]))
+        let scanner = QwenWorkDetailScanner(
+            sessionsRoot: fixture.sessionsRoot, projectsRoot: fixture.projectsRoot, databasePath: nil)
+        let provider = QwenWorkProvider(sessionsRoot: fixture.sessionsRoot, ledger: ledger, detailScanner: scanner)
+
+        func totals() async -> (list: Int, detail: Int) {
+            let entries = await ledger.allEntries()
+            let list = entries.flatMap(\.records).filter { $0.provider == "qwen-work" }.reduce(0) { $0 + $1.token }
+            let detail = await ledger.details(forProvider: "qwen-work").reduce(0) { $0 + $1.tokens.total }
+            return (list, detail)
+        }
+
+        _ = try await provider.fetchDailyRecords()
+        let before = await totals()
+        XCTAssertGreaterThan(before.list, 0)
+        XCTAssertEqual(before.detail, before.list, "主列表与明细来自同一条记录，必须相等")
+        let legacy = await ledger.entry(forPath: legacyKey)
+        XCTAssertNil(legacy, "旧的整份明细记录必须退役，否则详情页算两遍")
+
+        // 千问办公清理掉旧日志
+        try FileManager.default.removeItem(at: fixture.sessionsRoot)
+        await QwenWorkEventStore.shared.invalidate()
+        _ = try await provider.fetchDailyRecords()
+        let after = await totals()
+        XCTAssertEqual(after.list, before.list, "主列表历史保留")
+        XCTAssertEqual(after.detail, before.detail, "日志被清理后明细也必须还在")
     }
 
     // MARK: - Fixtures

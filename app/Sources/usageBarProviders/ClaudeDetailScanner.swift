@@ -134,6 +134,22 @@ public actor ClaudeDetailScanner {
         }
     }
 
+    /// 由明细汇总出主列表的按日记录（v0.3.41）：主列表与明细来自同一次解析，按构造就不可能对不上。
+    /// token = 明细五列之和（输入 + 输出 + 缓存写 5m + 缓存写 1h + 缓存读），浅色段 = 缓存读。
+    nonisolated public static func dailyRecords(from details: [FileDetailRecord],
+                                                provider: String) -> [FileDailyRecord] {
+        var totals: [String: Int] = [:]
+        var cached: [String: Int] = [:]
+        for d in details where d.provider == provider {
+            totals[d.date, default: 0] += d.tokens.total
+            cached[d.date, default: 0] += d.cacheRead
+        }
+        return totals.keys.sorted().compactMap { date in
+            guard let token = totals[date], token > 0 else { return nil }
+            return FileDailyRecord(provider: provider, date: date, token: token, cachedToken: cached[date] ?? 0)
+        }
+    }
+
     /// 解析单个 transcript 的**会话索引**（标题 + 请求 ID），一趟读完，不产出 token 数据。
     ///
     /// ## 为什么不能用 `detailRecords` 代替（GitHub issue #10 的根）
@@ -233,14 +249,17 @@ public actor ClaudeDetailScanner {
                 let input = (usage["input_tokens"] as? Int) ?? 0
                 let output = (usage["output_tokens"] as? Int) ?? 0
                 let cacheRead = (usage["cache_read_input_tokens"] as? Int) ?? 0
-                var c5 = 0, c1 = 0
+                // 缓存写入以 `cache_creation_input_tokens` 总数为准（计费字段、主列表一直用它）；
+                // `cache_creation` 里的 5m / 1h 拆分只用来分配比例：1h 取拆分值（不超过总数），其余归 5m。
+                // 2026-09-17 实测上游偶有拆分与总数矛盾（claude-opus-4-8：总数 0 而拆分 1h 2,246；
+                // 总数 630,881 而拆分 1h 2,125），此前按拆分算明细 → 5 个文件主列表与详情差 1,041,409。
+                // 旧 transcript 没有拆分对象 → 1h 为 0、整块归 5m，与原行为一致。
+                let cacheCreateTotal = (usage["cache_creation_input_tokens"] as? Int) ?? 0
+                var c1 = 0
                 if let cc = usage["cache_creation"] as? [String: Any] {
-                    c5 = (cc["ephemeral_5m_input_tokens"] as? Int) ?? 0
-                    c1 = (cc["ephemeral_1h_input_tokens"] as? Int) ?? 0
+                    c1 = min((cc["ephemeral_1h_input_tokens"] as? Int) ?? 0, cacheCreateTotal)
                 }
-                if c5 == 0 && c1 == 0 {   // 旧 transcript 无拆分对象 → 整块归 5m
-                    c5 = (usage["cache_creation_input_tokens"] as? Int) ?? 0
-                }
+                let c5 = cacheCreateTotal - c1
 
                 let tb = TokenBreakdown(input: input, output: output,
                                         cacheCreate5m: c5, cacheCreate1h: c1, cacheRead: cacheRead)
