@@ -5,28 +5,27 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.39</h3>
+<h3>usageBar 0.3.40</h3>
 <p><b>修复</b></p>
 <ul>
-<li><b>Codex 子代理会话把父会话的历史整段算成自己的用量</b>：Codex 的子代理（guardian 审批评审、thread_spawn 并行子任务）日志第一条记的是父会话当时的累计快照，usageBar 一直把这个快照当成子代理的新增。本机实测 7/28 一个子代理会话因此多算 1.03 亿、7/26 一个多算 2716 万。现在识别出继承快照，只计子代理自己的请求。</li>
-<li><b>Codex 0.153 起续聊老会话后，那天起的用量全部记 0</b>：新版 Codex 续聊时会把会话累计计数器从 0 重数，usageBar 的「只认涨」规则把重数后的所有增量都当成 0（本机 9/12 一天 407 万记成 0）。现在识别出计数器重启，从头计。</li>
-<li>单次增量改为取 `last_token_usage` 与累计增幅两者中的较小值：新口径在正常数据上与旧口径逐条相等，永远不会比旧口径高；主列表与详情页共用同一套差分规则。</li>
+<li><b>Codex 里归档过的对话不再漏算</b>：在 Codex 侧边栏「归档」一条对话后，它的日志会被挪进单独的归档文件夹，而 usageBar 以前只看对话文件夹。于是归档前没被统计到的对话永远不计；已经统计过的对话归档后，详情页里这条对话会消失，和主列表对不上；原对话被归档的分叉对话，还会把复制过来的旧记录算成新用量。现在两个文件夹一起统计。</li>
+<li><b>归档、取消归档来回操作不会重复计数</b>：同一条对话不管现在在哪个文件夹，都只算一份。</li>
 </ul>
 <p><b>变更</b></p>
 <ul>
-<li><b>升级后首次启动会按新规则重算全部 Codex 日志</b>，期间 Codex 那一行先显示旧数字、扫完才更新（本机 168 个文件 / 720 MB 约 5 分钟）。源日志已被清理的历史条目无法重算，保留原数。</li>
+<li>升级后首次启动会把 Codex 重算一次（几秒钟），期间 Codex 那一行先显示旧数字。日志已被 Codex 删除的历史数字保留不变。</li>
 </ul>
-<p>  &gt; ⚠️ <b>代价</b>：用过子代理的用户，Codex「累计」会明显下降（本机 12.04 亿 → 10.78 亿）。降掉的是被重复计入的父会话历史，不是丢数据。</p>
+<p>  &gt; 归档对话多的用户，Codex 用量会变化：补回以前漏算的归档对话，同时去掉分叉对话里重复算的旧记录。</p>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.39</title>
-            <pubDate>Wed, 16 Sep 2026 17:00:57 +0800</pubDate>
-            <sparkle:version>0.3.39</sparkle:version>
-            <sparkle:shortVersionString>0.3.39</sparkle:shortVersionString>
+            <title>0.3.40</title>
+            <pubDate>Thu, 17 Sep 2026 15:27:22 +0800</pubDate>
+            <sparkle:version>0.3.40</sparkle:version>
+            <sparkle:shortVersionString>0.3.40</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.39/usageBar.zip" length="2761805" type="application/octet-stream" sparkle:edSignature="/KkXhaygyMULTmQlY/RWBHuxr6DKv2dgP59bU3rLeMCmg0zE3aTE4cPirTQLhKyVjHLrXagt3HuUx2YhEkakCw=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.40/usageBar.zip" length="2746830" type="application/octet-stream" sparkle:edSignature="zbRu8InRfZ0lb/1T7g+CxeOgy1K8Ppap1e9zbwec8JxYg9Y5davt3aP4rsXBdAbcswJigCAl9molapXiWLpNAw=="/>
         </item>
     </channel>
 </rss>
