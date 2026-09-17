@@ -5,27 +5,22 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.40</h3>
+<h3>usageBar 0.3.41</h3>
 <p><b>修复</b></p>
 <ul>
-<li><b>Codex 里归档过的对话不再漏算</b>：在 Codex 侧边栏「归档」一条对话后，它的日志会被挪进单独的归档文件夹，而 usageBar 以前只看对话文件夹。于是归档前没被统计到的对话永远不计；已经统计过的对话归档后，详情页里这条对话会消失，和主列表对不上；原对话被归档的分叉对话，还会把复制过来的旧记录算成新用量。现在两个文件夹一起统计。</li>
-<li><b>归档、取消归档来回操作不会重复计数</b>：同一条对话不管现在在哪个文件夹，都只算一份。</li>
+<li><b>Claude Code / Cowork 的详情页总数偶尔和主列表对不上</b>：Claude 返回的缓存写入数据里，「总数」和「5 分钟 / 1 小时」的拆分数偶尔自相矛盾。主列表按总数算，详情页按拆分数算，两边就差了（本机 5 个对话文件共差约 104 万 token）。现在详情页也以总数为准，主列表的数直接由明细汇总，两边来自同一次计算。已有的对不上的记录会在下次刷新时自动重算；源文件已被清理的没法重算。</li>
+<li><b>千问办公清理旧日志后，详情页里那些天的会话会消失</b>：此前明细每次都按现存日志整份重算，千问办公清理旧日志后，主列表的数还在，详情页却没了。现在每个请求的明细和主列表数存在一起，日志被清理后详情照样能展开。已经丢掉的历史明细无法找回。</li>
 </ul>
-<p><b>变更</b></p>
-<ul>
-<li>升级后首次启动会把 Codex 重算一次（几秒钟），期间 Codex 那一行先显示旧数字。日志已被 Codex 删除的历史数字保留不变。</li>
-</ul>
-<p>  &gt; 归档对话多的用户，Codex 用量会变化：补回以前漏算的归档对话，同时去掉分叉对话里重复算的旧记录。</p>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.40</title>
-            <pubDate>Thu, 17 Sep 2026 15:27:22 +0800</pubDate>
-            <sparkle:version>0.3.40</sparkle:version>
-            <sparkle:shortVersionString>0.3.40</sparkle:shortVersionString>
+            <title>0.3.41</title>
+            <pubDate>Thu, 17 Sep 2026 18:09:22 +0800</pubDate>
+            <sparkle:version>0.3.41</sparkle:version>
+            <sparkle:shortVersionString>0.3.41</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.40/usageBar.zip" length="2746830" type="application/octet-stream" sparkle:edSignature="zbRu8InRfZ0lb/1T7g+CxeOgy1K8Ppap1e9zbwec8JxYg9Y5davt3aP4rsXBdAbcswJigCAl9molapXiWLpNAw=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.41/usageBar.zip" length="2749662" type="application/octet-stream" sparkle:edSignature="KX7pbppt/YopWzGdpvcvdrHTxaDa6J5DihQU6aXWgRQoQjRmlCXZEQPb0ECN+F0umdHyXH0+M1wpRiI8woHAAw=="/>
         </item>
     </channel>
 </rss>
