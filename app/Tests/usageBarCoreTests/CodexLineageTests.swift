@@ -156,8 +156,8 @@ final class CodexLineageTests: XCTestCase {
 
     // MARK: 账本迁移
 
-    /// 首次运行新算法：只删「源文件仍在」的真实文件条目（本轮重算），保留源文件已消失的条目和合成条目；
-    /// 标记写进账本本身，第二次不再删。
+    /// 首次运行新算法：只删「源文件仍在」的文件条目（含同文件的 `#fork`，本轮都会重写），
+    /// 保留源文件已消失的条目和 `.usagebar-*` 合成条目；标记写进账本本身，重扫完成后才写。
     func testLedgerMigrationKeepsMissingFilesAndSyntheticEntries() async {
         let cache = FileMtimeCache()
         let dir = URL(fileURLWithPath: "/tmp/codex-migrate-\(UUID().uuidString)/sessions")
@@ -172,12 +172,13 @@ final class CodexLineageTests: XCTestCase {
 
         let needs = await CodexProvider.needsLedgerMigration(cache: cache, sessionsDir: dir)
         XCTAssertTrue(needs)
-        let removed = await CodexProvider.invalidateStaleEntries(cache: cache, sessionsDir: dir) { $0 == alive }
-        XCTAssertEqual(removed, 1)
+        let removed = await CodexProvider.invalidateStaleEntries(
+            cache: cache, sessionsDir: dir, existingFileNames: ["rollout-a.jsonl"])
+        XCTAssertEqual(removed, 2)
         let paths = Set(await cache.allEntries().map(\.filePath))
         XCTAssertFalse(paths.contains(alive))
         XCTAssertTrue(paths.contains(gone), "源文件已消失的条目无法重算，必须保留")
-        XCTAssertTrue(paths.contains(alive + "#fork"))
+        XCTAssertFalse(paths.contains(alive + "#fork"), "同文件的 fork 条目也要清，本轮按新 key 重写")
         XCTAssertTrue(paths.contains(dir.path + "/.usagebar-detail-ledger"))
         XCTAssertTrue(paths.contains("/tmp/other/claude.jsonl"))
 

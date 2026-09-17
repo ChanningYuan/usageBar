@@ -3,7 +3,8 @@ import usageBarCore
 
 /// Codex 详情懒加载扫描器（drill-in 展开分会话 / 分模型时才跑，独立于主刷新快路径）。
 ///
-/// 数据源 `~/.codex/sessions/**/rollout-*.jsonl`。与主行 `CodexProvider` 同源、同一套差分状态机
+/// 数据源 `~/.codex/sessions/**/rollout-*.jsonl` + 同级 `archived_sessions/`（v0.3.40 起含归档对话，
+/// 枚举与去重走 `CodexRolloutFiles`，与主行同一份文件清单）。与主行 `CodexProvider` 同源、同一套差分状态机
 /// （`CodexLineage`：峰值门 / min(last,增幅) / 继承快照不计 / 重启从头计 / 乱序跳过），
 /// 但按 (model, session, date) 聚出四维 token（净输入 / 缓存命中 / 输出 / 思考）。
 ///
@@ -59,7 +60,7 @@ public actor CodexDetailScanner {
         let files = allFiles(root: root, requirePath: requirePath)
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         let inWindow = DailyAggregator.windowPredicate(window, weekStartMonday: weekStartMonday, now: now)
-        let threadNames = loadThreadNames()   // sessionId → Codex 侧栏标题
+        let threadNames = loadThreadNames(sessionsDir: root)   // sessionId → Codex 侧栏标题
 
         var sessionFinal: [String: CodexUsage] = [:]   // ownId → 历史最大累计（fork baseline 用）
         var hero = TokenBreakdown(); var heroCost = 0.0
@@ -144,7 +145,7 @@ public actor CodexDetailScanner {
                            requirePath: String? = nil) async -> [FileDetailRecord] {
         let files = allFiles(root: root, requirePath: requirePath)
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        let threadNames = loadThreadNames()
+        let threadNames = loadThreadNames(sessionsDir: root)
 
         var sessionFinal: [String: CodexUsage] = [:]
         var acc: [String: TokenBreakdown] = [:]        // key = session|model|date
@@ -223,23 +224,18 @@ public actor CodexDetailScanner {
                        cacheRead: min(d.cached, d.input), reasoning: min(d.reasoning, d.output))
     }
 
-    // MARK: - 文件枚举（与 CodexProvider 同源）
+    // MARK: - 文件枚举（与 CodexProvider 同一份清单）
 
+    /// `root`（sessions 目录）+ 同级 `archived_sessions/`，按文件名去重。
+    /// ⚠️ 必须与主行同一份清单：主行扫了归档、明细没扫，「列表总量 = 详情合计」立刻不成立。
     private func allFiles(root: URL, requirePath: String?) -> [URL] {
-        guard FileManager.default.fileExists(atPath: root.path) else { return [] }
-        return JSONLReader.findFiles(under: root) { url in
-            guard url.pathExtension == "jsonl",
-                  url.lastPathComponent.hasPrefix("rollout-") else { return false }
-            if let req = requirePath, !url.path.contains(req) { return false }
-            return true
-        }
+        CodexRolloutFiles.list(sessionsDir: root, requirePath: requirePath).map(\.url)
     }
 
     /// Codex 会话正经标题源：`~/.codex/session_index.jsonl`（每行 `{id, thread_name, updated_at}`，
     /// 与 Codex Desktop 侧栏同一份）。返回 sessionId → thread_name。每次 `detail()` 现读、始终最新。
-    private func loadThreadNames() -> [String: String] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let url = home.appendingPathComponent(".codex/session_index.jsonl")
+    private func loadThreadNames(sessionsDir: URL) -> [String: String] {
+        let url = sessionsDir.deletingLastPathComponent().appendingPathComponent("session_index.jsonl")
         guard FileManager.default.fileExists(atPath: url.path) else { return [:] }
         var map: [String: String] = [:]
         try? JSONLReader.forEachLine(at: url) { obj in

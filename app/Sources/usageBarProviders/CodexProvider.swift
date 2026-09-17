@@ -3,7 +3,8 @@ import usageBarCore
 
 /// Codex（OpenAI 家）provider（mtime 增量 + fork/resume 跨文件去重 + 谱系差分版）
 ///
-/// 数据源：`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`
+/// 数据源：`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` + `~/.codex/archived_sessions/rollout-*.jsonl`
+/// （v0.3.40 起含归档对话；枚举、去重与账本 key 规则见 `CodexRolloutFiles`）。
 /// `payload.info.total_token_usage.total_tokens` 是 session 累计值（非增量）。
 /// 差分核心在 `CodexLineage`（v0.3.39 起主行与详情共用；五条规则与实证见该文件头）：
 /// 峰值门 / 单次增量 min(last, 增幅) / 子代理继承快照不计 / 计数器重启从头计 / 乱序跳过。
@@ -42,22 +43,35 @@ import usageBarCore
 ///   - 父会话计数器重启后再 fork：replay 里会重放那次回落，父重启后的那段（本机场景 407 万）会被
 ///     重复计一次；精确解需按事件序列匹配 replay 边界，暂不做。
 ///
-/// ── 账本迁移（v0.3.39）──
+/// ── 账本迁移（v0.3.39 / v0.3.40）──
 /// 旧版本按旧规则算好的条目，文件不变就永远命中 mtime 缓存，新规则永远轮不到。首次运行时把
-/// 「源文件仍在」的 Codex 条目删掉重算一次；源文件已被清理的条目保留原数（无法重算，宁可留旧数也不丢）。
-/// 见 `migrateLedgerIfNeeded`。
+/// 「源文件仍在（活跃或归档目录里有同名文件）」的 Codex 条目删掉重算一次；源文件已被清理的条目保留原数
+/// （无法重算，宁可留旧数也不丢）。见 `needsLedgerMigration` / `invalidateStaleEntries`。
 public struct CodexProvider: UsageProvider {
     public let id = "codex"
     public let displayName = "Codex"
     public let iconSymbol = "bolt.circle.fill"
     public let brandColor = "#10A37F"
 
-    private var sessionsDir: URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return home.appendingPathComponent(".codex/sessions")
+    /// `~/.codex`（单测注入临时目录）
+    private let codexHome: URL
+    /// 持久账本（生产 = `.shared`；单测注入独立实例，不碰真实账本）
+    private let cache: FileMtimeCache
+    private let detailScanner: CodexDetailScanner
+
+    private var sessionsDir: URL { codexHome.appendingPathComponent("sessions") }
+    private var archivedDir: URL { CodexRolloutFiles.archivedDir(forSessions: sessionsDir) }
+
+    public init() {
+        self.init(codexHome: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex"),
+                  cache: .shared, detailScanner: .shared)
     }
 
-    public init() {}
+    init(codexHome: URL, cache: FileMtimeCache, detailScanner: CodexDetailScanner) {
+        self.codexHome = codexHome
+        self.cache = cache
+        self.detailScanner = detailScanner
+    }
 
     // MARK: - session_meta 解析
 
@@ -170,10 +184,13 @@ public struct CodexProvider: UsageProvider {
         return events
     }
 
-    // MARK: - 账本迁移（v0.3.39）
+    // MARK: - 账本迁移（v0.3.39 起）
 
-    /// 账本算法版本：1 = 旧「差分 + 峰值跟踪」；2 = `CodexLineage`（继承快照不计 + 重启从头计）。
-    static let ledgerAlgoVersion = 2
+    /// 账本算法版本：1 = 旧「差分 + 峰值跟踪」；2 = `CodexLineage`（继承快照不计 + 重启从头计，v0.3.39）；
+    /// 3 = 同时扫 `archived_sessions/`、账本 key 按文件名还原成 sessions 路径（v0.3.40）。
+    /// 2 → 3 必须重算：0.3.39 迁移时已被归档的文件「源文件不在 sessions/」→ 条目按旧算法保留了下来，
+    /// 现在归档文件被扫到、key 又恰好相同、mtime 没变 → 会直接命中那条旧算法的数。
+    static let ledgerAlgoVersion = 3
 
     /// 标记写在账本自身（合成条目，`size` = 版本号），而且**只在本轮重扫完成后才写**（见 `fetchDailyRecords` 末尾）。
     /// 账本在扫描期间会节流落盘：标记若和删条目同时写，首扫中途被杀就会留下「标记已写、条目没重算」的账本，
@@ -190,17 +207,20 @@ public struct CodexProvider: UsageProvider {
         return true
     }
 
-    /// 首次以新算法运行：删掉「源文件仍在」的 Codex 真实文件条目（本轮会按新规则重算回来），
-    /// 保留源文件已消失的条目（无法重算）与合成条目（fork / 明细账本每轮都重写）。返回删掉的条数。
-    /// **不写标记**——标记由 `markLedgerMigrated` 在重扫完成后写。`fileExists` 可注入，方便单测。
+    /// 首次以新算法运行：删掉「源文件仍在」的 Codex 文件条目（含 `#fork`），本轮会按新规则、新 key 重算回来。
+    /// 「仍在」按**文件名**判断（`existingFileNames` = 本轮活跃 + 归档目录里的全部 rollout 文件名），
+    /// 这样被归档挪走的、以及目录日期与文件名日期不一致而换了 key 的旧条目都会被清掉重算，不会和新条目并存。
+    /// 保留源文件已消失的条目（无法重算）与 `.usagebar-*` 合成条目。返回删掉的条数。
+    /// **不写标记**——标记由 `markLedgerMigrated` 在重扫完成后写。
     @discardableResult
     static func invalidateStaleEntries(cache: FileMtimeCache, sessionsDir: URL,
-                                       fileExists: @Sendable (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) async -> Int {
+                                       existingFileNames: Set<String>) async -> Int {
         let prefix = sessionsDir.path + "/"
         return await cache.remove { e in
-            guard e.filePath.hasPrefix(prefix) else { return false }
-            guard !e.filePath.hasSuffix("#fork"), !e.filePath.hasPrefix(prefix + ".usagebar-") else { return false }
-            return fileExists(e.filePath)
+            guard e.filePath.hasPrefix(prefix), !e.filePath.hasPrefix(prefix + ".usagebar-") else { return false }
+            var path = e.filePath
+            if path.hasSuffix("#fork") { path.removeLast("#fork".count) }
+            return existingFileNames.contains((path as NSString).lastPathComponent)
         }
     }
 
@@ -213,24 +233,25 @@ public struct CodexProvider: UsageProvider {
     // MARK: - 主入口
 
     public func fetchDailyRecords() async throws -> [FileDailyRecord] {
-        guard FileManager.default.fileExists(atPath: sessionsDir.path) else { return [] }
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: sessionsDir.path) || fm.fileExists(atPath: archivedDir.path) else { return [] }
 
-        let migrating = await Self.needsLedgerMigration(cache: FileMtimeCache.shared, sessionsDir: sessionsDir)
+        // 活跃 + 归档两处，按文件名去重、按文件名排序（字典序 == 时间序 → 父会话一定排在它的 fork 之前，
+        // 单遍即可在处理 fork 前把父的 final 填进 sessionFinal；父会话被归档也找得到）。
+        let files = CodexRolloutFiles.list(sessionsDir: sessionsDir)
+
+        let migrating = await Self.needsLedgerMigration(cache: cache, sessionsDir: sessionsDir)
         if migrating {
-            await Self.invalidateStaleEntries(cache: FileMtimeCache.shared, sessionsDir: sessionsDir)
+            await Self.invalidateStaleEntries(cache: cache, sessionsDir: sessionsDir,
+                                              existingFileNames: Set(files.map { $0.url.lastPathComponent }))
         }
-
-        // 文件名 `rollout-{ISO时间}-{uuid}` 字典序 == 时间序 → 父会话一定排在它的 fork 之前，
-        // 单遍即可在处理 fork 前把父的 final 填进 sessionFinal。
-        let files = JSONLReader.findFiles(under: sessionsDir) { url in
-            url.pathExtension == "jsonl" && url.lastPathComponent.hasPrefix("rollout-")
-        }
-        .sorted { $0.lastPathComponent < $1.lastPathComponent }
 
         var sessionFinal: [String: CodexUsage] = [:]   // session id → 历史最大累计（fork 基线用）
         var allRecords: [FileDailyRecord] = []
 
-        for url in files {
+        for file in files {
+            let url = file.url
+            let key = file.ledgerKey   // 归档前后同一个 key（见 CodexRolloutFiles）
             let meta = readFirstSessionMeta(url: url)
 
             // —— baseline 决策（优先级：subagent 短路 > fork 信号1 > 默认0）——
@@ -246,7 +267,7 @@ public struct CodexProvider: UsageProvider {
 
             if !isFork,
                let m = FileMetadata.read(at: path),
-               let entry = await FileMtimeCache.shared.lookup(filePath: path, mtime: m.mtime, size: m.size) {
+               let entry = await cache.lookup(filePath: key, mtime: m.mtime, size: m.size) {
                 // 非 fork 缓存命中：baseline 恒 0 → 用 Σtoken / Σcached 近似历史最大累计
                 // （计数器重启过的文件会略大于真值——基线偏大只会让 fork 少算，是保守方向）。
                 records = entry.records
@@ -260,8 +281,10 @@ public struct CodexProvider: UsageProvider {
                 if let m = FileMetadata.read(at: path) {
                     if !isFork {
                         // 非 fork：正常按 (mtime,size) 缓存，下轮可命中跳过解析。
-                        await FileMtimeCache.shared.store(
-                            FileCacheEntry(filePath: path, mtime: m.mtime, size: m.size, records: records)
+                        // 先删同一文件的 fork 身份条目：父会话消失后它从 fork 变回普通文件，两条并存就算两遍。
+                        await cache.removeEntry(forPath: key + "#fork")
+                        await cache.store(
+                            FileCacheEntry(filePath: key, mtime: m.mtime, size: m.size, records: records)
                         )
                     } else {
                         // ⚠️ **fork 文件也必须写账本**（v0.3.33 修）。
@@ -274,8 +297,12 @@ public struct CodexProvider: UsageProvider {
                         // 修法：写一个**合成 key**（真实路径 + 后缀），且 `mtime` 用当前时刻、`size` 用记录数——
                         // 这样它**永远不会被 `lookup` 命中**（下一轮 fork 分支压根不查缓存），每轮都以最新
                         // baseline 重算并覆盖同一条，既不会失效也不会重复累加。
-                        await FileMtimeCache.shared.store(
-                            FileCacheEntry(filePath: path + "#fork", mtime: Date(), size: records.count,
+                        //
+                        // 先删同一文件的普通身份条目：父会话后出现（例如 v0.3.40 起能扫到被归档的父会话）时，
+                        // 它从普通文件变成 fork，旧的「按全量算」那条若留着就会和这条一起算两遍。
+                        await cache.removeEntry(forPath: key)
+                        await cache.store(
+                            FileCacheEntry(filePath: key + "#fork", mtime: Date(), size: records.count,
                                            records: records)
                         )
                     }
@@ -292,16 +319,16 @@ public struct CodexProvider: UsageProvider {
         // ⚠️ 与 Claude 系不同，这里必须整体扫完再写：Codex 的 fork 差分基线是跨文件状态，
         // 逐文件独立算会把 replay 段重复计（见 CodexDetailScanner.allDetails 的注释）。
         // 写成一条合成条目（非真实文件路径），源 rollout 被清理后明细仍在。
-        let details = await CodexDetailScanner.shared.allDetails(providerId: id, root: sessionsDir)
+        let details = await detailScanner.allDetails(providerId: id, root: sessionsDir)
         if !details.isEmpty {
-            await FileMtimeCache.shared.store(FileCacheEntry(
+            await cache.store(FileCacheEntry(
                 filePath: sessionsDir.appendingPathComponent(".usagebar-detail-ledger").path,
                 mtime: Date(), size: details.count,
                 records: [], details: details))
         }
 
         if migrating {
-            await Self.markLedgerMigrated(cache: FileMtimeCache.shared, sessionsDir: sessionsDir)
+            await Self.markLedgerMigrated(cache: cache, sessionsDir: sessionsDir)
         }
         return allRecords
     }

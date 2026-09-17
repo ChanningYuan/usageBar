@@ -41,6 +41,12 @@ public actor FileMtimeCache {
         Array(entries.values)
     }
 
+    /// 按 key 精确删一条。给 Codex 用：同一个 rollout 文件在「fork（key#fork）」与「非 fork（key）」两种身份间
+    /// 切换时（父会话出现 / 消失），写新身份的条目前先删掉旧身份那条，避免同一文件在账本里算两遍（v0.3.40）。
+    public func removeEntry(forPath filePath: String) {
+        entries.removeValue(forKey: filePath)
+    }
+
     /// 按 key 精确取一条（不校验 mtime/size）。给 provider 读自己写进账本的**标记类合成条目**用
     /// （如 Codex 的账本算法版本标记，v0.3.39），不要拿它绕过 `lookup` 的 mtime 校验读真实文件条目。
     public func entry(forPath filePath: String) -> FileCacheEntry? {
