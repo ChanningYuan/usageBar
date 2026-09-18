@@ -5,22 +5,22 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.41</h3>
-<p><b>修复</b></p>
+<h3>usageBar 0.3.42</h3>
+<p><b>变更</b></p>
 <ul>
-<li><b>Claude Code / Cowork 的详情页总数偶尔和主列表对不上</b>：Claude 返回的缓存写入数据里，「总数」和「5 分钟 / 1 小时」的拆分数偶尔自相矛盾。主列表按总数算，详情页按拆分数算，两边就差了（本机 5 个对话文件共差约 104 万 token）。现在详情页也以总数为准，主列表的数直接由明细汇总，两边来自同一次计算。已有的对不上的记录会在下次刷新时自动重算；源文件已被清理的没法重算。</li>
-<li><b>千问办公清理旧日志后，详情页里那些天的会话会消失</b>：此前明细每次都按现存日志整份重算，千问办公清理旧日志后，主列表的数还在，详情页却没了。现在每个请求的明细和主列表数存在一起，日志被清理后详情照样能展开。已经丢掉的历史明细无法找回。</li>
+<li><b>千问办公：删掉主列表里「详情页已经看不到」的旧用量，让主列表和详情页一致</b>：千问办公看起来只保留最近约 10 天的本地会话日志。0.3.41 之前，日志被清理后，详情页里那些天的会话会消失，主列表却还留着数字，两边对不上。0.3.41 已经让新产生的用量不再丢明细；这一版把旧版本留下、再也补不出明细的那部分从主列表删掉。</li>
 </ul>
+<p>  &gt; ⚠️ <b>代价</b>：千问办公的「累计」等统计会少掉这部分历史用量（本机是 8 月 14 日两个会话，共 59,978 token）。</p>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.41</title>
-            <pubDate>Thu, 17 Sep 2026 18:09:22 +0800</pubDate>
-            <sparkle:version>0.3.41</sparkle:version>
-            <sparkle:shortVersionString>0.3.41</sparkle:shortVersionString>
+            <title>0.3.42</title>
+            <pubDate>Fri, 18 Sep 2026 11:24:55 +0800</pubDate>
+            <sparkle:version>0.3.42</sparkle:version>
+            <sparkle:shortVersionString>0.3.42</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.41/usageBar.zip" length="2749662" type="application/octet-stream" sparkle:edSignature="KX7pbppt/YopWzGdpvcvdrHTxaDa6J5DihQU6aXWgRQoQjRmlCXZEQPb0ECN+F0umdHyXH0+M1wpRiI8woHAAw=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.42/usageBar.zip" length="2750314" type="application/octet-stream" sparkle:edSignature="Gh7kEOVf8xBvt6TjPAsc7vxIEFM/jRoGwrmc8XnAGHxo+KZSXUO3WtG9tag3XJoigHasjr8cNOiTcxUiyBvUDw=="/>
         </item>
     </channel>
 </rss>
