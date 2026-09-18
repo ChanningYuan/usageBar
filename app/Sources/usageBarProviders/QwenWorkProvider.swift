@@ -198,6 +198,16 @@ public struct QwenWorkProvider: UsageProvider {
         }
         // 退役旧的整份明细记录（与上面逐请求的明细重复，留着详情页会算两遍）。每轮都删，幂等。
         await ledger.removeEntry(forPath: "usagebar://detail-ledger/qwen-work")
+        // v0.3.42：删掉旧版本留下的「只有主列表数、没有明细」的请求记录，让主列表与详情页一致。
+        // 这类记录的日志已被千问办公清理（它看起来只留最近约 10 天），明细再也补不出来。用户 2026-09-17 拍板
+        // 「为了一致性，删除」——宁可少一截历史，也不要两边对不上（同 v0.3.33 的「零特例」取舍）。
+        // 上面的循环已给现存日志里的每个请求重写了带明细的记录，所以这里只会命中旧版本的记录；
+        // 本机命中 2 条（8/14，共 59,978 token）。
+        let requestLedgerPrefix = sessionsRoot
+            .appendingPathComponent(".usagebar-request-ledger", isDirectory: true).path + "/"
+        await ledger.remove { entry in
+            entry.filePath.hasPrefix(requestLedgerPrefix) && !entry.records.isEmpty && entry.details.isEmpty
+        }
         return Self.dailyRecords(from: counted)
     }
 

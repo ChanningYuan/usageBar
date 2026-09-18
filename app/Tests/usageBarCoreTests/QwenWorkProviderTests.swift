@@ -228,6 +228,41 @@ final class QwenWorkProviderTests: XCTestCase {
         XCTAssertEqual(after.detail, before.detail, "日志被清理后明细也必须还在")
     }
 
+    /// v0.3.42：旧版本只存了主列表数、没存明细的请求记录（日志已被清理，明细补不出来）要整条删掉，
+    /// 主列表与详情页从此一致；0.3.41 起带明细的记录即使日志没了也必须保留。
+    func testRecordsOnlyRequestEntriesFromOldVersionsAreRemoved() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let ledger = FileMtimeCache()
+        let prefix = fixture.sessionsRoot.appendingPathComponent(".usagebar-request-ledger", isDirectory: true)
+        let oldKey = prefix.appendingPathComponent("gone-session", isDirectory: true).appendingPathComponent("old-request").path
+        await ledger.store(FileCacheEntry(filePath: oldKey, mtime: Date(), size: 999,
+            records: [FileDailyRecord(provider: "qwen-work", date: "2026-08-14", token: 999)]))
+        let keptKey = prefix.appendingPathComponent("gone-session", isDirectory: true).appendingPathComponent("kept-request").path
+        let keptDetail = FileDetailRecord(provider: "qwen-work", date: "2026-09-10", sessionId: "gone-session", title: "",
+                                          model: "qwork-lite", lastActivity: Date(), tokens: TokenBreakdown(input: 50))
+        await ledger.store(FileCacheEntry(filePath: keptKey, mtime: Date(), size: 50,
+            records: [FileDailyRecord(provider: "qwen-work", date: "2026-09-10", token: 50)], details: [keptDetail]))
+        let unrelatedKey = "/tmp/other-provider/\(UUID().uuidString).jsonl"
+        await ledger.store(FileCacheEntry(filePath: unrelatedKey, mtime: Date(), size: 1,
+            records: [FileDailyRecord(provider: "claude-code", date: "2026-08-14", token: 7)]))
+
+        let scanner = QwenWorkDetailScanner(
+            sessionsRoot: fixture.sessionsRoot, projectsRoot: fixture.projectsRoot, databasePath: nil)
+        _ = try await QwenWorkProvider(sessionsRoot: fixture.sessionsRoot, ledger: ledger, detailScanner: scanner)
+            .fetchDailyRecords()
+
+        let removed = await ledger.entry(forPath: oldKey)
+        let kept = await ledger.entry(forPath: keptKey)
+        let unrelated = await ledger.entry(forPath: unrelatedKey)
+        XCTAssertNil(removed, "只有主列表数、没有明细的旧记录必须删掉")
+        XCTAssertNotNil(kept, "带明细的记录（日志没了也一样）必须保留")
+        XCTAssertNotNil(unrelated, "别的来源的记录不能动")
+        let list = await ledger.allEntries().flatMap(\.records).filter { $0.provider == "qwen-work" }.reduce(0) { $0 + $1.token }
+        let detail = await ledger.details(forProvider: "qwen-work").reduce(0) { $0 + $1.tokens.total }
+        XCTAssertEqual(list, detail, "删完之后主列表与详情页合计一致")
+    }
+
     // MARK: - Fixtures
 
     private struct Fixture {
