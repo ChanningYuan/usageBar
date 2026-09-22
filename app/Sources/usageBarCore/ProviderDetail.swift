@@ -77,17 +77,22 @@ public struct SessionDetailRecord: Sendable, Equatable, Identifiable {
     public let tokens: TokenBreakdown
     /// ≈$ 等效 API 花费
     public let cost: Double
+    public let credits: CreditUsage?
+    public let models: [ModelDetailRecord]
 
     public var id: String { sessionId }
 
     public init(sessionId: String, title: String, subtitle: String,
-                lastActivity: Date, tokens: TokenBreakdown, cost: Double) {
+                lastActivity: Date, tokens: TokenBreakdown, cost: Double,
+                credits: CreditUsage? = nil, models: [ModelDetailRecord] = []) {
         self.sessionId = sessionId
         self.title = title
         self.subtitle = subtitle
         self.lastActivity = lastActivity
         self.tokens = tokens
         self.cost = cost
+        self.credits = credits
+        self.models = models
     }
 }
 
@@ -97,14 +102,19 @@ public struct ModelDetailRecord: Sendable, Equatable, Identifiable {
     public let modelId: String
     public let tokens: TokenBreakdown
     public let cost: Double
+    public let credits: CreditUsage?
+    public let displayName: String?
 
     public var id: String { modelId }
     public var hitRate: Double { tokens.hitRate }
 
-    public init(modelId: String, tokens: TokenBreakdown, cost: Double) {
+    public init(modelId: String, tokens: TokenBreakdown, cost: Double,
+                credits: CreditUsage? = nil, displayName: String? = nil) {
         self.modelId = modelId
         self.tokens = tokens
         self.cost = cost
+        self.credits = credits
+        self.displayName = displayName
     }
 }
 
@@ -133,6 +143,7 @@ public struct ProviderDetail: Sendable, Equatable {
     public let tokens: TokenBreakdown
     /// ≈$ 等效 API 花费合计
     public let cost: Double
+    public let credits: CreditUsage?
     /// 金额数据是否已成功取得。默认 true；用于区分“真实为 0”和“尚未同步”（千问办公积分）。
     public let costAvailable: Bool
     /// 金额最后一次成功同步的时刻（千问办公积分）。`costAvailable == false` 而它非空 = 显示的是缓存，
@@ -153,11 +164,13 @@ public struct ProviderDetail: Sendable, Equatable {
     public init(providerId: String, windowId: String, tokens: TokenBreakdown,
                 cost: Double, costAvailable: Bool = true, costSyncedAt: Date? = nil,
                 sources: [SourceDetailRecord] = [],
-                models: [ModelDetailRecord], sessions: [SessionDetailRecord]) {
+                models: [ModelDetailRecord], sessions: [SessionDetailRecord],
+                credits: CreditUsage? = nil) {
         self.providerId = providerId
         self.windowId = windowId
         self.tokens = tokens
         self.cost = cost
+        self.credits = credits
         self.costAvailable = costAvailable
         self.costSyncedAt = costSyncedAt
         self.sources = sources

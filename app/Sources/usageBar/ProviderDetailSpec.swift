@@ -13,13 +13,14 @@ import usageBarCore
 /// **加第 N 个 provider = 在 `specs` 里加一行声明，不碰 UI 代码。**
 /// 方案：`_notes/docs/0713-Cursor计数修复与详情页扩展/详情页模块化-spec.md`
 
-// MARK: - 金额口径（四档）
+// MARK: - 金额口径
 
 /// 详情页金额口径。**按「行（模型）」判定，不写死在 provider 上**（spec §1e）：
 /// 1. 该行模型名能查到价 → `.equivalentUSD`
 /// 2. 查不到价但有 credit → `.credits`
-/// 3. 只有周期总账单、不能归因到行 → `.creditsTotalOnly`
-/// 4. 都没有 → `.unavailable`
+/// 3. 本地逐请求积分，需显示覆盖状态 → `.recordedCredits`
+/// 4. 只有周期总账单、不能归因到行 → `.creditsTotalOnly`
+/// 5. 都没有 → `.unavailable`
 ///
 /// 这里的 `costUnit` 是 provider 的**默认档**；将来 BYOK（自带 key）时单行可按真实模型名升级到
 /// `.equivalentUSD`，代码不用改结构。
@@ -29,10 +30,12 @@ enum CostUnit: Equatable {
     /// `≈ 6.78 Credits` —— 直接读数据自带的 credit，**绕开价目表**（WorkBuddy）。
     /// ⚠️ credit 是整条消息的标量，**拆不到四列** → 指标区金额位显示 `—`。
     case credits
+    /// Qoder CLI 的本地请求积分，带缺失/冲突状态，不能分摊到 token 各列。
+    case recordedCredits
     /// 账户账单给出所选周期的**精确积分总额**，但没有 request/session/model 关联字段。
     /// Hero 展示精确积分；指标、模型、会话行统一显示 `—`，不猜摊（千问办公）。
     case creditsTotalOnly
-    /// `—` —— 模型名被厂商打码（`qmodel`）且本地无任何 credit 字段（Qoder 全家桶）。
+    /// `—` —— 模型名被厂商打码（`qmodel`）且本地无任何 credit 字段（Qoder IDE）。
     case unavailable
 }
 
@@ -315,20 +318,20 @@ enum ProviderDetailRegistry {
             accentDark: "#C7C7CC", accentLight: "#4A4A4F",
             scanner: .cursor),
 
-        // ── Qoder 全家桶：模型名被厂商打码成 qmodel / qwork-auto，价目表永远查不到 → 金额位 `—`。
+        // ── Qoder：不按打码模型名估价；CLI 读本地逐请求积分，IDE 暂无积分数据。
         //    强调色整体走青蓝系，与 Codex 的绿彻底拉开（Qoder CLI 的原始品牌色 #10A37F 与 Codex 完全相同）。
 
         // Qoder CLI：Claude 同款 transcript，复用 Claude 扫描器。
         // **3 格**（无缓存写）—— 2026-07-13 另一台机器实测：168 个文件、cache_creation 合计恒 0，
         // 与 Qoder IDE 一致。（原按 4 格写，探针回来后改）
-        // 金额「无价目」：它的 9 个「模型名」逐个查价目表 8 个查不到 ——
+        // 本地 message.usage.credits 按请求去重，提供总量、模型、会话及会话内模型积分。
         // `ultimate` / `efficient` / `lite` / `performance` 是**套餐档位名**不是模型；
         // `dmodel` / `kmodel` / `gm51model` / `qmodel_latest` 是打码别名；`auto` 是路由名（已进黑名单）。
-        // ⚠️ token 真值受环境变量 QODER_EXPOSE_TOKEN_USAGE 控制，没开时四列全 0（详情页会是空态）。
+        // ⚠️ token 真值受环境变量 QODER_EXPOSE_TOKEN_USAGE 控制，没开时四列全 0，积分记录仍独立展示。
         "qoder-cli": ProviderDetailSpec(
             metricRows: [[.tile(.input), .tile(.output)],
                          [.tile(.cacheRead)]],
-            hasSources: false, hasSessions: true, ring: .ofTotal, costUnit: .unavailable,
+            hasSources: false, hasSessions: true, ring: .ofTotal, costUnit: .recordedCredits,
             accentDark: "#35C2B1", accentLight: "#0C7A6E",
             scanner: .claudeTranscript(qoderCliSource)),
 

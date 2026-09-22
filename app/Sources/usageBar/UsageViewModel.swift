@@ -22,6 +22,12 @@ final class UsageViewModel: ObservableObject {
     @Published var detailProviderId: String? = nil
     /// 已加载的详情（nil 且 detailProviderId != nil = 加载中）
     @Published var detail: ProviderDetail? = nil
+    @Published private(set) var qoderCreditDates: Set<String> = []
+
+    func hasQoderCredits(in window: TimeWindow) -> Bool {
+        let includes = DailyAggregator.windowPredicate(window, weekStartMonday: TabSettings.shared.weekStartMonday)
+        return qoderCreditDates.contains(where: includes)
+    }
 
     /// 全量缓存：4 窗口 × 5 provider = 20 条
     private var allStats: [StatRecord] = []
@@ -131,7 +137,7 @@ final class UsageViewModel: ObservableObject {
         // 「用过」，否则会被自动隐藏 → 连「去开启」横幅都看不到（见 docs/0625-Qoder全家桶token计量/qoder-family-token-gate.md）。
         // （IDE 不受 gate，用过必有 token>0，本就进 keep，无需特判。）
         var keep = Set(allStats.filter { $0.token > 0 }.map { $0.provider })
-        if QoderUsageEnvGate.isQoderCliPresent() { keep.insert("qoder-cli") }
+        if QoderUsageEnvGate.isQoderCliPresent() || !qoderCreditDates.isEmpty { keep.insert("qoder-cli") }
         if QoderUsageEnvGate.isQwenWorkPresent() { keep.insert("qwen-work") }
         ProviderVisibilitySettings.shared.autoConfigureFirstRunIfNeeded(providerIdsToKeep: keep)
         // 每次刷新顺带扫一遍 Qoder 的 env 开关状态，驱动弹层/设置页横幅。
@@ -154,7 +160,10 @@ final class UsageViewModel: ObservableObject {
 
     /// 从 FileMtimeCache 全量聚合并 commit 到 UI(持久账本语义)。
     private func commitAggregation(providerIds: [String], log: (String) -> Void) async {
-        let allDaily = await FileMtimeCache.shared.allEntries().flatMap { $0.records }
+        let entries = await FileMtimeCache.shared.allEntries()
+        let allDaily = entries.flatMap(\.records)
+        qoderCreditDates = Set(entries.compactMap(\.qoderCredits).flatMap(\.observations)
+            .map { DailyAggregator.dateString(for: $0.timestamp) })
         let computed = DailyAggregator.aggregate(
             allDailyRecords: allDaily,
             providerIds: providerIds,
@@ -209,11 +218,12 @@ final class UsageViewModel: ObservableObject {
     /// 判定：全量缓存里今日记录 ∩ 可见 ∩ token>0，恰好一个，且属于可展开集合。
     func soleTodayDetailProvider() -> String? {
         let visible = Set(ProviderVisibilitySettings.shared.visibleProviderIds())
-        let providers = Set(
+        var providers = Set(
             allStats
                 .filter { $0.time == TimeWindow.today.id && visible.contains($0.provider) && $0.token > 0 }
                 .map { $0.provider }
         )
+        if visible.contains("qoder-cli") && hasQoderCredits(in: .today) { providers.insert("qoder-cli") }
         // 门禁走声明表（v0.3.22）。此前这里还硬编码着 `["claude-code", "codex"]` ——
         // 比 UsageView 那处白名单还旧（OpenCode 早就能 drill-in 了却没加进来），
         // 正是「同一个门禁散在多处、加 provider 必漏」的活证据。
@@ -263,7 +273,11 @@ final class UsageViewModel: ObservableObject {
         }
 
         var d: ProviderDetail
-        if await FileMtimeCache.shared.hasDetails(forProvider: providerId) {
+        if providerId == "qoder-cli" {
+            // 积分与 token 共用同一份持久账本快照；零 token 的积分请求也可以展示。
+            d = QoderCreditsAggregator.aggregate(entries: await FileMtimeCache.shared.allEntries(),
+                                                window: win, weekStartMonday: weekStartMonday)
+        } else if await FileMtimeCache.shared.hasDetails(forProvider: providerId) {
             d = LedgerDetailAggregator.aggregate(
                 providerId: providerId,
                 details: await FileMtimeCache.shared.details(forProvider: providerId),

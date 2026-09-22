@@ -22,6 +22,7 @@ struct ProviderDetailView: View {
     @State private var showAllSessions = false
     @State private var showAllModels = false
     @State private var showAllSources = false
+    @State private var expandedSessions: Set<String> = []
 
     /// 明细区折叠阈值：默认只显示前 N 条，多出来的收进「展开全部」。
     /// 按模型 / 按会话 / 按来源**共用同一套**（v0.3.23 起）——此前只有「按会话」有折叠，
@@ -42,7 +43,7 @@ struct ProviderDetailView: View {
             ?? ProviderDetailRegistry.specs["claude-code"]!
     }
 
-    /// 是否展示「等效 API 费用」（≈$ 前缀）。四档金额口径见 `CostUnit`。
+    /// 是否展示「等效 API 费用」（≈$ 前缀）。金额口径见 `CostUnit`。
     private var usesEquivalentCost: Bool { spec.costUnit == .equivalentUSD }
 
     private var pal: DetailPalette { .of(scheme) }
@@ -91,7 +92,7 @@ struct ProviderDetailView: View {
     /// 内容区：有数据时按实测高度自适应（矮不留白、高封顶滚动）；加载/空态给固定高度撑住弹层。
     @ViewBuilder private var detailContent: some View {
         if let d = viewModel.detail, d.providerId == providerId {
-            if d.tokens.total == 0 && d.cost == 0 {
+            if d.tokens.total == 0 && d.cost == 0 && d.credits?.hasActivity != true {
                 centered("该周期这个来源没有用量").frame(height: 220)
             } else {
                 ScrollView {
@@ -511,6 +512,22 @@ struct ProviderDetailView: View {
             if providerId == "qwen-work", spec.costUnit == .creditsTotalOnly, !d.costAvailable {
                 qwenWorkHeroHint
             }
+            if let credits = d.credits {
+                Text(!credits.hasValue ? "本地记录积分 · 当前记录未提供可用积分"
+                     : credits.isPartial ? "本地记录积分 · * 仅含已记录部分" : "本地记录积分")
+                    .font(.system(size: 9)).foregroundStyle(pal.text3)
+                    .help(credits.explanation)
+                if credits.conflictRequests > 0 || credits.sourceIssues || credits.weakIdentityRequests > 0 {
+                    Text(credits.conflictRequests > 0 ? "有冲突请求未计入，悬停查看说明"
+                         : credits.sourceIssues ? "部分记录未能完整读取，悬停查看说明"
+                         : "部分请求缺少编号，去重可靠性有限")
+                        .font(.system(size: 9)).foregroundStyle(pal.text3).help(credits.explanation)
+                }
+                if credits.hasValue && (credits.nonBillableRequests > 0 || credits.billingUnknownRequests > 0) {
+                    Text("含未计费或计费状态未知的记录，不代表实际扣款")
+                        .font(.system(size: 9)).foregroundStyle(pal.text3).help(credits.explanation)
+                }
+            }
         }
     }
 
@@ -568,7 +585,7 @@ struct ProviderDetailView: View {
     /// 缓存命中率口径由声明表给（`.ofTotal` Claude 系 / `.ofInput` Codex 系）。
     private func ringRate(_ t: TokenBreakdown) -> Double { spec.ring.rate(t) }
 
-    /// Hero 副行金额段。四档各自的措辞。
+    /// Hero 副行金额段。各来源使用自己的计量口径。
     private func heroCostLabel(_ detail: ProviderDetail) -> String {
         if spec.costUnit == .creditsTotalOnly, !detail.costAvailable {
             // 有缓存：照显示，但标「截至 HH:mm」（不是实时数）；从没同步过：积分未同步
@@ -579,6 +596,8 @@ struct ProviderDetailView: View {
         }
         let c = detail.cost
         switch spec.costUnit {
+        case .recordedCredits:
+            return detail.credits?.label ?? "积分未知"
         case .equivalentUSD:
             return "≈ \(fmtDollar(c))"
         case .credits:
@@ -727,38 +746,54 @@ struct ProviderDetailView: View {
         collapsibleSection(title: "按模型", unit: "个模型",
                            items: d.models, expanded: $showAllModels,
                            trailing: { EmptyView() }) { m in
-            HStack(spacing: 8) {
-                Circle().fill(accent).frame(width: 7, height: 7)
-                Text(m.modelId).font(.system(size: 11)).foregroundStyle(pal.text).lineLimit(1)
-                Spacer(minLength: 6)
-                Text(fmtTok(m.tokens.total))
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(pal.text2)
-                    .frame(width: 56, alignment: .trailing)
-                hitPill(m.hitRate)
-                if spec.costUnit != .creditsTotalOnly,
-                   m.cost == 0, m.tokens.total > 0,
-                   UnifiedPricing.hasNoPricing(for: m.modelId) {
-                    // 内置+远程价目都没有的模型：给反馈入口（预填 issue），感知长尾缺价
-                    Button(action: { openPricingIssue(model: m.modelId) }) {
-                        Text("无价目")
-                            .font(.system(size: 9))
-                            .foregroundStyle(pal.text3)
-                            .padding(.horizontal, 4).padding(.vertical, 1)
-                            .background(RoundedRectangle(cornerRadius: 4)
-                                .strokeBorder(pal.text3.opacity(0.45), lineWidth: 0.5))
-                    }
-                    .buttonStyle(.plain)
-                    .help("该模型暂无价目，点击一键反馈（打开预填好的 GitHub Issue）")
-                    .frame(width: 46, alignment: .trailing)
-                } else {
-                    Text(fmtCost(m.cost))
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(pal.text)
-                        .frame(width: 46, alignment: .trailing)
+            modelRow(m)
+        }
+    }
+
+    private func modelRow(_ m: ModelDetailRecord) -> some View {
+        HStack(spacing: 8) {
+            Circle().fill(accent).frame(width: 7, height: 7)
+            Text(m.displayName ?? m.modelId).font(.system(size: 11)).foregroundStyle(pal.text).lineLimit(1)
+                .help(m.displayName.map { "\($0)（\(m.modelId)）" } ?? m.modelId)
+            Spacer(minLength: 6)
+            Text(fmtTok(m.tokens.total))
+                .font(.system(size: 10.5, design: .monospaced))
+                .foregroundStyle(pal.text2)
+                .frame(width: 56, alignment: .trailing)
+            hitPill(m.hitRate)
+            if spec.costUnit == .recordedCredits {
+                recordedCreditLabel(m.credits)
+            } else if spec.costUnit != .creditsTotalOnly,
+               m.cost == 0, m.tokens.total > 0,
+               UnifiedPricing.hasNoPricing(for: m.modelId) {
+                // 内置+远程价目都没有的模型：给反馈入口（预填 issue），感知长尾缺价
+                Button(action: { openPricingIssue(model: m.modelId) }) {
+                    Text("无价目")
+                        .font(.system(size: 9))
+                        .foregroundStyle(pal.text3)
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(RoundedRectangle(cornerRadius: 4)
+                            .strokeBorder(pal.text3.opacity(0.45), lineWidth: 0.5))
                 }
+                .buttonStyle(.plain)
+                .help("该模型暂无价目，点击一键反馈（打开预填好的 GitHub Issue）")
+                .frame(width: 46, alignment: .trailing)
+            } else {
+                Text(fmtCost(m.cost))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(pal.text)
+                    .frame(width: 46, alignment: .trailing)
             }
         }
+    }
+
+    private func recordedCreditLabel(_ credits: CreditUsage?) -> some View {
+        Text(credits?.label ?? "积分未知")
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .foregroundStyle(credits?.hasValue == true ? pal.text : pal.text3)
+            .lineLimit(1).minimumScaleFactor(0.8)
+            .frame(width: 90, alignment: .trailing)
+            .help(credits?.explanation ?? "没有可用的积分记录，不代表消耗为 0")
     }
 
     /// 打开预填好的「价目缺失」GitHub Issue（用户只需点 Submit）
@@ -799,7 +834,39 @@ struct ProviderDetailView: View {
         }
     }
 
-    private func sessionRow(_ s: SessionDetailRecord) -> some View {
+    @ViewBuilder private func sessionRow(_ s: SessionDetailRecord) -> some View {
+        if spec.costUnit == .recordedCredits {
+            VStack(alignment: .leading, spacing: 8) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        if !expandedSessions.insert(s.sessionId).inserted { expandedSessions.remove(s.sessionId) }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: expandedSessions.contains(s.sessionId) ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .semibold)).foregroundStyle(pal.text3)
+                        sessionSummary(s)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("展开此会话的模型积分分布")
+                if expandedSessions.contains(s.sessionId) {
+                    VStack(alignment: .leading, spacing: 7) {
+                        ForEach(s.models) { modelRow($0) }
+                        if let credits = s.credits, credits.subagentRequests > 0 {
+                            Text("包含 \(credits.subagentRequests) 个子任务请求，已归入本会话并去除重复")
+                                .font(.system(size: 9)).foregroundStyle(pal.text3)
+                        }
+                    }
+                    .padding(8)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(pal.card))
+                }
+            }
+        } else { sessionSummary(s) }
+    }
+
+    private func sessionSummary(_ s: SessionDetailRecord) -> some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(s.title).font(.system(size: 11)).foregroundStyle(pal.text).lineLimit(1).truncationMode(.tail)
@@ -822,10 +889,14 @@ struct ProviderDetailView: View {
             // （`m.hitRate`）**同口径**，避免同一页两个药丸算法不同。
             // （Codex 的 Hero 环用的是另一套 cached/输入，是重构前就有的口径分歧，本版不动。）
             hitPill(s.tokens.hitRate)
-            Text(sessionCost(s.cost))
+            if spec.costUnit == .recordedCredits {
+                recordedCreditLabel(s.credits)
+            } else {
+                Text(sessionCost(s.cost))
                 .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(pal.text)
                 .frame(width: 46, alignment: .trailing)
+            }
         }
     }
 
@@ -860,13 +931,15 @@ struct ProviderDetailView: View {
         return "\(n)"
     }
 
-    /// 金额四档（`CostUnit`）：
+    /// 金额口径（`CostUnit`）：
     /// - `.equivalentUSD` → `≈$12.3`（token × 价目表单价）
     /// - `.credits`       → `6.78 Cr`（数据自带的信用点；**不查价目表**）
     /// - `.creditsTotalOnly` → `—`（只有周期总额，无法归因到当前行）
-    /// - `.unavailable`   → `—`（模型名被厂商打码 + 本地无 credit，如 Qoder 全家桶）
+    /// - `.unavailable`   → `—`（模型名被厂商打码 + 本地无 credit，如 Qoder IDE）
     private func fmtCost(_ c: Double) -> String {
         switch spec.costUnit {
+        case .recordedCredits:
+            return "积分未知"  // 正常显示必须经过带覆盖状态的 recordedCreditLabel。
         case .unavailable:
             return "—"
         case .credits:
@@ -891,7 +964,7 @@ struct ProviderDetailView: View {
     /// （等效美元能拆，是因为每列各有单价）。硬按四列摊会是编造。
     private func metricCost(_ c: Double) -> String {
         switch spec.costUnit {
-        case .credits, .creditsTotalOnly: return "—"
+        case .credits, .creditsTotalOnly, .recordedCredits: return "—"
         default: return fmtCost(c)
         }
     }

@@ -50,16 +50,21 @@ public struct QoderCliProvider: UsageProvider {
     public let brandColor = "#10A37F"
     public var family: String? { "qoder" }
 
-    private var projectsDir: URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return home.appendingPathComponent(".qoder/projects")
-    }
+    private let projectsDir: URL
+    private let segmentsRoot: URL
+    private let cache: FileMtimeCache
 
-    public init() {}
+    public init(projectsDir: URL? = nil, segmentsRoot: URL? = nil, cache: FileMtimeCache = .shared) {
+        self.projectsDir = projectsDir ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".qoder/projects")
+        self.segmentsRoot = segmentsRoot ?? QoderCliSegmentSource.defaultRoot
+        self.cache = cache
+    }
 
     private static let requestLedgerDir = "/.usagebar-request-ledger/"
 
     public func fetchDailyRecords() async throws -> [FileDailyRecord] {
+        // 独立补齐积分，不让 token 门禁、mtime 命中或旧源缺字段挡住积分采集。
+        await QoderCreditsReader.refresh(root: projectsDir, ledger: cache)
         var allRecords: [FileDailyRecord] = []
 
         // ── 计量口径（v0.3.35）：**只统计有持久化会话的调用** ────────────────────
@@ -101,7 +106,7 @@ public struct QoderCliProvider: UsageProvider {
                 seenRequestIds.formUnion(index.requestIds)
                 sessionTitles.merge(index.titles) { _, new in new }
 
-                if let entry = await FileMtimeCache.shared.lookup(filePath: path, mtime: meta.mtime, size: meta.size) {
+                if let entry = await cache.lookup(filePath: path, mtime: meta.mtime, size: meta.size) {
                     allRecords.append(contentsOf: entry.records)
                     continue
                 }
@@ -112,7 +117,7 @@ public struct QoderCliProvider: UsageProvider {
                     url: url, providerId: "qoder-cli", attachSource: false)
                 let entry = FileCacheEntry(filePath: path, mtime: meta.mtime, size: meta.size,
                                            records: records, details: details)
-                await FileMtimeCache.shared.store(entry)
+                await cache.store(entry)
                 allRecords.append(contentsOf: records)
             }
         }
@@ -120,7 +125,7 @@ public struct QoderCliProvider: UsageProvider {
         // ── 源② segments 诊断日志（v0.3.33 新增，issue #8）────────────────
         // `--no-session-persistence` 的桥接/非交互调用只在这里留 token 真值。
         // ⚠️ 跨源去重：同一请求若已被源① 计过（持久化会话两边都写），这里必须跳过，否则翻倍。
-        let scan = await QoderCliSegmentStore.shared.scan(under: QoderCliSegmentSource.defaultRoot)
+        let scan = await QoderCliSegmentStore.shared.scan(under: segmentsRoot)
         var segTotals: [String: Int] = [:]
         var segCached: [String: Int] = [:]
         for e in scan.events where e.tokens.total > 0
@@ -132,14 +137,14 @@ public struct QoderCliProvider: UsageProvider {
             // 原始 segment 轮转/删除后历史仍在（与千问办公同款做法）。
             let title = Self.sessionTitle(for: e.sessionId,
                                           transcripts: sessionTitles, roots: scan.projectRoots)
-            await FileMtimeCache.shared.store(Self.segmentLedgerEntry(from: e, title: title))
+            await cache.store(Self.segmentLedgerEntry(from: e, title: title, root: segmentsRoot))
         }
         allRecords.append(contentsOf: segTotals.keys.sorted().map { date in
             FileDailyRecord(provider: id, date: date,
                             token: segTotals[date] ?? 0, cachedToken: segCached[date] ?? 0)
         })
 
-        await Self.purgeNonPersistedLedger(persistedSessions: persistedSessions,
+        await Self.purgeNonPersistedLedger(cache: cache, persistedSessions: persistedSessions,
                                            projectsDirReadable: projectsDirReadable,
                                            projectsDirExists: FileManager.default
                                                .fileExists(atPath: projectsDir.path))
@@ -155,11 +160,11 @@ public struct QoderCliProvider: UsageProvider {
     /// 本机就遇到过 `Operation not permitted`），`persistedSessions` 会是空集 —— 此时若照常清理，
     /// 会把**全部** Qoder 历史抹掉。所以这种情况下整段跳过，宁可暂时多算。
     /// 目录压根不存在则是可信的「确实没有持久化会话」，正常清理。
-    private static func purgeNonPersistedLedger(persistedSessions: Set<String>,
+    private static func purgeNonPersistedLedger(cache: FileMtimeCache, persistedSessions: Set<String>,
                                                 projectsDirReadable: Bool,
                                                 projectsDirExists: Bool) async {
         guard projectsDirReadable || !projectsDirExists else { return }
-        let removed = await FileMtimeCache.shared.remove { entry in
+        let removed = await cache.remove { entry in
             // 只碰 segment 合成条目：`…/.usagebar-request-ledger/<会话>/<请求>`。
             // transcript 条目按定义就是持久化会话，永远保留。
             guard entry.filePath.contains(requestLedgerDir),
@@ -201,8 +206,8 @@ public struct QoderCliProvider: UsageProvider {
     }
 
     /// 把一条 segment 请求事件写成账本条目（总量 + 明细各一份）。
-    private static func segmentLedgerEntry(from e: QwenWorkUsageEvent, title: String) -> FileCacheEntry {
-        let key = QoderCliSegmentSource.defaultRoot
+    private static func segmentLedgerEntry(from e: QwenWorkUsageEvent, title: String, root: URL) -> FileCacheEntry {
+        let key = root
             .appendingPathComponent(".usagebar-request-ledger", isDirectory: true)
             .appendingPathComponent(e.sessionId, isDirectory: true)
             .appendingPathComponent(e.requestId)

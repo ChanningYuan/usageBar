@@ -428,6 +428,7 @@ struct UsageRootView: View {
         func token(_ pid: String) -> Int { viewModel.stats.first { $0.provider == pid }?.token ?? 0 }
         let filtered = visibleProviderIds.filter {
             token($0) > 0 || showsQoderHint(for: $0) || showsRestartHint(for: $0)
+                || ($0 == "qoder-cli" && viewModel.hasQoderCredits(in: viewModel.window))
         }
         // 按当前周期用量降序；token 相同（如多个 Qoder「去开启」0 行）保持原注册顺序（稳定排序）
         return filtered.enumerated()

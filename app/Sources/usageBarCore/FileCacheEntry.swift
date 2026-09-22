@@ -18,14 +18,18 @@ public struct FileCacheEntry: Codable, Sendable, Equatable {
     /// 详情页的唯一数据源。为空表示该文件由旧版本解析、或该 provider 尚未接明细
     /// —— 此时详情页会回落到「只有总量、无法展开」的降级态。
     public let details: [FileDetailRecord]
+    /// Qoder 积分的持久请求观测。旧账本没有该字段仍可读取，不清理已有 token 历史。
+    public let qoderCredits: QoderCreditFile?
 
     public init(filePath: String, mtime: Date, size: Int,
-                records: [FileDailyRecord], details: [FileDetailRecord] = []) {
+                records: [FileDailyRecord], details: [FileDetailRecord] = [],
+                qoderCredits: QoderCreditFile? = nil) {
         self.filePath = filePath
         self.mtime = mtime
         self.size = size
         self.records = records
         self.details = details
+        self.qoderCredits = qoderCredits
     }
 }
 
