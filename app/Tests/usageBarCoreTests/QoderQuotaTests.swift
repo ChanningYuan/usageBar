@@ -31,7 +31,7 @@ final class QoderQuotaTests: XCTestCase {
         XCTAssertEqual(snap.windows[0].detail, "6,000/6,000")
         XCTAssertEqual(snap.windows[0].resetsAt,
                        Date(timeIntervalSince1970: 1_784_736_000))         // 2026-07-23 00:00 +0800
-        XCTAssertEqual(snap.windows[1].label, "资源包")
+        XCTAssertEqual(snap.windows[1].label, "组织共享")
         XCTAssertEqual(snap.windows[1].usedPercent, 46.79, accuracy: 0.01) // 不是 0.47
         XCTAssertEqual(snap.windows[1].detail, "6,551/14,000")
         XCTAssertNil(snap.windows[1].resetsAt)   // 购买制，无刷新日期（expiresAt 归属套餐）
@@ -205,6 +205,145 @@ final class QoderQuotaTests: XCTestCase {
         XCTAssertFalse(QoderRateLimitReader.isBackedOff(.work, now: t0))
     }
 
+    // MARK: - issue #11：三类额度独立，不能被零套餐额度截断
+
+    private static var organizationPackage: [String: Any] { [
+        "cap": 76000, "used": 13629, "remaining": 62371,
+        "percentage": 0.18, "available": true, "unit": "credits",
+    ] }
+
+    func testOrganizationPackageSurvivesZeroOrMissingPlanQuota() throws {
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        for providerId in ["qoder-cli", "qoder-ide"] {
+            for quota: [String: Any]? in [["total": 0, "used": 0], nil] {
+                var obj: [String: Any] = ["userType": "teams",
+                                         "orgResourcePackage": Self.organizationPackage]
+                obj["userQuota"] = quota
+                let snap = QoderRateLimitReader.snapshot(
+                    fromQuota: obj, now: now, providerId: providerId, sourceLabel: "Qoder IDE")
+                XCTAssertNil(snap.error)
+                XCTAssertEqual(snap.providerId, providerId)
+                XCTAssertEqual(snap.planType, "teams")
+                XCTAssertEqual(snap.sourceLabel, "Qoder IDE")
+                XCTAssertEqual(snap.capturedAt, now)
+                XCTAssertEqual(snap.windows.count, 1)
+                let window = try XCTUnwrap(snap.windows.first)
+                XCTAssertEqual(window.kind, "pack")
+                XCTAssertEqual(window.label, "组织共享")
+                XCTAssertEqual(window.used, 13629)
+                XCTAssertEqual(window.total, 76000)
+                XCTAssertEqual(window.usedPercent, 17.9328947368, accuracy: 0.000001)
+                XCTAssertEqual(window.detail, "13,629/76,000")
+                XCTAssertNil(window.resetsAt)
+            }
+        }
+    }
+
+    func testExhaustedOrganizationPackageRemainsVisible() throws {
+        let obj = parse("""
+        {"userType":"teams","userQuota":{"total":0,"used":0},
+         "orgResourcePackage":{"cap":76000,"used":76000,"remaining":0,"available":false}}
+        """)
+        let snap = QoderRateLimitReader.snapshot(fromQuota: obj, now: Date())
+        XCTAssertNil(snap.error)
+        XCTAssertEqual(snap.windows.count, 1)
+        let window = try XCTUnwrap(snap.windows.first)
+        XCTAssertEqual(window.usedPercent, 100)
+        XCTAssertEqual(window.detail, "76,000/76,000")
+    }
+
+    func testAddOnQuotaWorksWithoutPlanOrOrganizationPackage() throws {
+        let obj = parse("""
+        {"userType":"personal_standard","expiresAt":1784736000000,
+         "addOnQuota":{"total":1500,"used":450,"remaining":1050,"percentage":0.3}}
+        """)
+        let snap = QoderRateLimitReader.snapshot(fromQuota: obj, now: Date())
+        XCTAssertNil(snap.error)
+        XCTAssertEqual(snap.windows.count, 1)
+        let window = try XCTUnwrap(snap.windows.first)
+        XCTAssertEqual(window.kind, "addon")
+        XCTAssertEqual(window.label, "加购")
+        XCTAssertEqual(window.usedPercent, 30)
+        XCTAssertEqual(window.used, 450)
+        XCTAssertEqual(window.total, 1500)
+        XCTAssertEqual(window.detail, "450/1,500")
+        XCTAssertNil(window.resetsAt, "套餐重置时间不能挂到加购额度上")
+    }
+
+    func testAllThreeQuotaBucketsRetainTheirOwnNumbersAndReset() {
+        var obj = parse("""
+        {"userType":"teams","expiresAt":1784736000000,
+         "userQuota":{"total":6000,"used":6000,"percentage":1},
+         "addOnQuota":{"total":1500,"used":1500,"remaining":0}}
+        """)
+        obj["orgResourcePackage"] = Self.organizationPackage
+        let snap = QoderRateLimitReader.snapshot(fromQuota: obj, now: Date())
+        XCTAssertNil(snap.error)
+        XCTAssertEqual(snap.windows.map(\.kind), ["monthly", "addon", "pack"])
+        XCTAssertEqual(snap.windows.map(\.label), ["套餐", "加购", "组织共享"])
+        XCTAssertEqual(snap.windows.map(\.detail), ["6,000/6,000", "1,500/1,500", "13,629/76,000"])
+        XCTAssertEqual(snap.windows.map(\.resetsAt), [Date(timeIntervalSince1970: 1_784_736_000), nil, nil])
+        XCTAssertEqual(snap.windows.map(\.usedPercent), [100, 100, 13629.0 / 76000 * 100])
+    }
+
+    func testMalformedBucketsDoNotInventUsageOrHideValidOrganizationPackage() {
+        let invalidBuckets: [[String: Any]] = [
+            [:], ["total": 100], ["total": 100, "used": NSNull()],
+            ["total": "100", "used": 10], ["total": 100, "used": "10"],
+            ["total": true, "used": 0], ["total": 100, "used": false],
+            ["total": -100, "used": 10], ["total": 100, "used": -1],
+            ["total": Double.infinity, "used": 0], ["total": 100, "used": Double.nan],
+        ]
+        for bucket in invalidBuckets {
+            let obj: [String: Any] = ["userType": "teams", "userQuota": bucket,
+                                     "addOnQuota": bucket, "orgResourcePackage": Self.organizationPackage]
+            let snap = QoderRateLimitReader.snapshot(fromQuota: obj, now: Date())
+            XCTAssertNil(snap.error)
+            XCTAssertEqual(snap.windows.map(\.kind), ["pack"])
+
+            var invalidPack = bucket
+            invalidPack["cap"] = invalidPack.removeValue(forKey: "total")
+            let empty = QoderRateLimitReader.snapshot(fromQuota: ["orgResourcePackage": invalidPack], now: Date())
+            XCTAssertTrue(empty.windows.isEmpty)
+            XCTAssertEqual(empty.error, .noQuotaData)
+        }
+    }
+
+    func testEmptyResponseKeepsContextWithoutClaimingAnUnsupportedAccount() {
+        for obj: [String: Any] in [[:], ["userType": "teams"]] {
+            let snap = QoderRateLimitReader.snapshot(fromQuota: obj, now: Date(), sourceLabel: "Qoder IDE")
+            XCTAssertTrue(snap.windows.isEmpty)
+            XCTAssertEqual(snap.error, .noQuotaData)
+            XCTAssertEqual(snap.planType, obj["userType"] as? String)
+            XCTAssertEqual(snap.sourceLabel, "Qoder IDE")
+        }
+    }
+
+    func testZeroAndOverLimitUsageRemainValidNumbers() {
+        let obj = parse("""
+        {"userQuota":{"total":6000,"used":0},
+         "addOnQuota":{"total":1500,"used":1600},
+         "orgResourcePackage":{"cap":100,"used":0,"available":true}}
+        """)
+        let snap = QoderRateLimitReader.snapshot(fromQuota: obj, now: Date())
+        XCTAssertNil(snap.error)
+        XCTAssertEqual(snap.windows.map(\.usedPercent), [0, 100, 0])
+        XCTAssertEqual(snap.windows.map(\.detail), ["0/6,000", "1,600/1,500", "0/100"])
+    }
+
+    func testLatestCliQuotaWithOnlyOrganizationPackageDoesNotResurrectOldPlan() throws {
+        let latest = """
+        2026-09-22T15:45:38.000+08:00 quota/usage response: {"userType":"teams","userQuota":{"total":0,"used":0},"orgResourcePackage":{"cap":76000,"used":13629,"remaining":62371,"available":true}}
+        """
+        let hit = try XCTUnwrap(QoderCliQuotaReader.parseLatestQuota(in: Self.logSample + "\n" + latest))
+        XCTAssertNil(hit.snapshot.error)
+        XCTAssertEqual(hit.snapshot.planType, "teams")
+        XCTAssertEqual(hit.snapshot.windows.map(\.kind), ["pack"])
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        XCTAssertEqual(hit.snapshot.capturedAt, formatter.date(from: "2026-09-22T15:45:38.000+08:00"))
+    }
+
     func testCommunityNoQuota() {
         // 免费版 total=0 → 无信用点额度概念
         let obj = parse("""
@@ -213,5 +352,6 @@ final class QoderQuotaTests: XCTestCase {
         let snap = QoderRateLimitReader.snapshot(fromQuota: obj, now: Date())
         XCTAssertEqual(snap.error, .noQuotaData)
         XCTAssertTrue(snap.windows.isEmpty)
+        XCTAssertEqual(snap.planType, "community")
     }
 }

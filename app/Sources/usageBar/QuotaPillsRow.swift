@@ -1,6 +1,14 @@
 import SwiftUI
 import usageBarCore
 
+/// 把额度实际高度交给主列表；分行后不能仍按一行的高度裁切。
+struct QuotaPillHeightKey: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
 /// 主列表 provider 行下方的「额度药丸子行」（v0.3.24）。
 ///
 /// 只在**今日 tab + 已开启监测 + 有快照**时渲染（调用侧已判今日 tab）。
@@ -14,8 +22,13 @@ struct QuotaPillsRow: View {
     var body: some View {
         if let snap = store.snapshot(for: providerId) {
             content(snap)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.leading, 32)   // 与上方名称对齐（icon 22 + gap 10）
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .background(GeometryReader { geometry in
+                    Color.clear.preference(key: QuotaPillHeightKey.self,
+                                           value: [providerId: geometry.size.height])
+                })
         }
     }
 
@@ -24,35 +37,47 @@ struct QuotaPillsRow: View {
         if !snap.windows.isEmpty {
             let stale = QuotaFormat.isStale(snap.capturedAt)
             let hoisted = QuotaFormat.hoistedReset(snap.windows)
-            HStack(spacing: 7) {
-                ForEach(Array(snap.windows.enumerated()), id: \.offset) { _, w in
-                    pill(w, stale: stale, hideReset: hoisted != nil)
+            // Qoder 三类额度可同时存在；放不下时分行，不截断用量数字。
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 7) {
+                    quotaItems(snap, stale: stale, hoisted: hoisted)
                 }
-                // 上提的重置时间缀行尾（0715 定稿 P3）：一次只写一遍，药丸更短
-                if hoisted != nil {
-                    Text(QuotaFormat.countdownCoarse(hoisted).map { "\($0) 重置" } ?? "已重置")
-                        .font(.system(size: 8))
-                        .foregroundStyle(Color(hex: scheme == .dark ? "#636366" : "#8E8E93"))
+                .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 4) {
+                    // 分行时让重置时间留在它所属的额度旁，避免看起来像所有额度一起重置。
+                    quotaItems(snap, stale: stale, hoisted: nil)
                 }
-                // 按量积分药丸（0812 定稿 1a：仅 unlimited 或余额 > 0 时出现；neutral 色不套色档）
-                // ⚠️ 底色必须用 6 位 hex + .opacity()——本项目 Color(hex:) 不认 8 位带 alpha 的写法
-                if let creditsText = snap.credits?.displayText {
-                    let gray = Color(hex: scheme == .dark ? "#98989D" : "#8E8E93")
-                    infoPill(label: "积分", value: creditsText,
-                             valueColor: Color(hex: scheme == .dark ? "#F5F5F7" : "#1D1D1F"),
-                             bg: gray.opacity(scheme == .dark ? 0.15 : 0.094))
-                }
-                // 重置券药丸（0812 定稿：≥1 张才出现；明细在详情页）
-                if !snap.availableCoupons.isEmpty {
-                    let green = Color(hex: scheme == .dark ? "#66C08C" : "#1F8A54")
-                    infoPill(label: "券", value: "×\(snap.availableCoupons.count)",
-                             valueColor: green,
-                             bg: green.opacity(scheme == .dark ? 0.15 : 0.094))
-                }
-                Spacer(minLength: 0)
             }
         } else if let err = snap.error {
             grayLine(err, source: snap.sourceLabel)
+        }
+    }
+
+    @ViewBuilder
+    private func quotaItems(_ snap: RateLimitSnapshot, stale: Bool, hoisted: Date?) -> some View {
+        ForEach(Array(snap.windows.enumerated()), id: \.offset) { _, w in
+            pill(w, stale: stale, hideReset: hoisted != nil)
+        }
+        // 上提的重置时间缀行尾（0715 定稿 P3）：一次只写一遍，药丸更短
+        if hoisted != nil {
+            Text(QuotaFormat.countdownCoarse(hoisted).map { "\($0) 重置" } ?? "已重置")
+                .font(.system(size: 8))
+                .foregroundStyle(Color(hex: scheme == .dark ? "#636366" : "#8E8E93"))
+        }
+        // 按量积分药丸（0812 定稿 1a：仅 unlimited 或余额 > 0 时出现；neutral 色不套色档）
+        // ⚠️ 底色必须用 6 位 hex + .opacity()——本项目 Color(hex:) 不认 8 位带 alpha 的写法
+        if let creditsText = snap.credits?.displayText {
+            let gray = Color(hex: scheme == .dark ? "#98989D" : "#8E8E93")
+            infoPill(label: "积分", value: creditsText,
+                     valueColor: Color(hex: scheme == .dark ? "#F5F5F7" : "#1D1D1F"),
+                     bg: gray.opacity(scheme == .dark ? 0.15 : 0.094))
+        }
+        // 重置券药丸（0812 定稿：≥1 张才出现；明细在详情页）
+        if !snap.availableCoupons.isEmpty {
+            let green = Color(hex: scheme == .dark ? "#66C08C" : "#1F8A54")
+            infoPill(label: "券", value: "×\(snap.availableCoupons.count)",
+                     valueColor: green,
+                     bg: green.opacity(scheme == .dark ? 0.15 : 0.094))
         }
     }
 
@@ -283,7 +308,7 @@ enum QuotaFormat {
             return "已登录 · 暂无额度数据"
         case .authDenied:            return "未获钥匙串授权 ·"
         case .network:               return "暂时无法获取额度"
-        case .noQuotaData:           return "该账号类型不提供配额数据"
+        case .noQuotaData:           return "当前没有可展示的额度数据"
         case .noDataSource:          return "该工具未提供额度接口"
         case .awaitingData:          return "打开 Claude 会话后自动显示，或切「联网 API」立即看"
         case .binaryNotFound:        return "未找到 Codex — 安装 CLI 或 Codex Desktop 后自动显示"

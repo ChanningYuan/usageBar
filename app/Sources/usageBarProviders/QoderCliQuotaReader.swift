@@ -74,7 +74,7 @@ public struct QoderCliQuotaReader {
             // 行首时间戳 = 这条额度的真实采集时刻；解不出就不用这条（宁可没有，也不谎报采集时间）
             guard let at = Self.lineTimestamp(in: text, before: marker.lowerBound) else { continue }
             let snap = QoderRateLimitReader.snapshot(fromQuota: obj, now: at, providerId: providerId)
-            // 免费版（total=0）会得到 noQuotaData——那也是**真实结论**，照样返回，别继续往下翻旧日志
+            // 最新响应的所有额度池都无可展示数字时也照样返回，别继续往下翻出旧余额。
             return LoggedQuota(snapshot: snap, userId: obj["userId"] as? String)
         }
         return nil

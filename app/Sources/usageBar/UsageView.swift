@@ -245,6 +245,7 @@ struct UsageRootView: View {
     @ObservedObject var tabSettings: TabSettings = .shared
     @ObservedObject var quotaSettings: RateLimitSettings = .shared
     @ObservedObject var quotaStore: RateLimitStore = .shared   // 快照到达时重算弹窗高度
+    @State private var quotaPillHeights: [String: CGFloat] = [:]
 
     /// GitHub mark(模板图,跟随明暗主题色),给 footer 的"去 GitHub"入口用
     private static let githubIcon: NSImage? = {
@@ -315,16 +316,19 @@ struct UsageRootView: View {
         // 每块 = 行 32 + 块内上下 padding 6；块间距 5；content 上下 padding 16
         var h = CGFloat(n) * 38 + CGFloat(max(0, n - 1)) * 5 + 16
         h += CGFloat(qoderHintCount) * 23    // 未开启提示行(18) + 间距(5)，在块之外
-        h += CGFloat(quotaPillRowCount) * 22 // 额度药丸子行（约 19pt + 块内 VStack 间距 3）
+        h += quotaPillsHeight  // 额度可分行，按实际高度加块内 VStack 间距
         return h
     }
 
-    /// 今日 tab 下、已开启监测且有快照的 provider 数量——每个会多挂一行药丸，需计入高度。
-    private var quotaPillRowCount: Int {
+    /// 首次布局保留原来的一行高度；子视图测量后跟随实际高度，避免三类额度挤压底栏。
+    private var quotaPillsHeight: CGFloat {
         guard viewModel.window == .today else { return 0 }
-        return displayedProviderIds.filter { pid in
-            quotaSettings.isEnabled(forProvider: pid) && quotaStore.snapshot(for: pid) != nil
-        }.count
+        return displayedProviderIds.reduce(0) { height, pid in
+            guard quotaSettings.isEnabled(forProvider: pid), quotaStore.snapshot(for: pid) != nil else {
+                return height
+            }
+            return height + max(19, quotaPillHeights[pid] ?? 19) + 3
+        }
     }
 
     private var totalHeight: CGFloat {
@@ -348,6 +352,7 @@ struct UsageRootView: View {
                 .background(Color(nsColor: .windowBackgroundColor))
             }
         }
+        .onPreferenceChange(QuotaPillHeightKey.self) { quotaPillHeights = $0 }
         .onAppear { qoderStatus.refresh() }
     }
 
