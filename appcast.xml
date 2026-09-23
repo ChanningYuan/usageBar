@@ -5,23 +5,23 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.43</h3>
-<p><b>修复</b></p>
+<h3>usageBar 0.3.44</h3>
+<p><b>新增</b></p>
 <ul>
-<li><b>Qoder Teams 套餐额度为 0 时，组织共享额度仍正常显示（#11）</b>：套餐、加购、组织共享三类额度分别读取和展示；套餐额度缺失不再挡住其他额度，组织共享额度用完后仍显示已用 100%。</li>
-<li><b>Qoder 加购额度不再漏显示</b>；三类额度同时出现、横向空间不足时自动分行，保留完整数字。组织资源包统一标为「组织共享」，不推断内部资金来源。</li>
-<li><b>无额度数据时不再断言账号不支持</b>：提示改为「当前没有可展示的额度数据」；缺失或异常数值不再当成已用 0。</li>
+<li><b>Qoder CLI 详情支持本地记录积分（#12）</b>：周期总量、按模型、按会话显示积分；点击会话可展开其模型分布，子任务归入主会话。文本用量为 0 时，有积分记录仍可查看详情。</li>
+<li><b>积分记录跨文件去重并保留历史</b>：刷新、重启或原日志被清理后，已经采集的积分仍保留。升级时补读现存历史会话，不清空原有用量账本。</li>
+<li><b>区分零积分、积分未知和记录不完整</b>：缺失或异常数据不当成 0，部分记录缺失时标注合计不完整；同一请求的金额或归属冲突时明确提示，并排除冲突金额。显示值来自本地记录，不代表官方最终扣款。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.43</title>
-            <pubDate>Tue, 22 Sep 2026 16:53:47 +0800</pubDate>
-            <sparkle:version>0.3.43</sparkle:version>
-            <sparkle:shortVersionString>0.3.43</sparkle:shortVersionString>
+            <title>0.3.44</title>
+            <pubDate>Tue, 22 Sep 2026 18:22:19 +0800</pubDate>
+            <sparkle:version>0.3.44</sparkle:version>
+            <sparkle:shortVersionString>0.3.44</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.43/usageBar.zip" length="2757715" type="application/octet-stream" sparkle:edSignature="jHm2E5SD4wLaI9O1DeMtJtR0UEJETWA7TfAh+9Bk+O5Wiv0u38j+1WteZsKmCwpEIXTcqS8FgIXwx8zVpJH4Aw=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.44/usageBar.zip" length="2878676" type="application/octet-stream" sparkle:edSignature="ulaJmCpSDkjkDBP1x2FBh0keYoOn7PkB0r0f/96DhUzaOC5qZxo/o5QLh3/a5Bk8rurlMuBYNYzLRBENTXFZCw=="/>
         </item>
     </channel>
 </rss>
