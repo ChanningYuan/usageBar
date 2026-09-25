@@ -12,12 +12,13 @@ import usageBarCore
 ///       - IDE 读 SharedClientCache SQLite(chat_message.token_info)
 ///       - ⚠️ QoderWork 已于 v0.3.33 下架(由千问办公替代),悟空同批下架
 ///   3. 千问办公(独立,读 ~/.qwenworkcn/logs/sessions/**/segments/*.jsonl)
+///      豆包工作(独立,v0.3.45;只有积分没有 token,联网同步在 DoubaoWorkStore,本 provider 只把本地镜像写进账本)
 ///   4. Codex(独立)
 ///   5. WorkBuddy(独立,读 ~/.workbuddy/projects/.../*.jsonl 的 providerData.rawUsage)
 ///   6. Cursor(唯一联网) → OpenCode
 ///
 /// ⚠️ **v0.3.33 下架了 4 个 provider**：QoderWork / 悟空(由千问办公替代)、
-/// OpenClaw / Hermes Agent(本机未使用)。当前 9 个实例。
+/// OpenClaw / Hermes Agent(本机未使用)。v0.3.45 加豆包工作,当前 10 个实例。
 /// 下架 = 从本列表摘掉 + 删 provider 实现 + 清 UsageView 元信息/图标分支 + 清详情声明表；
 /// 历史数据随 schemaVersion 9 的重扫一并清出,不留置灰行。
 ///
@@ -34,6 +35,7 @@ public enum UsageBarProviders {
             QoderIdeProvider(),
             // 独立 provider
             QwenWorkProvider(),
+            DoubaoWorkProvider(),
             CodexProvider(),
             WorkBuddyProvider(),
             CursorProvider(),  // ⚠️ 唯一联网 provider（本地无真实 token，必须联网拉取）

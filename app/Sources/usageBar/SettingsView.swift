@@ -14,7 +14,17 @@ final class SettingsNavigation: ObservableObject {
 
     /// 置 true 表示"打开设置后应展开并滚到账号额度段"（从额度「去授权/去开启」入口跳来）。
     @Published var pendingFocusQuota = false
-    func requestFocusQuota() { pendingFocusQuota = true }
+    /// 要定位到的那一行（逻辑开关 id，如 "doubao-work"）；nil = 只滚到段头。
+    /// v0.3.45：段里 7 行，排在后面的（豆包工作）只滚到段头时根本不在可见区域（验收实拍）。
+    private(set) var pendingQuotaRow: String?
+    func requestFocusQuota(row: String? = nil) {
+        pendingQuotaRow = row
+        pendingFocusQuota = true
+    }
+    func consumeQuotaRow() -> String? {
+        defer { pendingQuotaRow = nil }
+        return pendingQuotaRow
+    }
 }
 
 /// Settings 面板(右键菜单 → 偏好设置...)
@@ -181,10 +191,16 @@ struct SettingsView: View {
     }
 
     /// 额度「去授权/去开启」入口触发：展开账号额度段并滚动到它，然后复位信号。
+    /// 带了具体行（`requestFocusQuota(row:)`）就把那一行滚到窗口中间，否则滚到段头。
     private func focusQuota(_ proxy: ScrollViewProxy) {
         quotaExpanded = true
-        DispatchQueue.main.async {
-            withAnimation { proxy.scrollTo("quota", anchor: .top) }
+        let row = nav.consumeQuotaRow()
+        // 段刚展开时行还没进布局树：稍等一拍再滚，否则 scrollTo 找不到目标、原地不动
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            withAnimation {
+                if let row { proxy.scrollTo("quota-row-\(row)", anchor: .center) }
+                else { proxy.scrollTo("quota", anchor: .top) }
+            }
         }
         nav.pendingFocusQuota = false
     }
@@ -192,7 +208,13 @@ struct SettingsView: View {
     // MARK: - 折叠段通用
 
     private var visibleProviderCount: Int {
-        ProviderRegistry.all.filter { settings.isProviderToggleOn($0.id) }.count
+        listedProviders.filter { settings.isProviderToggleOn($0.id) }.count
+    }
+
+    /// 设置页列出的数据源：豆包工作只在本机装了（或留有它的数据）时出现（Pencil lane ③ 定稿）——
+    /// 它没有本地日志，没装的机器上列出来只是一个永远没数的开关。
+    private var listedProviders: [any UsageProvider] {
+        ProviderRegistry.all.filter { $0.id != "doubao-work" || DoubaoWorkEnv.isInstalled() }
     }
 
     /// 折叠段标题行：chevron（收起▸ / 展开▾）+ 标题 + 右侧计数；整行可点击折叠。
@@ -300,7 +322,7 @@ struct SettingsView: View {
             pricingNotice   // 价目表过期提示：折叠与否都要能看见
             if dataSourceExpanded {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(ProviderRegistry.all, id: \.id) { p in
+                    ForEach(listedProviders, id: \.id) { p in
                         providerRow(p)
                         // gate 横幅**按产品各挂各的**（v0.3.33）：Qoder CLI 与千问办公是两个独立的
                         // 环境变量、两个独立的开关状态，共用一条横幅时用户无法判断"到底谁没开"。
@@ -385,13 +407,18 @@ struct SettingsView: View {
             }
             if quotaExpanded {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Self.quotaRows, id: \.id) { row in
+                    ForEach(Self.quotaRows.filter { $0.id != "doubao-work" || showsDoubaoQuotaRow }, id: \.id) { row in
                         quotaRow(id: row.id, iconProvider: row.icon, name: row.name, desc: row.desc)
                     }
                 }
                 .padding(.leading, 2)
             }
         }
+    }
+
+    /// 豆包工作这一行：装了才出现；已经开着的（比如后来卸载了）也留着，让用户能关掉
+    private var showsDoubaoQuotaRow: Bool {
+        DoubaoWorkEnv.isInstalled() || quotaSettings.isEnabled("doubao-work")
     }
 
     private struct QuotaRowSpec { let id: String; let icon: String; let name: String; let desc: String }
@@ -404,6 +431,8 @@ struct SettingsView: View {
               desc: "读取本机 Qoder 登录凭证并请求 qoder.com（首次弹一次钥匙串授权框）。CLI 与 IDE 登录同一账号时共用一份额度；登录了不同账号时各行显示各自账号的额度。"),
         .init(id: "qwen-work", icon: "qwen-work", name: "千问办公额度与积分",
               desc: "读取本机千问办公登录凭证，查每日 / 周期 / 长期积分的已用与额度（主列表三颗药丸、详情页额度模块）。今日已用与按会话积分只有网页登录能查到，见下面的「精确模式」。"),
+        .init(id: "doubao-work", icon: "doubao-work", name: "豆包工作额度与积分",
+              desc: "读取本机豆包工作的登录信息（开启时弹一次「DoubaoWork Safe Storage」钥匙串授权），联网查额度（当前时段 / 近 7 天）与逐条积分消耗明细。只读 doubao.com 的登录 cookie，不外传。豆包工作没有 token 数据，主列表数字位显示「—」，积分在详情页。"),
         .init(id: "cursor", icon: "cursor", name: "Cursor",
               desc: "读取本机 Cursor 登录凭证并请求 cursor.com。与「数据源 → Cursor」用同一份凭证。"),
         .init(id: "workbuddy", icon: "workbuddy", name: "WorkBuddy",
@@ -433,13 +462,30 @@ struct SettingsView: View {
                         .font(.system(size: 8.5, weight: .semibold))
                         .foregroundStyle(Color(hex: "#007AFF"))
                 }
+                // 豆包工作：登录失效 → 打开豆包工作重新登录；授权被拒 → 立即再请求一次授权（解除 6 小时退避）
+                if id == "doubao-work", quotaSettings.isEnabled(id) {
+                    switch quotaStore.snapshot(for: id)?.error {
+                    case .credentialUnavailable?, .notLoggedIn?:
+                        Button("打开豆包工作 ›") { ProviderDetailView.openDoubaoWorkApp() }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 8.5, weight: .semibold))
+                            .foregroundStyle(Color(hex: "#007AFF"))
+                    case .authDenied?:
+                        Button("重新授权 ›") { Task { await RateLimitCoordinator.refreshOne(id) } }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 8.5, weight: .semibold))
+                            .foregroundStyle(Color(hex: "#007AFF"))
+                    default:
+                        EmptyView()
+                    }
+                }
                 Spacer()
                 Toggle("", isOn: Binding(
                     get: { quotaSettings.isEnabled(id) },
                     set: { on in
                         // Claude / Qoder / 千问办公首次开启弹引导 sheet（选数据源 / 预告钥匙串授权）；
                         // 已配置过的（曾确认过一次）直接开，不重弹——复用上次数据源，避免"关了再开又弹"的怪感。
-                        if on, ["claude-code", "qoder", "qwen-work"].contains(id),
+                        if on, ["claude-code", "qoder", "qwen-work", "doubao-work"].contains(id),
                            !quotaSettings.isConfigured(id) {
                             guideFor = id
                             return   // 先不开，等 sheet 确认；toggle 视觉回弹到关
@@ -485,12 +531,13 @@ struct SettingsView: View {
                 qwenWorkPreciseRows
             }
         }
+        .id("quota-row-\(id)")   // 「去开启 / 去授权」入口按行定位（SettingsNavigation.requestFocusQuota(row:)）
     }
 
     /// 设置行状态标签：数据源 + 连接状态点。
     /// 千问办公也算——它有 `/user/balance` 这个真实的「当前状态」数据源（0804 起）。
     private func quotaChip(id: String) -> (text: String, dot: Color)? {
-        guard ["claude-code", "qoder", "qwen-work"].contains(id),
+        guard ["claude-code", "qoder", "qwen-work", "doubao-work"].contains(id),
               quotaSettings.isEnabled(id) else { return nil }
         let pid = id == "qoder" ? "qoder-cli" : id
         let snap = quotaStore.snapshot(for: pid)
@@ -512,6 +559,13 @@ struct SettingsView: View {
         case "qwen-work":
             // 主行 chip 只表示桌面令牌这条线；网页令牌线的状态在子行（spec 0910 §3.2 C）
             text = snap?.error == .credentialUnavailable ? "凭证已失效" : "已连接"
+        case "doubao-work":
+            switch snap?.error {
+            case .credentialUnavailable?: text = "登录已失效"
+            case .authDenied?:            text = "未获授权"
+            case .notLoggedIn?:           text = "未登录"
+            default:                      text = snap == nil ? "同步中" : "已连接"
+            }
         default: text = "联网 API"
         }
         return (text, dot)

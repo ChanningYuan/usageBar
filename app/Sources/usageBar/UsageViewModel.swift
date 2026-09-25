@@ -23,10 +23,36 @@ final class UsageViewModel: ObservableObject {
     /// 已加载的详情（nil 且 detailProviderId != nil = 加载中）
     @Published var detail: ProviderDetail? = nil
     @Published private(set) var qoderCreditDates: Set<String> = []
+    /// 豆包工作有积分消耗的日期（v0.3.45）。豆包工作没有 token，主列表靠它决定这一行在当期显不显示。
+    @Published private(set) var doubaoCreditDates: Set<String> = []
+    /// 本机有没有豆包工作（主列表「去开启」提示、首次运行保留判据用；每次刷新重判）
+    @Published private(set) var doubaoWorkInstalled = DoubaoWorkEnv.isInstalled()
 
     func hasQoderCredits(in window: TimeWindow) -> Bool {
         let includes = DailyAggregator.windowPredicate(window, weekStartMonday: TabSettings.shared.weekStartMonday)
         return qoderCreditDates.contains(where: includes)
+    }
+
+    func hasDoubaoCredits(in window: TimeWindow) -> Bool {
+        let includes = DailyAggregator.windowPredicate(window, weekStartMonday: TabSettings.shared.weekStartMonday)
+        return doubaoCreditDates.contains(where: includes)
+    }
+
+    private var doubaoLedgerObserver: NSObjectProtocol?
+
+    init() {
+        // 豆包工作的积分走额度采集那一路联网同步（打开弹层 / 设置里刚开开关都会触发），
+        // 写进账本后这里重算——不等下一次 10 分钟刷新
+        doubaoLedgerObserver = NotificationCenter.default.addObserver(
+            forName: .doubaoWorkLedgerDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.doubaoLedgerDidChange() }
+        }
+    }
+
+    private func doubaoLedgerDidChange() async {
+        await recomputeFromCache()
+        if detailProviderId == "doubao-work" { await loadDetail(providerId: "doubao-work") }
     }
 
     /// 全量缓存：4 窗口 × 5 provider = 20 条
@@ -139,6 +165,9 @@ final class UsageViewModel: ObservableObject {
         var keep = Set(allStats.filter { $0.token > 0 }.map { $0.provider })
         if QoderUsageEnvGate.isQoderCliPresent() || !qoderCreditDates.isEmpty { keep.insert("qoder-cli") }
         if QoderUsageEnvGate.isQwenWorkPresent() { keep.insert("qwen-work") }
+        // 豆包工作只有积分、token 恒 0：装了就保留（开关关着时靠这一行挂「去开启」）
+        doubaoWorkInstalled = DoubaoWorkEnv.isInstalled()
+        if doubaoWorkInstalled || !doubaoCreditDates.isEmpty { keep.insert("doubao-work") }
         ProviderVisibilitySettings.shared.autoConfigureFirstRunIfNeeded(providerIdsToKeep: keep)
         // 每次刷新顺带扫一遍 Qoder 的 env 开关状态，驱动弹层/设置页横幅。
         QoderUsageStatus.shared.refresh()
@@ -164,6 +193,11 @@ final class UsageViewModel: ObservableObject {
         let allDaily = entries.flatMap(\.records)
         qoderCreditDates = Set(entries.compactMap(\.qoderCredits).flatMap(\.observations)
             .map { DailyAggregator.dateString(for: $0.timestamp) })
+        doubaoCreditDates = Set(entries
+            .filter { $0.filePath.hasPrefix(DoubaoWorkProvider.ledgerPrefix) }
+            .flatMap(\.details)
+            .filter { ($0.nativeCost ?? 0) > 0 }
+            .map(\.date))
         let computed = DailyAggregator.aggregate(
             allDailyRecords: allDaily,
             providerIds: providerIds,
@@ -224,6 +258,7 @@ final class UsageViewModel: ObservableObject {
                 .map { $0.provider }
         )
         if visible.contains("qoder-cli") && hasQoderCredits(in: .today) { providers.insert("qoder-cli") }
+        if visible.contains("doubao-work") && hasDoubaoCredits(in: .today) { providers.insert("doubao-work") }
         // 门禁走声明表（v0.3.22）。此前这里还硬编码着 `["claude-code", "codex"]` ——
         // 比 UsageView 那处白名单还旧（OpenCode 早就能 drill-in 了却没加进来），
         // 正是「同一个门禁散在多处、加 provider 必漏」的活证据。
@@ -319,7 +354,20 @@ final class UsageViewModel: ObservableObject {
             case .qwenWork:
                 d = await QwenWorkDetailScanner.shared.detail(
                     window: win, weekStartMonday: weekStartMonday)
+            case .doubaoWork:
+                // 豆包工作没有本地日志可扫：账本（及其背后的镜像）就是全部
+                d = .empty(providerId: providerId, windowId: win.id)
             }
+        }
+        // 豆包工作：会话副标题（日期 · 模型）+ 积分同步状态（Hero「截至 HH:mm」/「积分未开启」据此）
+        if providerId == "doubao-work" {
+            let status = await DoubaoWorkStore.shared.status()
+            let enabled = RateLimitSettings.shared.isEnabled("doubao-work")
+            d = DoubaoWorkDetail.decorated(
+                d, details: await FileMtimeCache.shared.details(forProvider: providerId),
+                window: win, weekStartMonday: weekStartMonday,
+                costAvailable: enabled && status.error == nil && status.lastSyncAt != nil,
+                costSyncedAt: status.lastSyncAt)
         }
         // 仅当用户仍停在同一 provider 详情页才 commit（防止快速来回切）
         guard detailProviderId == providerId, win == window else { return }

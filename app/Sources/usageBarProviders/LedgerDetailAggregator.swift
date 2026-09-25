@@ -80,9 +80,11 @@ public enum LedgerDetailAggregator {
             return SourceDetailRecord(source: source, tokens: tb, cost: sourceCost[source] ?? 0)
         }
 
+        // token 相同再按金额排（v0.3.45）：豆包工作这类只有积分、token 恒 0 的来源，
+        // 只按 token 排就是字典的随机序，每次进详情页顺序都不一样
         let models = byModel.map { (mid, tb) in
             ModelDetailRecord(modelId: mid, tokens: tb, cost: modelCost[mid] ?? 0)
-        }.sorted { $0.tokens.total > $1.tokens.total }
+        }.sorted { ($0.tokens.total, $0.cost) > ($1.tokens.total, $1.cost) }
 
         let sessions = bySession.map { (sid, tb) -> SessionDetailRecord in
             SessionDetailRecord(sessionId: sid,
@@ -90,7 +92,7 @@ public enum LedgerDetailAggregator {
                                 subtitle: String(sid.prefix(8)),
                                 lastActivity: sessionLastActivity[sid] ?? .distantPast,
                                 tokens: tb, cost: sessionCost[sid] ?? 0)
-        }.sorted { $0.tokens.total > $1.tokens.total }
+        }.sorted { ($0.tokens.total, $0.cost) > ($1.tokens.total, $1.cost) }
 
         return ProviderDetail(providerId: providerId, windowId: window.id,
                               tokens: hero, cost: heroCost, sources: sources,

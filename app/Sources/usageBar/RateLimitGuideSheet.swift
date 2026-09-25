@@ -8,11 +8,12 @@ import usageBarProviders
 ///   （需钥匙串的 OAuth → 「去授权并启用」；零弹窗的 statusline/CLI → 「启用」）。
 /// - **Qoder**：单方案（联网查额度，需一次钥匙串授权），按钮固定「去授权并启用」。
 /// - **千问办公**：单方案（联网缓存真实积分账单，需一次钥匙串授权）。
+/// - **豆包工作**：单方案（联网同步额度与逐笔积分，需一次钥匙串授权，v0.3.45）。
 /// - Codex / Cursor / WorkBuddy 不弹此 sheet（零选择、零钥匙串，直接开）。
 ///
 /// 需钥匙串的选项会亮出**强调色提醒**：选「始终允许」+「仅查额度、绝不外发」。
 struct RateLimitGuideSheet: View {
-    let logicalId: String                 // "claude-code" / "qoder" / "qwen-work"
+    let logicalId: String                 // "claude-code" / "qoder" / "qwen-work" / "doubao-work"
     @State private var selected: String   // Claude 的数据源选择；Qoder 恒为 ""
     let onConfirm: (_ source: String) -> Void
     let onCancel: () -> Void
@@ -27,6 +28,7 @@ struct RateLimitGuideSheet: View {
 
     private var isClaude: Bool { logicalId == "claude-code" }
     private var isQwenWork: Bool { logicalId == "qwen-work" }
+    private var isDoubaoWork: Bool { logicalId == "doubao-work" }
 
     /// statusline 预览图（Icons/statusline-preview.png，随 app 打包）
     private static let statuslineShot: NSImage? = BundleIconLoader.load(name: "statusline-preview", ext: "png")
@@ -41,7 +43,7 @@ struct RateLimitGuideSheet: View {
                         optionRow(opt)
                     }
                 } else {
-                    optionRow(isQwenWork ? Self.qwenWorkOption : Self.qoderOption)
+                    optionRow(singleOption)
                 }
                 if selectedOption.needsKeychain { keychainWarning }
             }
@@ -57,7 +59,8 @@ struct RateLimitGuideSheet: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            ProviderIcon(providerId: isClaude ? "claude-code" : (isQwenWork ? "qwen-work" : "qoder-work"))
+            ProviderIcon(providerId: isClaude ? "claude-code"
+                         : isQwenWork ? "qwen-work" : isDoubaoWork ? "doubao-work" : "qoder-work")
                 .frame(width: 24, height: 24)
             VStack(alignment: .leading, spacing: 1) {
                 Text(headerTitle)
@@ -193,20 +196,32 @@ struct RateLimitGuideSheet: View {
         desc: "读取本机千问办公登录凭证，向 qwenwork.cn 查每日 / 周期 / 长期积分的已用与额度（主列表三颗药丸、详情页额度模块）。今日已用与按会话积分只有网页登录能查到，另在设置页开启「精确模式」；不会上传会话内容。",
         recommended: false, needsKeychain: true)
 
+    static let doubaoWorkOption = Option(
+        source: "", title: "联网同步额度与积分明细",
+        desc: "读取本机豆包工作的登录信息（doubao.com 的登录 cookie），向 doubao.com 查当前时段 / 近 7 天额度与逐条积分消耗（主列表两颗药丸、详情页积分）。只读查询，不会上传会话内容。豆包工作没有 token 数据，主列表数字位显示「—」。",
+        recommended: false, needsKeychain: true)
+
+    /// 单方案来源（Qoder / 千问办公 / 豆包工作）的那一个选项
+    private var singleOption: Option {
+        isQwenWork ? Self.qwenWorkOption : isDoubaoWork ? Self.doubaoWorkOption : Self.qoderOption
+    }
+
     private var selectedOption: Option {
         if isClaude { return Self.claudeOptions.first { $0.source == selected } ?? Self.claudeOptions[0] }
-        return isQwenWork ? Self.qwenWorkOption : Self.qoderOption
+        return singleOption
     }
 
     private var headerTitle: String {
         if isClaude { return "开启 Claude Code 额度监测" }
         if isQwenWork { return "开启千问办公积分监测" }
+        if isDoubaoWork { return "开启豆包工作额度与积分" }
         return "开启 Qoder 额度监测"
     }
 
     private var headerSubtitle: String {
         if isClaude { return "选一个获取额度的方式" }
         if isQwenWork { return "确认后开始联网同步积分历史" }
+        if isDoubaoWork { return "确认后开始联网同步额度与积分明细" }
         return "确认后开始联网查询账号额度"
     }
 

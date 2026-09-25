@@ -1,7 +1,6 @@
 import CommonCrypto
 import CryptoKit
 import Foundation
-import SQLite3
 import Security
 import usageBarCore
 
@@ -209,41 +208,8 @@ public enum ChromeCookieReader {
     }
 
     /// 拷贝到临时目录后只读查询 `cookies` 表，返回所有 qwenwork.cn 下名为 token 的密文。
+    /// 拷库 + 查表的通用部分在 `ChromiumCookieStore`（v0.3.45 抽出，豆包工作共用）。
     static func encryptedTokens(in database: URL) -> [Data] {
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("usagebar-chrome-cookies-\(UUID().uuidString)")
-        try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmp) }
-        let copy = tmp.appendingPathComponent("Cookies")
-        guard (try? FileManager.default.copyItem(at: database, to: copy)) != nil else { return [] }
-        for suffix in ["-journal", "-wal"] {
-            let side = URL(fileURLWithPath: database.path + suffix)
-            if FileManager.default.fileExists(atPath: side.path) {
-                try? FileManager.default.copyItem(at: side, to: URL(fileURLWithPath: copy.path + suffix))
-            }
-        }
-
-        var db: OpaquePointer?
-        let uri = "file:\(copy.path)?mode=ro"
-        guard sqlite3_open_v2(uri, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK, let db else {
-            if let db { sqlite3_close(db) }
-            return []
-        }
-        defer { sqlite3_close(db) }
-        var stmt: OpaquePointer?
-        let sql = "SELECT encrypted_value FROM cookies WHERE host_key LIKE '%qwenwork.cn' AND name = 'token' ORDER BY expires_utc DESC"
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
-            if let stmt { sqlite3_finalize(stmt) }
-            return []
-        }
-        defer { sqlite3_finalize(stmt) }
-        var out: [Data] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            if let bytes = sqlite3_column_blob(stmt, 0) {
-                let count = Int(sqlite3_column_bytes(stmt, 0))
-                out.append(Data(bytes: bytes, count: count))
-            }
-        }
-        return out
+        ChromiumCookieStore.rows(in: database, hostLike: "%qwenwork.cn", name: "token").map(\.encrypted)
     }
 }

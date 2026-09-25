@@ -3,7 +3,7 @@ import SwiftUI
 
 /// 账号额度监测开关（v0.3.24，持久化 UserDefaults）。
 ///
-/// 逻辑开关：`codex` / `claude-code` / `qoder` / `qwen-work` / `cursor` / `workbuddy`。
+/// 逻辑开关：`codex` / `claude-code` / `qoder` / `qwen-work` / `doubao-work` / `cursor` / `workbuddy`。
 /// - Codex **默认开**（纯本地读日志，零联网、零风险）。
 /// - Claude / Qoder / 千问办公 **默认关**——首次开启涉及联网和/或读系统钥匙串，
 ///   让用户主动开、并预告代价（见设置说明文案）。
@@ -14,9 +14,10 @@ final class RateLimitSettings: ObservableObject {
     static let shared = RateLimitSettings()
 
     /// 逻辑开关 id（≠ provider 实例 id：qoder 覆盖三实例）
-    static let logicalIds = ["codex", "claude-code", "qoder", "qwen-work", "cursor", "workbuddy"]
+    static let logicalIds = ["codex", "claude-code", "qoder", "qwen-work", "doubao-work", "cursor", "workbuddy"]
     /// 默认开：零钥匙串的三个（Codex 读日志、WorkBuddy 读明文文件、Cursor 读明文 SQLite）。
-    /// Claude / Qoder / 千问办公涉及钥匙串授权，默认关，让用户主动开 + 走引导。
+    /// Claude / Qoder / 千问办公 / 豆包工作涉及钥匙串授权，默认关，让用户主动开 + 走引导。
+    /// ⚠️ 豆包工作的额度**和积分**都靠这一个开关（没有本地日志可读）：关着时主列表那一行没有数，只挂「去开启」。
     static let defaultEnabled: Set<String> = ["codex", "workbuddy", "cursor"]
 
     @Published private(set) var enabled: Set<String> {

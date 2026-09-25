@@ -36,6 +36,7 @@ enum ProviderMetaLookup {
         "qoder-ide": .init(id: "qoder-ide", displayName: "Qoder IDE", brandColor: "#0E5F7A"),
         // 独立
         "qwen-work": .init(id: "qwen-work", displayName: "千问办公", brandColor: "#39D98A"),
+        "doubao-work": .init(id: "doubao-work", displayName: "豆包工作", brandColor: "#3C7BFF"),
         "codex": .init(id: "codex", displayName: "Codex", brandColor: "#10A37F"),
         "workbuddy": .init(id: "workbuddy", displayName: "WorkBuddy", brandColor: "#5B5BD6"),
         "cursor": .init(id: "cursor", displayName: "Cursor", brandColor: "#000000"),
@@ -171,6 +172,18 @@ struct ProviderIcon: View {
                         Text("千问").font(.system(size: 7, weight: .semibold)).foregroundStyle(.white)
                     }
                 }
+            case "doubao-work":
+                // 豆包工作:官方 app 图标(白色圆角底 + 蓝色环,抽自 DoubaoWork.app 的 app.icns,88px)
+                if let img = BundleIconLoader.load(name: "doubaowork", ext: "png") {
+                    Image(nsImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: size, height: size)
+                } else {
+                    roundedBox(bg: "#3C7BFF") {
+                        Text("豆包").font(.system(size: 7, weight: .semibold)).foregroundStyle(.white)
+                    }
+                }
             case "codex":
                 roundedBoxWithBundleImage(bg: "#10A37F", name: "codex", ext: "svg")
             case "workbuddy":
@@ -280,6 +293,15 @@ struct UsageRootView: View {
 
     private func showsRestartHint(for pid: String) -> Bool { gateHint(for: pid) == .needsRestart }
 
+    /// 豆包工作「去开启」（用户 09-24 拍板 1a）：装了豆包工作、从没开过「豆包工作额度与积分」
+    /// （开关关着、也没走完过引导）→ 这一行常驻（不分周期，数字「—」）+ 下面挂一行提示。
+    /// 开过一次后就按当期有没有积分决定显示——豆包工作没有本地日志，开关关着就一个数都没有，
+    /// 不挂这一行用户根本不知道它能统计。
+    private func showsDoubaoEnableHint(for pid: String) -> Bool {
+        pid == "doubao-work" && visibleProviderIds.contains(pid) && viewModel.doubaoWorkInstalled
+            && !quotaSettings.isEnabled("doubao-work") && !quotaSettings.isConfigured("doubao-work")
+    }
+
     /// 某个时间点是否落在当前选中的周期内（复用聚合层的窗口判定，避免另写一套日期逻辑）。
     private func inCurrentWindow(_ date: Date) -> Bool {
         DailyAggregator.windowPredicate(
@@ -307,6 +329,7 @@ struct UsageRootView: View {
         ["qoder-cli", "qwen-work"]
             .filter { showsQoderHint(for: $0) || showsRestartHint(for: $0) }
             .count
+            + (showsDoubaoEnableHint(for: "doubao-work") ? 1 : 0)
     }
 
     /// 按行数动态算 popover 内容区高度,空状态(0 行)给个最小占位
@@ -429,6 +452,9 @@ struct UsageRootView: View {
         let filtered = visibleProviderIds.filter {
             token($0) > 0 || showsQoderHint(for: $0) || showsRestartHint(for: $0)
                 || ($0 == "qoder-cli" && viewModel.hasQoderCredits(in: viewModel.window))
+                // 豆包工作 token 恒 0：当期有积分，或还没开过额度与积分（挂「去开启」）才显示
+                || ($0 == "doubao-work" && viewModel.hasDoubaoCredits(in: viewModel.window))
+                || showsDoubaoEnableHint(for: $0)
         }
         // 按当前周期用量降序；token 相同（如多个 Qoder「去开启」0 行）保持原注册顺序（稳定排序）
         return filtered.enumerated()
@@ -467,6 +493,8 @@ struct UsageRootView: View {
                             qoderHintRow
                         } else if showsRestartHint(for: pid) {
                             restartHintRow(restartHintText(for: pid))
+                        } else if showsDoubaoEnableHint(for: pid) {
+                            doubaoEnableHintRow
                         }
                     }
                 }
@@ -514,6 +542,31 @@ struct UsageRootView: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             Button {
+                SettingsWindowController.shared.showWindow()
+            } label: {
+                HStack(spacing: 2) {
+                    Text("去开启").font(.system(size: 10, weight: .medium))
+                    Image(systemName: "chevron.right").font(.system(size: 7))
+                }
+            }
+            .buttonStyle(.link)
+            Spacer()
+        }
+        .padding(.leading, 32)   // 对齐 provider 名(icon 22 + spacing 10)
+        .frame(height: 18)
+    }
+
+    /// 豆包工作还没开「额度与积分」：只说开了能看到什么 + 入口（不是报错，不用警告色）。
+    private var doubaoEnableHintRow: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+            Text("开启额度与积分后显示")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            Button {
+                SettingsNavigation.shared.requestFocusQuota(row: "doubao-work")   // 打开设置后定位到豆包工作那一行
                 SettingsWindowController.shared.showWindow()
             } label: {
                 HStack(spacing: 2) {

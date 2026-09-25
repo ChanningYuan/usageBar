@@ -92,7 +92,13 @@ struct ProviderDetailView: View {
     /// 内容区：有数据时按实测高度自适应（矮不留白、高封顶滚动）；加载/空态给固定高度撑住弹层。
     @ViewBuilder private var detailContent: some View {
         if let d = viewModel.detail, d.providerId == providerId {
-            if d.tokens.total == 0 && d.cost == 0 && d.credits?.hasActivity != true {
+            if spec.costUnit == .itemizedCredits, d.cost == 0, doubaoHeroHint != nil {
+                // 豆包工作：开关关着 / 登录失效 / 授权被拒、且这个周期没有历史积分——只给 Hero + 原因和入口
+                // （Pencil lane ② 右侧三态）。不能落到「没有用量」：那会被读成「没花钱」，其实是「没拿到」。
+                hero(d)
+                    .padding(.horizontal, 14).padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if d.tokens.total == 0 && d.cost == 0 && d.credits?.hasActivity != true {
                 centered("该周期这个来源没有用量").frame(height: 220)
             } else {
                 ScrollView {
@@ -227,7 +233,8 @@ struct ProviderDetailView: View {
             Spacer()
             if let action {
                 Button(action) {
-                    SettingsNavigation.shared.requestFocusQuota()   // 打开设置后定位到「账号额度」段
+                    // 打开设置后定位到本来源那一行（不只是段头：段里行多，排后面的会在可见区外）
+                    SettingsNavigation.shared.requestFocusQuota(row: RateLimitSettings.logicalKey(forProvider: providerId))
                     SettingsWindowController.shared.showWindow()
                 }
                     .buttonStyle(.plain)
@@ -257,7 +264,7 @@ struct ProviderDetailView: View {
             }
             .frame(height: 5)
             // 无分母的金额型窗口（千问办公「剩 X」）直接显示原样值，不编一个 0%
-            Text(w.total == nil && w.valueText != nil ? w.valueText! : "\(Int(w.usedPercent.rounded()))%")
+            Text(w.total == nil && w.valueText != nil ? w.valueText! : QuotaFormat.percentText(w.usedPercent))
                 .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(color)
                 .frame(minWidth: 34, alignment: .trailing)
@@ -488,7 +495,8 @@ struct ProviderDetailView: View {
     private func detailBody(_ d: ProviderDetail) -> some View {
         VStack(alignment: .leading, spacing: 13) {
             hero(d)
-            metricGrid(d)
+            // 没有 token 的来源（豆包工作）指标区整块缺席；空 VStack 也会多吃一截间距，所以不渲染
+            if !spec.metricRows.isEmpty { metricGrid(d) }
             if spec.hasSources, d.sourceCount >= 2 {
                 hairline
                 sourcesSection(d)
@@ -511,6 +519,16 @@ struct ProviderDetailView: View {
             // 千问办公：积分未同步时说清原因 + 给主操作（spec 0910 §3.2 B）
             if providerId == "qwen-work", spec.costUnit == .creditsTotalOnly, !d.costAvailable {
                 qwenWorkHeroHint
+            }
+            // 豆包工作：积分拿不到时说清原因 + 给入口（Pencil lane ② 三态）
+            if let hint = doubaoHeroHint {
+                HStack(spacing: 4) {
+                    Text(hint.text).font(.system(size: 9)).foregroundStyle(pal.text3)
+                    Button(hint.action) { hint.perform() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(accent)
+                }
             }
             if let credits = d.credits {
                 Text(!credits.hasValue ? "本地记录积分 · 当前记录未提供可用积分"
@@ -558,7 +576,7 @@ struct ProviderDetailView: View {
         case .openUsagePage:
             NSWorkspace.shared.open(QwenWorkBillingStore.usagePageURL)
         case .reauthorize, .pasteManually:
-            SettingsNavigation.shared.requestFocusQuota()
+            SettingsNavigation.shared.requestFocusQuota(row: "qwen-work")
             SettingsWindowController.shared.showWindow()
         }
     }
@@ -566,7 +584,8 @@ struct ProviderDetailView: View {
     private func heroMain(_ d: ProviderDetail) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(fmtTok(d.tokens.total))
+                // 没有 token 的来源（豆包工作）：大数字「—」，与主列表数字位同一口径；积分在下面那行
+                Text(spec.hasTokens ? fmtTok(d.tokens.total) : "—")
                     .font(.system(size: 30, weight: .bold, design: .monospaced))
                     .foregroundStyle(pal.text)
                 (
@@ -578,7 +597,8 @@ struct ProviderDetailView: View {
                 )
             }
             Spacer()
-            CacheRing(ratio: ringRate(d.tokens), accent: accent, track: pal.track, text: pal.text, sub: pal.text3)
+            CacheRing(ratio: spec.hasTokens ? ringRate(d.tokens) : nil,
+                      accent: accent, track: pal.track, text: pal.text, sub: pal.text3)
         }
     }
 
@@ -587,6 +607,7 @@ struct ProviderDetailView: View {
 
     /// Hero 副行金额段。各来源使用自己的计量口径。
     private func heroCostLabel(_ detail: ProviderDetail) -> String {
+        if spec.costUnit == .itemizedCredits { return itemizedCreditsLabel(detail) }
         if spec.costUnit == .creditsTotalOnly, !detail.costAvailable {
             // 有缓存：照显示，但标「截至 HH:mm」（不是实时数）；从没同步过：积分未同步
             guard let at = detail.costSyncedAt else { return "积分未同步" }
@@ -610,9 +631,53 @@ struct ProviderDetailView: View {
             // 账户账单直接给出的精确扣减总额，不加“≈”。
             let n = c >= 1 ? String(format: "%.2f", c) : String(format: "%.4f", c)
             return "\(n) 积分"
+        case .itemizedCredits:
+            return itemizedCreditsLabel(detail)
         case .unavailable:
             // 模型名被厂商打码（qmodel），价目表永远查不到；本地也没有 credit
             return "无价目"
+        }
+    }
+
+    /// 豆包工作 Hero 副行的积分段（v0.3.45，Pencil lane ②）：
+    /// 正常「12.70 积分」；开关关着且这个周期没有历史「积分未开启」；同步不上时照显示本地记录并标「截至 HH:mm」。
+    private func itemizedCreditsLabel(_ d: ProviderDetail) -> String {
+        let c = d.cost
+        let n = fmtCost(c)
+        let stamped = d.costSyncedAt.map { "\(n) 积分（截至 \(Self.syncStamp($0))）" } ?? "\(n) 积分"
+        if !quotaSettings.isEnabled(providerId) { return c > 0 ? stamped : "积分未开启" }
+        if !d.costAvailable { return c > 0 ? stamped : "积分未同步" }
+        return "\(n) 积分"
+    }
+
+    /// 豆包工作积分拿不到时的原因 + 入口（Hero 下一行）。正常同步时为 nil。
+    private var doubaoHeroHint: (text: String, action: String, perform: () -> Void)? {
+        guard providerId == "doubao-work" else { return nil }
+        let toSettings = {
+            SettingsNavigation.shared.requestFocusQuota(row: "doubao-work")
+            SettingsWindowController.shared.showWindow()
+        }
+        if !quotaSettings.isEnabled(providerId) {
+            return ("开启「豆包工作额度与积分」后显示（读一次钥匙串 + 联网）", "去设置 ›", toSettings)
+        }
+        switch quotaStore.snapshot(for: providerId)?.error {
+        case .credentialUnavailable?:
+            return ("豆包工作登录已失效，重新登录后自动恢复", "打开豆包工作 ›", { Self.openDoubaoWorkApp() })
+        case .authDenied?:
+            return ("未获「DoubaoWork Safe Storage」钥匙串授权", "去设置重新授权 ›", toSettings)
+        case .notLoggedIn?:
+            return ("没有找到豆包工作的登录信息", "打开豆包工作 ›", { Self.openDoubaoWorkApp() })
+        default:
+            return nil
+        }
+    }
+
+    /// 唤起豆包工作让用户重新登录；没装就打开网页版的「订阅与额度管理」（设置页共用）
+    static func openDoubaoWorkApp() {
+        if let app = DoubaoWorkEnv.appURL {
+            NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
+        } else {
+            NSWorkspace.shared.open(DoubaoWorkAPI.quotaPageURL)
         }
     }
 
@@ -756,11 +821,11 @@ struct ProviderDetailView: View {
             Text(m.displayName ?? m.modelId).font(.system(size: 11)).foregroundStyle(pal.text).lineLimit(1)
                 .help(m.displayName.map { "\($0)（\(m.modelId)）" } ?? m.modelId)
             Spacer(minLength: 6)
-            Text(fmtTok(m.tokens.total))
+            Text(spec.hasTokens ? fmtTok(m.tokens.total) : "—")
                 .font(.system(size: 10.5, design: .monospaced))
                 .foregroundStyle(pal.text2)
                 .frame(width: 56, alignment: .trailing)
-            hitPill(m.hitRate)
+            if spec.hasTokens { hitPill(m.hitRate) } else { noTokenPill }
             if spec.costUnit == .recordedCredits {
                 recordedCreditLabel(m.credits)
             } else if spec.costUnit != .creditsTotalOnly,
@@ -812,6 +877,15 @@ struct ProviderDetailView: View {
             .init(name: "body", value: body),
         ]
         if let url = comp.url { NSWorkspace.shared.open(url) }
+    }
+
+    /// 没有 token 的来源（豆包工作）：命中率那一格占位写「—」，列照样对齐。
+    /// 绿色小标签表示缓存命中率，没有 token 就没有命中率——别拿积分占比塞进去冒充。
+    private var noTokenPill: some View {
+        Text("—")
+            .font(.system(size: 9, design: .monospaced))
+            .foregroundStyle(pal.text3)
+            .frame(width: 40, alignment: .center)
     }
 
     private func hitPill(_ r: Double) -> some View {
@@ -879,7 +953,7 @@ struct ProviderDetailView: View {
                 }
             }
             Spacer(minLength: 6)
-            Text(fmtTok(s.tokens.total))
+            Text(spec.hasTokens ? fmtTok(s.tokens.total) : "—")
                 .font(.system(size: 10.5, design: .monospaced))
                 .foregroundStyle(pal.text2)
                 .frame(width: 56, alignment: .trailing)
@@ -888,7 +962,7 @@ struct ProviderDetailView: View {
             // ⚠️ 用 `tokens.hitRate`（cached/total）而非 `ringRate` —— 与紧邻的「按模型」行
             // （`m.hitRate`）**同口径**，避免同一页两个药丸算法不同。
             // （Codex 的 Hero 环用的是另一套 cached/输入，是重构前就有的口径分歧，本版不动。）
-            hitPill(s.tokens.hitRate)
+            if spec.hasTokens { hitPill(s.tokens.hitRate) } else { noTokenPill }
             if spec.costUnit == .recordedCredits {
                 recordedCreditLabel(s.credits)
             } else {
@@ -949,6 +1023,9 @@ struct ProviderDetailView: View {
             return c > 0 ? String(format: "%.2f Cr", c) : "0 Cr"
         case .creditsTotalOnly:
             return "—"
+        case .itemizedCredits:
+            // 服务端逐笔精确积分（两位小数），不加「≈」、不带单位（单位在 Hero「积分」里说过）
+            return c >= 1000 ? String(format: "%.0f", c) : String(format: "%.2f", c)
         case .equivalentUSD:
             if c >= 10 { return String(format: "≈$%.0f", c) }
             if c >= 1 { return String(format: "≈$%.1f", c) }
@@ -964,7 +1041,7 @@ struct ProviderDetailView: View {
     /// （等效美元能拆，是因为每列各有单价）。硬按四列摊会是编造。
     private func metricCost(_ c: Double) -> String {
         switch spec.costUnit {
-        case .credits, .creditsTotalOnly, .recordedCredits: return "—"
+        case .credits, .creditsTotalOnly, .recordedCredits, .itemizedCredits: return "—"
         default: return fmtCost(c)
         }
     }
@@ -1032,7 +1109,8 @@ private struct DetailPalette {
 // MARK: - 缓存命中环
 
 private struct CacheRing: View {
-    let ratio: Double
+    /// nil = 这个来源没有 token（豆包工作）：只画空轨道 + 「—」，不画一个 0% 的弧
+    let ratio: Double?
     let accent: Color
     let track: Color
     let text: Color
@@ -1041,12 +1119,14 @@ private struct CacheRing: View {
     var body: some View {
         ZStack {
             Circle().stroke(track, lineWidth: 5.5)
-            Circle()
-                .trim(from: 0, to: max(0.001, min(1, ratio)))
-                .stroke(accent, style: StrokeStyle(lineWidth: 5.5, lineCap: .round))
-                .rotationEffect(.degrees(-90))
+            if let ratio {
+                Circle()
+                    .trim(from: 0, to: max(0.001, min(1, ratio)))
+                    .stroke(accent, style: StrokeStyle(lineWidth: 5.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
             VStack(spacing: 0) {
-                Text(String(format: "%.1f%%", ratio * 100))
+                Text(ratio.map { String(format: "%.1f%%", $0 * 100) } ?? "—")
                     .font(.system(size: 12.5, weight: .bold))
                     .foregroundStyle(text)
                 Text("缓存命中").font(.system(size: 7.5)).foregroundStyle(sub)

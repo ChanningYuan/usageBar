@@ -47,11 +47,16 @@ public struct RateLimitWindow: Codable, Sendable, Equatable {
     /// 行下小字：这一类额度里的每个积分包（「注册赠送 · 额度 2,000 · 已用 62.98 · 剩 1,937.02」）。
     /// 只有详情页额度模块渲染，主列表药丸不渲染。可选字段（v0.3.38）。
     public let notes: [String]?
+    /// 窗口**还没开始计时**时代替重置时间显示的原样文字（`resetsAt` 为 nil 才用）。
+    /// 豆包工作的 5 小时窗口：往前 5 小时没用过就没有重置时间，官方显示「开始使用后计时」（v0.3.45）。
+    /// 可选字段，老快照 JSON 解码自动得 nil。
+    public let pendingText: String?
 
     public init(kind: String, label: String, windowMinutes: Int? = nil, usedPercent: Double,
                 resetsAt: Date? = nil, severity: String? = nil, scopeModel: String? = nil,
                 detail: String? = nil, used: Double? = nil, total: Double? = nil,
-                valueText: String? = nil, resetVerb: String? = nil, notes: [String]? = nil) {
+                valueText: String? = nil, resetVerb: String? = nil, notes: [String]? = nil,
+                pendingText: String? = nil) {
         self.kind = kind
         self.label = label
         self.windowMinutes = windowMinutes
@@ -65,6 +70,7 @@ public struct RateLimitWindow: Codable, Sendable, Equatable {
         self.valueText = valueText
         self.resetVerb = resetVerb
         self.notes = notes
+        self.pendingText = pendingText
     }
 
     /// "6,000/6,000" —— `detail` 字段的统一紧凑格式（千分位、无单位；单位在信用点语境下自明）
@@ -75,6 +81,14 @@ public struct RateLimitWindow: Codable, Sendable, Equatable {
         let u = f.string(from: NSNumber(value: used)) ?? String(Int(used))
         let t = f.string(from: NSNumber(value: total)) ?? String(Int(total))
         return "\(u)/\(t)"
+    }
+
+    /// 还没开始计时（没有重置时间、只有 `pendingText`）——豆包工作 5 小时窗口「开始使用后计时」（v0.3.45）
+    public var isPending: Bool { resetsAt == nil && pendingText != nil }
+
+    /// 百分比文案：不足 1% 写「<1%」，不四舍五入成「1%」或「0%」（豆包工作的额度窗口常年在这个区间）。
+    public static func percentText(_ p: Double) -> String {
+        p > 0 && p < 1 ? "<1%" : "\(Int(p.rounded()))%"
     }
 
     /// 由 `windowMinutes` 推导展示 label（探针铁律：别按窗口名写死）。

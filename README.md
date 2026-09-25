@@ -1,10 +1,10 @@
 # usageBar
 
-> macOS 菜单栏工具，聚合显示 13 个 AI 编程工具（Claude Code / Cowork / Codex / Cursor / Qoder 全家桶 / 千问办公 / 悟空 等）的 token 用量与账号额度，全本地直读、零配置。
+> macOS 菜单栏工具，聚合显示 13 个 AI 编程工具（Claude Code / Cowork / Codex / Cursor / Qoder 全家桶 / 千问办公 / 豆包工作 / 悟空 等）的 token 用量与账号额度，全本地直读、零配置。
 
 **Swift 6 · macOS 14+ · Apple Silicon**
 
-在 macOS 状态栏一眼看到你今天 / 近 7 天 / 近 30 天 / 累计在各个 AI 编程工具上烧了多少 token。token 统计除 Cursor 外都直接读取各工具落在本地的会话记录（jsonl / SQLite）；账号额度和千问办公积分历史属于可选联网能力，首次开启会明确提示授权。
+在 macOS 状态栏一眼看到你今天 / 近 7 天 / 近 30 天 / 累计在各个 AI 编程工具上烧了多少 token。token 统计除 Cursor 外都直接读取各工具落在本地的会话记录（jsonl / SQLite）；账号额度、千问办公积分历史和豆包工作积分属于可选联网能力，首次开启会明确提示授权。
 
 除 token 用量外，还会显示**账号额度**（订阅套餐的用量上限与已用比例、重置时间），额度数据同样优先走本地已有的凭证与缓存。
 
@@ -33,6 +33,7 @@
 | **Qoder（Work）** 🥇 | `~/Library/Application Support/QoderWork/logs/<ts>/main.log` | 增量 mirror 到本地 jsonl，精确 input/output 两列 |
 | **Qoder（IDE）** 🥇 | `~/Library/Application Support/Qoder/SharedClientCache/.../local.db` | 直读 SQLite `chat_message.token_info` |
 | **千问办公** | 本地 segment + 可选 `qwenwork.cn/user/billings` | 逐请求去重；精确 input/output/cache read（当前协议无 cache write）；账单缓存支持按周期查看真实积分消耗 |
+| **豆包工作** | 可选联网：`doubao.com` 额度与积分明细接口（读取本机豆包工作的登录信息） | **只有积分，没有 token**：豆包工作不向本机提供 token 数据，主列表数字位显示「—」；当前时段（5 小时）/ 近 7 天两颗额度药丸 + 逐笔积分明细（按模型、按会话） |
 | Codex（OpenAI） | rollout jsonl | **累计值**，跨窗口做差分 |
 | 悟空 | 本地 jsonl | flat 结构，毫秒时间戳 |
 | WorkBuddy | `~/.workbuddy/projects/**/*.jsonl` | Claude Code 风格会话记录 |
@@ -59,6 +60,7 @@
 - **账号额度零弹窗**：优先搭 Claude Code 自身 statusline 的便车读额度（引导时注入一行写命令），**不起进程、不弹系统授权框**；读不到就显示空态，绝不为了拿数据而回落到需要弹框授权的通道。
 - **持久账本**：会话文件被删 / 轮转后，其历史 token 仍计入累计——消耗发生过就保留，不会因源文件消失而丢失。
 - **千问办公积分历史**：缓存官网 `/user/billings` 与 `/user/billings/computer` 的真实扣减；同一会话账单增长时按新旧金额做差，把增量归到本次观察周期，既不重复计费，也不把跨周新消耗算回旧周。缓存位于 `~/Library/Application Support/usageBar/qwen-work-billings.json`，只保存规范化账单、账号哈希与差分流水，不保存登录凭证。
+- **豆包工作积分明细本地留存**：服务端只展示近 30 天，usageBar 按消息编号逐笔存到本地，更早的记录照样能查；任务进行中同一笔积分会变大，按编号覆盖、不重复计。缓存位于 `~/Library/Application Support/usageBar/doubao-work.json`，只保存明细与账号哈希；登录信息每次刷新从豆包工作本地读取，解密密钥只放内存，不落盘。
 - **mtime/size 增量缓存**：只重读发生变化的文件，刷新快、CPU 占用低。
 
 ## 安装

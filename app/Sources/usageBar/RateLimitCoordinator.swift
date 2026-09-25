@@ -26,7 +26,7 @@ enum RateLimitCoordinator {
     /// - 其余（Codex 走官方 CLI RPC、凭据由 CLI 自管 / Cursor·WorkBuddy 明文）都不需要。
     static func needsKeychain(_ logicalId: String) -> Bool {
         switch logicalId {
-        case "qoder", "qwen-work": return true
+        case "qoder", "qwen-work", "doubao-work": return true
         case "claude-code": return RateLimitSettings.shared.dataSource(for: "claude-code") == "oauth"
         default: return false
         }
@@ -62,6 +62,9 @@ enum RateLimitCoordinator {
             if canRun("qwen-work") {
                 group.addTask { [await readQwenWork(now: now)] }
             }
+            if canRun("doubao-work") {
+                group.addTask { [await readDoubaoWork(now: now)] }
+            }
             if canRun("workbuddy") {
                 group.addTask { [await WorkBuddyRateLimitReader().read(now: now)] }
             }
@@ -86,6 +89,7 @@ enum RateLimitCoordinator {
             store(await QoderRateLimitReader().readAll(now: now))
             return
         case "qwen-work":   snap = await readQwenWork(now: now, force: true)
+        case "doubao-work": snap = await readDoubaoWork(now: now, force: true)
         case "workbuddy":   snap = await WorkBuddyRateLimitReader().read(now: now)
         default:            snap = nil
         }
@@ -132,6 +136,19 @@ enum RateLimitCoordinator {
             providerId: "qwen-work", windows: windows, planType: quota.planName, capturedAt: now,
             error: windows.isEmpty ? (quota.error ?? .network) : nil,
             sourceLabel: "千问办公", headline: headline)
+    }
+
+    /// 豆包工作（v0.3.45）：当前时段（5 小时）/ 近 7 天两颗药丸，「已用 x/总额」照抄服务端的展示串。
+    ///
+    /// 同一轮顺带同步逐笔积分明细——豆包工作没有本地日志，积分只能联网拿。有新增 / 变化就把镜像写进账本，
+    /// 并通知主列表重算：用户刚打开开关就该看到数，不能等下一次 10 分钟刷新。
+    private static func readDoubaoWork(now: Date = Date(), force: Bool = false) async -> RateLimitSnapshot {
+        let status = await DoubaoWorkStore.shared.refresh(now: now, force: force)
+        if status.itemsChanged {
+            _ = try? await DoubaoWorkProvider().fetchDailyRecords()
+            NotificationCenter.default.post(name: .doubaoWorkLedgerDidChange, object: nil)
+        }
+        return DoubaoWorkQuotaSnapshot.make(status, now: now)
     }
 
     /// 药丸用的紧凑数字：整数不带小数、不加千分位（"63" / "2000" / "1937.02"）。详情页小字仍用 `formatCredits`。
@@ -193,6 +210,9 @@ enum RateLimitCoordinator {
             StatuslineConfigurator.deconfigure()
         case "qoder":
             QoderRateLimitReader.clearCache()
+        case "doubao-work":
+            // 只丢授权缓存；逐笔积分历史保留（同千问办公：历史是用户要的本地记录）
+            Task { await DoubaoWorkStore.shared.clearAuthCache() }
         case "qwen-work":
             s.setQwenWorkPreciseMode(false)
             Task {
@@ -251,4 +271,9 @@ enum RateLimitCoordinator {
             await QuotaHistoryStore.shared.record(provider: logicalId, snapshot: snap)
         }
     }
+}
+
+extension Notification.Name {
+    /// 豆包工作的逐笔积分写进了账本（额度采集那一路同步的）→ 主列表 / 详情页要重算（v0.3.45）
+    static let doubaoWorkLedgerDidChange = Notification.Name("usagebar.doubaoWorkLedgerDidChange")
 }

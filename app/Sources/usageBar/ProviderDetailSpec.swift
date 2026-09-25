@@ -20,7 +20,8 @@ import usageBarCore
 /// 2. 查不到价但有 credit → `.credits`
 /// 3. 本地逐请求积分，需显示覆盖状态 → `.recordedCredits`
 /// 4. 只有周期总账单、不能归因到行 → `.creditsTotalOnly`
-/// 5. 都没有 → `.unavailable`
+/// 5. 服务端逐笔精确积分、每笔带模型和会话 → `.itemizedCredits`
+/// 6. 都没有 → `.unavailable`
 ///
 /// 这里的 `costUnit` 是 provider 的**默认档**；将来 BYOK（自带 key）时单行可按真实模型名升级到
 /// `.equivalentUSD`，代码不用改结构。
@@ -35,6 +36,9 @@ enum CostUnit: Equatable {
     /// 账户账单给出所选周期的**精确积分总额**，但没有 request/session/model 关联字段。
     /// Hero 展示精确积分；指标、模型、会话行统一显示 `—`，不猜摊（千问办公）。
     case creditsTotalOnly
+    /// `12.70 积分` —— 服务端逐笔给出精确积分，**每笔都带模型和会话**（豆包工作，v0.3.45）。
+    /// 和千问办公（只有周期总额）不同：能精确归到行，所以 Hero / 按模型 / 按会话都显示真实积分，不加「≈」。
+    case itemizedCredits
     /// `—` —— 模型名被厂商打码（`qmodel`）且本地无任何 credit 字段（Qoder IDE）。
     case unavailable
 }
@@ -179,6 +183,8 @@ enum DetailScannerKind {
     case workBuddy
     case qoderIde
     case qwenWork
+    /// 豆包工作：没有本地日志可扫，账本就是唯一来源；账本里一条都没有时回落为空（v0.3.45）
+    case doubaoWork
 }
 
 // MARK: - 声明
@@ -196,6 +202,13 @@ struct ProviderDetailSpec {
     /// （0804 对焦拍板 4b）。⚠️ 别改回用 `RateLimitSettings.logicalKey` 返回 nil 来关——那会把
     /// 主列表药丸和设置页状态一起关掉（初版就是这么错的）。
     let hasQuotaModule: Bool
+    /// 这个来源有没有 token 数据。默认 true。
+    ///
+    /// 豆包工作 = false（v0.3.45）：它不向客户端提供 token，只有积分。沿用详情页统一框架——
+    /// 大数字、缓存命中环、按模型 / 按会话的 token 列和命中率一律显示「—」（与主列表数字位同一口径），
+    /// 积分放在大数字下面那行；指标区（`metricRows`）整块缺席。
+    /// ⚠️ 别拿「token 为 0」代替这个声明：有 token 的来源某周期真是 0 时要显示「0」，不是「—」。
+    let hasTokens: Bool
     let ring: RingMode
     let costUnit: CostUnit
     let accentDark: String
@@ -203,12 +216,13 @@ struct ProviderDetailSpec {
     let scanner: DetailScannerKind
 
     init(metricRows: [[MetricBlock]], hasSources: Bool, hasSessions: Bool,
-         hasQuotaModule: Bool = true, ring: RingMode, costUnit: CostUnit,
+         hasQuotaModule: Bool = true, hasTokens: Bool = true, ring: RingMode, costUnit: CostUnit,
          accentDark: String, accentLight: String, scanner: DetailScannerKind) {
         self.metricRows = metricRows
         self.hasSources = hasSources
         self.hasSessions = hasSessions
         self.hasQuotaModule = hasQuotaModule
+        self.hasTokens = hasTokens
         self.ring = ring
         self.costUnit = costUnit
         self.accentDark = accentDark
@@ -370,7 +384,15 @@ enum ProviderDetailRegistry {
             hasSources: false, hasSessions: true, ring: .ofTotal, costUnit: .credits,
             accentDark: "#8A8AE8", accentLight: "#4A4AC0",
             scanner: .workBuddy),
-
+        // 豆包工作（v0.3.45）：只有积分，没有 token。无指标区；按模型 / 按会话都有真实积分（服务端逐笔带模型与会话）。
+        // 会话 = 消耗场景（会话标题）：明细里没有会话 id，同名的两个会话会合成一行（已知局限）。
+        // 额度模块画两行：当前时段（5 小时）/ 近 7 天，区头右侧写套餐到期。强调色取官方图标的蓝。
+        "doubao-work": ProviderDetailSpec(
+            metricRows: [],
+            hasSources: false, hasSessions: true, hasQuotaModule: true, hasTokens: false,
+            ring: .ofTotal, costUnit: .itemizedCredits,
+            accentDark: "#3C7BFF", accentLight: "#1F5FD6",
+            scanner: .doubaoWork),
     ]
 
     static func spec(for providerId: String) -> ProviderDetailSpec? { specs[providerId] }

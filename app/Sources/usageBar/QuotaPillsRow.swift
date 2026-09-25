@@ -93,7 +93,7 @@ struct QuotaPillsRow: View {
                 .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
                 .foregroundStyle(labelColor)
             // 金额型窗口（千问办公积分）直接展示数值；没有分母就不编百分比出来
-            Text(w.valueText ?? "\(Int(w.usedPercent.rounded()))%")
+            Text(w.valueText ?? QuotaFormat.percentText(w.usedPercent))
                 .font(.system(size: 9, weight: .bold, design: .monospaced))
                 .foregroundStyle(color)
                 .lineLimit(1)
@@ -137,7 +137,7 @@ struct QuotaPillsRow: View {
             if err == .authDenied {
                 // 授权被拒 → 去设置的「账号额度」段（切数据源 / 重置 / 重新授权都在那）
                 Button("去授权 ›") {
-                    SettingsNavigation.shared.requestFocusQuota()
+                    SettingsNavigation.shared.requestFocusQuota(row: RateLimitSettings.logicalKey(forProvider: providerId))
                     SettingsWindowController.shared.showWindow()
                 }
                 .buttonStyle(.plain)
@@ -248,9 +248,15 @@ enum QuotaFormat {
     /// 详情页放到额度区头部、主列表缀在药丸行尾，行内/药丸内不再重复。
     /// Claude 这类多窗口、各自重置的仍返回 nil（每行各挂各的）。
     static func hoistedReset(_ windows: [RateLimitWindow]) -> Date? {
+        // 有窗口还没开始计时（豆包工作 5 小时窗口「开始使用后计时」）：各挂各的，别把另一个窗口的
+        // 重置时间提到区头——那会读成「两个窗口一起重置」（v0.3.45）
+        guard !windows.contains(where: \.isPending) else { return nil }
         let carriers = windows.compactMap(\.resetsAt)
         return carriers.count == 1 ? carriers[0] : nil
     }
+
+    /// 百分比文案：不足 1% 写「<1%」而不是四舍五入成「1%」或「0%」（豆包工作的额度窗口常年在这个区间）。
+    static func percentText(_ p: Double) -> String { RateLimitWindow.percentText(p) }
 
     /// 详情页额度行长文案："4h15m 后重置"（对齐设计稿 p8ma3 的 q 行）；重置点已过 → "已重置"。
     static func resetTextLong(_ resetsAt: Date?, now: Date = Date()) -> String? {
@@ -261,7 +267,7 @@ enum QuotaFormat {
 
     /// 带动词的版本（v0.3.38）：千问办公的每日包是「清零」、周期包是「到期」（给日期，不给倒计时）。
     static func resetText(_ w: RateLimitWindow, now: Date = Date()) -> String? {
-        guard let r = w.resetsAt else { return nil }
+        guard let r = w.resetsAt else { return w.pendingText.map { "(\($0))" } }
         switch w.resetVerb {
         case "到期": return "(\(shortDate(r)) 到期)"
         case "清零":
@@ -272,7 +278,7 @@ enum QuotaFormat {
     }
 
     static func resetTextLong(_ w: RateLimitWindow, now: Date = Date()) -> String? {
-        guard let r = w.resetsAt else { return nil }
+        guard let r = w.resetsAt else { return w.pendingText }
         switch w.resetVerb {
         case "到期": return "\(shortDate(r)) 到期"
         case "清零":
