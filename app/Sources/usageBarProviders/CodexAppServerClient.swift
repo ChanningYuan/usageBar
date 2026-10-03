@@ -50,8 +50,8 @@ enum CodexAppServerClient {
             "\(home)/.npm-global/bin/codex",
             "\(home)/.local/bin/codex",
             "\(home)/bin/codex",
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
         ]
+        candidates += desktopBinaryCandidates(in: ["/Applications", "\(home)/Applications"])
         // VS Code / Cursor 的 Codex 扩展内嵌二进制（浅层 glob，找不到就算了）
         for extRoot in ["\(home)/.vscode/extensions", "\(home)/.cursor/extensions"] {
             if let dirs = try? FileManager.default.contentsOfDirectory(atPath: extRoot) {
@@ -61,13 +61,26 @@ enum CodexAppServerClient {
                 }
             }
         }
-        for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
-            if validate(path) {
-                cachedBinary = path
-                return path
-            }
+        let binary = discoverBinary(candidates: candidates)
+        cachedBinary = binary
+        return binary
+    }
+
+    /// 新版桌面端把 CLI 移进独立 .app 壳；保留旧位置，兼容尚未升级的安装。
+    static func desktopBinaryCandidates(in applicationDirectories: [String]) -> [String] {
+        applicationDirectories.flatMap { directory in
+            [
+                "\(directory)/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+                "\(directory)/ChatGPT.app/Contents/Resources/codex",
+            ]
         }
-        return nil
+    }
+
+    /// 与生产发现链共用的验真步骤；测试可用独立安装目录，避免依赖本机安装状态。
+    static func discoverBinary(candidates: [String]) -> String? {
+        candidates.first { path in
+            FileManager.default.isExecutableFile(atPath: path) && validate(path)
+        }
     }
 
     /// `--version` 3 秒验真：能跑通且输出含 "codex" 才算数（npm 坏 shim 会退非零/报 ENOENT）。

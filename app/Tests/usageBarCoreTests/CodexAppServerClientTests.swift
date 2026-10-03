@@ -7,6 +7,59 @@ import XCTest
 /// 「连接不上」、顶着 3 天前的旧数字一直显示「更新于 3d 前 · 连接不上 Codex」，无人察觉。
 final class CodexAppServerClientTests: XCTestCase {
 
+    func testFindsCurrentDesktopInstallation() throws {
+        let root = try makeInstallationRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let binary = try installFakeCodex(in: root, relativePath:
+            "ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex")
+        let candidates = CodexAppServerClient.desktopBinaryCandidates(in: [root.path])
+        XCTAssertEqual(CodexAppServerClient.discoverBinary(candidates: candidates), binary.path)
+    }
+
+    func testStillFindsLegacyDesktopInstallation() throws {
+        let root = try makeInstallationRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let binary = try installFakeCodex(in: root, relativePath:
+            "ChatGPT.app/Contents/Resources/codex")
+        let candidates = CodexAppServerClient.desktopBinaryCandidates(in: [root.path])
+        XCTAssertEqual(CodexAppServerClient.discoverBinary(candidates: candidates), binary.path)
+    }
+
+    func testBrokenCurrentBinaryDoesNotHideWorkingLegacyBinary() throws {
+        let root = try makeInstallationRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = try installFakeCodex(in: root, relativePath:
+            "ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+            script: "#!/bin/sh\nexit 1\n")
+        let legacy = try installFakeCodex(in: root, relativePath:
+            "ChatGPT.app/Contents/Resources/codex")
+        let candidates = CodexAppServerClient.desktopBinaryCandidates(in: [root.path])
+        XCTAssertEqual(CodexAppServerClient.discoverBinary(candidates: candidates), legacy.path)
+    }
+
+    func testFindsDesktopInUserApplications() throws {
+        let root = try makeInstallationRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let systemApplications = root.appendingPathComponent("SystemApplications")
+        let userApplications = root.appendingPathComponent("User/Applications")
+        let binary = try installFakeCodex(in: userApplications, relativePath:
+            "ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex")
+        let candidates = CodexAppServerClient.desktopBinaryCandidates(in:
+            [systemApplications.path, userApplications.path])
+        XCTAssertEqual(CodexAppServerClient.discoverBinary(candidates: candidates), binary.path)
+    }
+
+    func testMissingOrUnrecognizedDesktopBinaryIsNotAccepted() throws {
+        let root = try makeInstallationRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let candidates = CodexAppServerClient.desktopBinaryCandidates(in: [root.path])
+        XCTAssertNil(CodexAppServerClient.discoverBinary(candidates: candidates))
+        _ = try installFakeCodex(in: root, relativePath:
+            "ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+            script: "#!/bin/sh\necho another-tool\n")
+        XCTAssertNil(CodexAppServerClient.discoverBinary(candidates: candidates))
+    }
+
     func testUsageErrorDetection() {
         let clap = """
         error: invalid value 'untrusted' for '--ask-for-approval <APPROVAL_POLICY>'
@@ -74,5 +127,22 @@ final class CodexAppServerClientTests: XCTestCase {
         try script.write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         return url
+    }
+
+    private func makeInstallationRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("usagebar-codex-install-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    private func installFakeCodex(in root: URL, relativePath: String,
+                                  script: String = "#!/bin/sh\necho codex-cli 0.160.0\n") throws -> URL {
+        let binary = root.appendingPathComponent(relativePath)
+        try FileManager.default.createDirectory(at: binary.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        try script.write(to: binary, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: binary.path)
+        return binary
     }
 }
