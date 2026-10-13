@@ -5,22 +5,27 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.46</h3>
+<h3>usageBar 0.3.47</h3>
+<p><b>新增</b></p>
+<ul>
+<li><b>详情页「按模型」显示输出速度</b>：每个模型新增一列「xx tok/s」——从发出请求到回答完，平均每秒输出多少 token。看得出哪个模型快、换了渠道有没有变慢；鼠标停在数字上有说明。跟着顶部周期（今日 / 昨日 / 本周 / 本月 / 累计）重算。</li>
+<li>支持 Claude Code、Cowork、Codex、Qoder CLI、Qoder IDE、千问办公、OpenCode、WorkBuddy。Cursor 与豆包工作的本地记录没有 token 数或耗时，这两家不显示这一列。</li>
+<li>升级后第一次刷新会重新读一遍现存日志补上耗时；日志已被各工具自己清理的早期用量照常保留，只是没有速度。</li>
+</ul>
 <p><b>修复</b></p>
 <ul>
-<li><b>Codex 明明能用，额度却提示「未找到 Codex」</b>：适配新版桌面端内置程序的新位置，同时保留旧版本兼容，并支持安装在个人「应用程序」目录的桌面端。更新后自动恢复额度读取，无需重新安装或登录 Codex。</li>
-<li>找不到可用程序时，提示明确为「无法读取 Codex 额度」，避免与正常的用量统计混淆。</li>
+<li>Codex 的「积分」药丸与详情页「按量积分」不再显示 $ 符号：这是积分（信用点）余额，不是美元，避免误解。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.46</title>
-            <pubDate>Sat, 03 Oct 2026 16:34:59 +0800</pubDate>
-            <sparkle:version>0.3.46</sparkle:version>
-            <sparkle:shortVersionString>0.3.46</sparkle:shortVersionString>
+            <title>0.3.47</title>
+            <pubDate>Wed, 14 Oct 2026 00:43:39 +0800</pubDate>
+            <sparkle:version>0.3.47</sparkle:version>
+            <sparkle:shortVersionString>0.3.47</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.46/usageBar.zip" length="3013733" type="application/octet-stream" sparkle:edSignature="DE4L71Ot//JbGmo7GTIL+2jIZWd6CLm9QYGF9bY7zyF7UtWBnJgjji1X3lLt8KVrgwz8Cs/Tx+sTyQwRgw5SDA=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.47/usageBar.zip" length="3041544" type="application/octet-stream" sparkle:edSignature="4vRjR7+qFA2Ge5WuXPy7ZG74lKS8EFQ14/RgarvUWAJZj0pSESS7NEwtVZgcuC/bhV2jsrOKy/lQwj4OvfajDQ=="/>
         </item>
     </channel>
 </rss>
