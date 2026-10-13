@@ -106,7 +106,8 @@ public struct QoderCliProvider: UsageProvider {
                 seenRequestIds.formUnion(index.requestIds)
                 sessionTitles.merge(index.titles) { _, new in new }
 
-                if let entry = await cache.lookup(filePath: path, mtime: meta.mtime, size: meta.size) {
+                if let entry = await cache.lookup(filePath: path, mtime: meta.mtime, size: meta.size),
+                   entry.detailsHaveTiming(provider: "qoder-cli") {   // v0.3.47：旧版明细没有耗时 → 重解析一次补上
                     allRecords.append(contentsOf: entry.records)
                     continue
                 }
@@ -224,7 +225,7 @@ public struct QoderCliProvider: UsageProvider {
             details: [FileDetailRecord(provider: "qoder-cli", date: e.date,
                                        sessionId: e.sessionId, title: title,
                                        model: e.model, lastActivity: e.timestamp,
-                                       tokens: e.tokens)])
+                                       tokens: e.tokens, timing: e.timing)])
     }
 
     private func parseFile(url: URL) throws -> [FileDailyRecord] {

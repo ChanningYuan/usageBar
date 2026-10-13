@@ -42,6 +42,8 @@ public enum LedgerDetailAggregator {
         var sourceCost: [ClaudeSource: Double] = [:]
         var byModel: [String: TokenBreakdown] = [:]
         var modelCost: [String: Double] = [:]
+        // 速度两列分别相加再相除（v0.3.47）；没有一条带耗时的明细的模型不入表 → 那一格留空
+        var modelTiming: [String: GenerationTiming] = [:]
         var bySession: [String: TokenBreakdown] = [:]
         var sessionCost: [String: Double] = [:]
         // 会话标题 / 最后活动：同一会话可能跨多天多条，取最近一条的标题、最晚的活动时间
@@ -57,6 +59,7 @@ public enum LedgerDetailAggregator {
             hero.add(tb); heroCost += c
             byModel[d.model, default: TokenBreakdown()].add(tb)
             modelCost[d.model, default: 0] += c
+            if let t = d.timing { modelTiming[d.model, default: GenerationTiming()].add(t) }
 
             if let raw = d.source, let src = ClaudeSource(rawValue: raw) {
                 bySource[src, default: TokenBreakdown()].add(tb)
@@ -83,7 +86,8 @@ public enum LedgerDetailAggregator {
         // token 相同再按金额排（v0.3.45）：豆包工作这类只有积分、token 恒 0 的来源，
         // 只按 token 排就是字典的随机序，每次进详情页顺序都不一样
         let models = byModel.map { (mid, tb) in
-            ModelDetailRecord(modelId: mid, tokens: tb, cost: modelCost[mid] ?? 0)
+            ModelDetailRecord(modelId: mid, tokens: tb, cost: modelCost[mid] ?? 0,
+                              timing: modelTiming[mid].flatMap { $0.millis > 0 ? $0 : nil })
         }.sorted { ($0.tokens.total, $0.cost) > ($1.tokens.total, $1.cost) }
 
         let sessions = bySession.map { (sid, tb) -> SessionDetailRecord in

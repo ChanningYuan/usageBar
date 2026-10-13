@@ -209,6 +209,12 @@ struct ProviderDetailSpec {
     /// 积分放在大数字下面那行；指标区（`metricRows`）整块缺席。
     /// ⚠️ 别拿「token 为 0」代替这个声明：有 token 的来源某周期真是 0 时要显示「0」，不是「—」。
     let hasTokens: Bool
+    /// 「按模型」每行是否有输出速度列（v0.3.47）。默认 true。
+    ///
+    /// Cursor = false（本地没有 token 数、官方用量记录没有耗时）；豆包工作 = false（连 token 都没有）。
+    /// 这两家**整列不出现**，不放一列「—」（2026-10-13 用户拍板）。其余来源某个模型拿不到耗时时
+    /// 那一格留空。⚠️ 新接来源：解析时没往明细里写 `timing` 就设 false，否则会是一整列空白。
+    let hasSpeed: Bool
     let ring: RingMode
     let costUnit: CostUnit
     let accentDark: String
@@ -216,13 +222,15 @@ struct ProviderDetailSpec {
     let scanner: DetailScannerKind
 
     init(metricRows: [[MetricBlock]], hasSources: Bool, hasSessions: Bool,
-         hasQuotaModule: Bool = true, hasTokens: Bool = true, ring: RingMode, costUnit: CostUnit,
+         hasQuotaModule: Bool = true, hasTokens: Bool = true, hasSpeed: Bool = true,
+         ring: RingMode, costUnit: CostUnit,
          accentDark: String, accentLight: String, scanner: DetailScannerKind) {
         self.metricRows = metricRows
         self.hasSources = hasSources
         self.hasSessions = hasSessions
         self.hasQuotaModule = hasQuotaModule
         self.hasTokens = hasTokens
+        self.hasSpeed = hasSpeed
         self.ring = ring
         self.costUnit = costUnit
         self.accentDark = accentDark
@@ -328,7 +336,8 @@ enum ProviderDetailRegistry {
         "cursor": ProviderDetailSpec(
             metricRows: [[.tile(.input), .tile(.output)],
                          [.tile(.cacheRead), .tile(.cacheCreate)]],
-            hasSources: false, hasSessions: false, ring: .ofTotal, costUnit: .equivalentUSD,
+            hasSources: false, hasSessions: false, hasSpeed: false,   // 本地无 token、官方记录无耗时
+            ring: .ofTotal, costUnit: .equivalentUSD,
             accentDark: "#C7C7CC", accentLight: "#4A4A4F",
             scanner: .cursor),
 
@@ -390,6 +399,7 @@ enum ProviderDetailRegistry {
         "doubao-work": ProviderDetailSpec(
             metricRows: [],
             hasSources: false, hasSessions: true, hasQuotaModule: true, hasTokens: false,
+            hasSpeed: false,   // 没有 token 数，就没有每秒 token 数
             ring: .ofTotal, costUnit: .itemizedCredits,
             accentDark: "#3C7BFF", accentLight: "#1F5FD6",
             scanner: .doubaoWork),

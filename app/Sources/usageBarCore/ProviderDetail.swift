@@ -104,17 +104,24 @@ public struct ModelDetailRecord: Sendable, Equatable, Identifiable {
     public let cost: Double
     public let credits: CreditUsage?
     public let displayName: String?
+    /// 该模型在窗口内有计时回复的输出 token / 耗时合计（v0.3.47，「按模型」速度列）。
+    /// nil = 一条带耗时的回复都没有（旧记录 / 不支持的来源），那一格留空。
+    public let timing: GenerationTiming?
 
     public var id: String { modelId }
     public var hitRate: Double { tokens.hitRate }
+    /// 平均每秒输出的 token 数；没有计时回复时为 nil
+    public var tokensPerSecond: Double? { timing?.tokensPerSecond }
 
     public init(modelId: String, tokens: TokenBreakdown, cost: Double,
-                credits: CreditUsage? = nil, displayName: String? = nil) {
+                credits: CreditUsage? = nil, displayName: String? = nil,
+                timing: GenerationTiming? = nil) {
         self.modelId = modelId
         self.tokens = tokens
         self.cost = cost
         self.credits = credits
         self.displayName = displayName
+        self.timing = timing
     }
 }
 

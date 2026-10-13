@@ -114,8 +114,8 @@ final class RateLimitTests: XCTestCase {
     func testCodexCreditsDisplayGating() {
         XCTAssertNil(RateLimitCredits(hasCredits: false, unlimited: false, balance: "0").displayText)
         XCTAssertNil(RateLimitCredits(hasCredits: false, unlimited: false, balance: nil).displayText)
-        XCTAssertEqual(RateLimitCredits(hasCredits: true, unlimited: false, balance: "4.2").displayText, "$4.20")
-        XCTAssertEqual(RateLimitCredits(hasCredits: true, unlimited: false, balance: "12").displayText, "$12")
+        XCTAssertEqual(RateLimitCredits(hasCredits: true, unlimited: false, balance: "4.2").displayText, "4.20", "积分不是美元，不带 $")
+        XCTAssertEqual(RateLimitCredits(hasCredits: true, unlimited: false, balance: "12").displayText, "12")
         XCTAssertEqual(RateLimitCredits(hasCredits: true, unlimited: true, balance: nil).displayText, "∞")
     }
 
@@ -136,7 +136,7 @@ final class RateLimitTests: XCTestCase {
         let merged = RateLimitStore.shared.snapshot(for: "codex-test-merge")
         XCTAssertEqual(merged?.windows.count, 1)
         XCTAssertEqual(merged?.error, .network)
-        XCTAssertEqual(merged?.credits?.displayText, "$4.20", "积分随窗口一起保留")
+        XCTAssertEqual(merged?.credits?.displayText, "4.20", "积分随窗口一起保留")
         XCTAssertEqual(merged?.availableCoupons.count, 1, "重置券随窗口一起保留")
         RateLimitStore.shared.remove("codex-test-merge")
     }

@@ -12,6 +12,8 @@ public enum QoderCreditsAggregator {
         var tokens = TokenBreakdown()
         var credits = CreditUsage()
         var activity = Date.distantPast
+        /// 速度分量（v0.3.47）；`hasTiming` 区分「没有一条带耗时的明细」和「有但为 0」
+        var timing = GenerationTiming()
     }
 
     public static func aggregate(entries: [FileCacheEntry], window: TimeWindow,
@@ -34,6 +36,7 @@ public enum QoderCreditsAggregator {
             for d in entry.details where d.provider == "qoder-cli" && inWindow(d.date) {
                 let key = Group(session: d.sessionId, model: d.model, date: d.date)
                 rows[key, default: Row()].tokens.add(d.tokens)
+                if let t = d.timing { rows[key, default: Row()].timing.add(t) }
                 rows[key, default: Row()].activity = max(rows[key]?.activity ?? .distantPast, d.lastActivity)
                 if entry.filePath.contains("/.usagebar-request-ledger/") {
                     let request = "request:" + URL(fileURLWithPath: entry.filePath).lastPathComponent
@@ -83,7 +86,7 @@ public enum QoderCreditsAggregator {
         var sessionModels: [String: [String: Row]] = [:]
         func merged(_ a: Row?, _ b: Row) -> Row {
             var result = a ?? Row()
-            result.tokens.add(b.tokens); result.credits.add(b.credits)
+            result.tokens.add(b.tokens); result.credits.add(b.credits); result.timing.add(b.timing)
             result.activity = max(result.activity, b.activity)
             return result
         }
@@ -99,7 +102,8 @@ public enum QoderCreditsAggregator {
         func modelRecords(_ values: [String: Row]) -> [ModelDetailRecord] {
             values.map { id, row in
                 ModelDetailRecord(modelId: id, tokens: row.tokens, cost: row.credits.value,
-                                  credits: row.credits, displayName: names[id])
+                                  credits: row.credits, displayName: names[id],
+                                  timing: row.timing.millis > 0 ? row.timing : nil)
             }.sorted {
                 if $0.tokens.total != $1.tokens.total { return $0.tokens.total > $1.tokens.total }
                 return $0.modelId < $1.modelId

@@ -811,16 +811,18 @@ struct ProviderDetailView: View {
         collapsibleSection(title: "按模型", unit: "个模型",
                            items: d.models, expanded: $showAllModels,
                            trailing: { EmptyView() }) { m in
-            modelRow(m)
+            modelRow(m, showSpeed: spec.hasSpeed)
         }
     }
 
-    private func modelRow(_ m: ModelDetailRecord) -> some View {
+    /// `showSpeed`：只有「按模型」区带速度列（v0.3.47）；会话展开里的模型积分分布不带。
+    private func modelRow(_ m: ModelDetailRecord, showSpeed: Bool = false) -> some View {
         HStack(spacing: 8) {
             Circle().fill(accent).frame(width: 7, height: 7)
             Text(m.displayName ?? m.modelId).font(.system(size: 11)).foregroundStyle(pal.text).lineLimit(1)
                 .help(m.displayName.map { "\($0)（\(m.modelId)）" } ?? m.modelId)
             Spacer(minLength: 6)
+            if showSpeed { speedLabel(m) }
             Text(spec.hasTokens ? fmtTok(m.tokens.total) : "—")
                 .font(.system(size: 10.5, design: .monospaced))
                 .foregroundStyle(pal.text2)
@@ -850,6 +852,28 @@ struct ProviderDetailView: View {
                     .frame(width: 46, alignment: .trailing)
             }
         }
+    }
+
+    /// 「按模型」速度列（v0.3.47，设计稿 `docs/1013-按模型输出速度/`）：灰色、小一号，放在 token 数左边，
+    /// 右边 token / 命中率 / 金额三列位置不动。没有计时回复的模型那一格留空——不放「—」（用户 2026-10-13 拍板）。
+    @ViewBuilder
+    private func speedLabel(_ m: ModelDetailRecord) -> some View {
+        let label = Text(m.tokensPerSecond.map(Self.fmtSpeed) ?? "")
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(pal.text3)
+            .lineLimit(1)
+            // 按内容取宽、不占固定列宽：紧贴右侧定宽的 token 列，各行右边缘照样对齐；
+            // 留空的格子不占地方。固定 64 点会把 Qoder CLI 这类右侧还有宽积分列的行的模型名挤成省略号。
+            .fixedSize()
+        if m.tokensPerSecond != nil {
+            label.help("从发出请求到回答完，平均每秒输出的 token 数")
+        } else {
+            label
+        }
+    }
+
+    static func fmtSpeed(_ tps: Double) -> String {
+        tps >= 1 ? String(format: "%.0f tok/s", tps) : "<1 tok/s"
     }
 
     private func recordedCreditLabel(_ credits: CreditUsage?) -> some View {

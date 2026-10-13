@@ -21,6 +21,8 @@ public actor ClaudeDetailScanner {
         let model: String
         let date: String
         var tokens: TokenBreakdown
+        /// 输出速度分量（v0.3.47）。按新口径解析的恒非 nil（可能为 0），见 `FileDetailRecord.timedOutput`
+        var timing = GenerationTiming()
     }
 
     fileprivate struct SessionMeta {
@@ -130,7 +132,8 @@ public actor ClaudeDetailScanner {
                 title: resolvedTitle(m), model: u.model,
                 lastActivity: m?.lastActivity ?? .distantPast,
                 tokens: u.tokens,
-                source: attachSource ? u.source.rawValue : nil)
+                source: attachSource ? u.source.rawValue : nil,
+                timing: u.timing)
         }
     }
 
@@ -216,8 +219,36 @@ public actor ClaudeDetailScanner {
         var seenIds = Set<String>()
         var requestIds = Set<String>()
 
+        // ── 输出速度（v0.3.47）：一条回复 = 同一 message.id 的若干行（每个内容块写完落一行）。
+        // 开始 = 这条回复**第一次出现之前**紧邻那一行的时间（用户消息 / 工具结果写入的时刻 = 请求发出）；
+        // 结束 = 这条回复**最后一行**的时间；输出 = 各行 output_tokens 的最大值（= 最终值）。
+        // ⚠️ 三个实测的坑：
+        //   - Qoder CLI 的 fork 先写一行**不带 usage** 的同 id 行、再写带 usage 的，两行同一时刻 → 「第一次出现」
+        //     必须把不带 usage 的行也算上，否则开始 = 自己的前一行，耗时恒 0、整个来源没有速度；
+        //   - 旧版客户端（Cowork 的 claude-sonnet-4-6 实测 58/197 条）首行 output 是流式中途的临时值（0 / 6），
+        //     末行才是最终值 → 速度必须用最大值，用首行会算出 5 tok/s；
+        //   - 时间先存原串（Claude 一律写定长 UTC 串），用到才解析，省掉每行一次日期解析。
+        var prevLineTs: String? = nil
+        var messageStart: [String: String] = [:]       // message.id → 第一次出现之前那一行的时间
+        var seenMessageLine = Set<String>()             // 出现过的 message.id（含不带 usage 的行）
+        var lastLineOf: [String: String] = [:]          // message.id → 最后一行时间
+        var maxOutputOf: [String: Int] = [:]            // message.id → 各行 output_tokens 最大值
+        var pendingTiming: [String: String] = [:]       // 计入了 token 的 message.id → 归账 key
+
         try? JSONLReader.forEachLine(at: url) { obj in
+            let lineTs = obj["timestamp"] as? String
+            let startOfThisLine = prevLineTs
+            defer { if let lineTs { prevLineTs = lineTs } }
+
             let type = obj["type"] as? String
+            if type == "assistant", let message = obj["message"] as? [String: Any],
+               let mid = message["id"] as? String, !mid.isEmpty {
+                if seenMessageLine.insert(mid).inserted, let s = startOfThisLine { messageStart[mid] = s }
+                if let lineTs { lastLineOf[mid] = lineTs }
+                if let o = (message["usage"] as? [String: Any])?["output_tokens"] as? Int {
+                    maxOutputOf[mid] = max(maxOutputOf[mid] ?? 0, o)
+                }
+            }
             let sid = (obj["sessionId"] as? String) ?? (obj["session_id"] as? String) ?? ""
             guard !sid.isEmpty else { return }
 
@@ -272,6 +303,14 @@ public actor ClaudeDetailScanner {
                 } else {
                     acc[key] = Unit(source: source, sessionId: sid, model: model, date: date, tokens: tb)
                 }
+                if messageId.isEmpty {
+                    // 没有 message.id 的回复无法跨行追踪，只能当它只有这一行
+                    let start = startOfThisLine.flatMap(ISODateParser.parse)
+                    acc[key]?.timing.add(output: output,
+                                         millis: start.map { GenerationTiming.millis(from: $0, to: ts) })
+                } else {
+                    pendingTiming[messageId] = key
+                }
 
                 var m = metas[sid] ?? SessionMeta(aiTitle: nil, firstUserText: nil, cwd: nil, lastActivity: ts)
                 m.cwd = m.cwd ?? (obj["cwd"] as? String)
@@ -314,6 +353,12 @@ public actor ClaudeDetailScanner {
             default:
                 break
             }
+        }
+
+        for (mid, key) in pendingTiming {
+            guard let start = messageStart[mid].flatMap(ISODateParser.parse),
+                  let end = lastLineOf[mid].flatMap(ISODateParser.parse) else { continue }
+            acc[key]?.timing.add(output: maxOutputOf[mid] ?? 0, millis: GenerationTiming.millis(from: start, to: end))
         }
 
         return FileParse(units: Array(acc.values), metas: metas, requestIds: requestIds)

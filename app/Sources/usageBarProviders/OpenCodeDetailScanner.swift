@@ -31,9 +31,12 @@ public actor OpenCodeDetailScanner {
         let (messages, sessions) = loadAll()
         return messages.map { m in
             let root = OpenCodeDB.rootSessionId(of: m.sessionId, in: sessions)
+            var timing = GenerationTiming()
+            timing.add(output: m.tokens.output, millis: m.genMillis)   // output 已含思考，与计入口径一致
             return FileDetailRecord(provider: "opencode", date: m.date, sessionId: root,
                                     title: sessions[root]?.title ?? "",
-                                    model: m.modelId, lastActivity: m.time, tokens: m.tokens)
+                                    model: m.modelId, lastActivity: m.time, tokens: m.tokens,
+                                    timing: timing)
         }
     }
 

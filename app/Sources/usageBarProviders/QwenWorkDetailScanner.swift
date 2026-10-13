@@ -120,7 +120,8 @@ public actor QwenWorkDetailScanner {
         return events.map { e in
             FileDetailRecord(provider: "qwen-work", date: e.date, sessionId: e.sessionId,
                              title: metas[e.sessionId]?.resolvedTitle ?? "",
-                             model: e.model, lastActivity: e.timestamp, tokens: e.tokens)
+                             model: e.model, lastActivity: e.timestamp, tokens: e.tokens,
+                             timing: e.timing)
         }
     }
 

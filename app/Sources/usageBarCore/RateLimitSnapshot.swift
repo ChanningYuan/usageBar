@@ -121,9 +121,11 @@ public struct RateLimitCredits: Codable, Sendable, Equatable {
     public var displayText: String? {
         if unlimited { return "∞" }
         guard let balance, let v = Double(balance), v > 0 else { return nil }
-        // 官方 balance 是美元字符串；两位小数、去多余零（"4.20"→"$4.20"、"12"→"$12"）
+        // 两位小数、去多余零（"4.20"→"4.20"、"12"→"12"）。
+        // ⚠️ 不加 $（v0.3.47）：这是 Codex 的积分 / 信用点余额，不是美元——前面带 $ 会被当成「还剩多少美元」
+        // （用户 2026-10-14 指出：「容易误解」）。药丸 label 与详情页行名已写明「积分」，数字本身不带单位。
         let s = v == v.rounded() ? String(Int(v)) : String(format: "%.2f", v)
-        return "$\(s)"
+        return s
     }
 }
 

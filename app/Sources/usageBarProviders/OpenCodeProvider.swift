@@ -23,6 +23,9 @@ enum OpenCodeDB {
         let providerId: String
         let tokens: TokenBreakdown
         let cost: Double
+        /// 从创建到完成的毫秒数（`data.time.created` → `data.time.completed`，v0.3.47 速度列）；
+        /// 回复没写完 / 被打断时 completed 缺失 → nil
+        var genMillis: Int? = nil
     }
 
     struct SessionInfo: Sendable {
@@ -73,7 +76,9 @@ enum OpenCodeDB {
                json_extract(m.data, '$.tokens.cache.read'),
                json_extract(m.data, '$.tokens.cache.write'),
                json_extract(m.data, '$.cost'),
-               json_extract(m.data, '$.providerID')
+               json_extract(m.data, '$.providerID'),
+               json_extract(m.data, '$.time.created'),
+               json_extract(m.data, '$.time.completed')
           FROM message m
          WHERE json_extract(m.data, '$.role') = 'assistant'
         """
@@ -107,6 +112,12 @@ enum OpenCodeDB {
             // 订阅登录 opencode 记 cost=0（无真实扣费）→ 按模型等效 API 价兜底；
             // API key 用户 cost>0 用真实值
             let dbCost = sqlite3_column_double(stmt, 8)
+            var genMillis: Int? = nil
+            if sqlite3_column_type(stmt, 11) != SQLITE_NULL {
+                let created = sqlite3_column_type(stmt, 10) != SQLITE_NULL
+                    ? sqlite3_column_int64(stmt, 10) : sqlite3_column_int64(stmt, 1)
+                genMillis = Int(sqlite3_column_int64(stmt, 11) - created)
+            }
             rows.append(MessageRow(
                 sessionId: sessionId,
                 date: DailyAggregator.dateString(for: time),
@@ -115,7 +126,8 @@ enum OpenCodeDB {
                 providerId: providerId,
                 tokens: tokens,
                 cost: dbCost > 0 ? dbCost : UnifiedPricing.cost(
-                    tokens, modelId: modelId, provider: providerId.isEmpty ? nil : providerId)
+                    tokens, modelId: modelId, provider: providerId.isEmpty ? nil : providerId),
+                genMillis: genMillis
             ))
         }
         return rows

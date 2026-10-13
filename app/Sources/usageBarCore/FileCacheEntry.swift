@@ -43,6 +43,63 @@ extension FileCacheEntry {
         let detailTotal = details.filter { $0.provider == provider }.reduce(0) { $0 + $1.tokens.total }
         return listTotal == detailTotal
     }
+
+    /// 这一条账本记录里，某来源的明细是否都已按「带耗时」的口径解析过（v0.3.47）。
+    ///
+    /// 按文件存明细的来源（Claude Code / Cowork / Qoder CLI 的 transcript）命中缓存时用它：
+    /// 旧版本写的明细没有耗时 → 当作未命中、重新解析一次补上。**源文件已被清理的条目根本走不到
+    /// 这里**（lookup 要拿现存文件的 mtime），原样保留——历史一条不丢，只是那部分没有速度。
+    public func detailsHaveTiming(provider: String) -> Bool {
+        details.allSatisfy { $0.provider != provider || $0.timing != nil }
+    }
+}
+
+/// 回复耗时的累加器：有计时的回复一共输出了多少 token、一共花了多少毫秒（v0.3.47）。
+///
+/// ## 口径（2026-10-13 用户拍板）
+///
+/// **端到端**：从发出请求到回答完，含等第一个字的时间。8 个来源统一这一个口径——Codex 日志其实
+/// 能算「纯生成」，但同一列混两种口径会误导，不单独用。
+///
+/// **所有回复都计入**，按「总输出 ÷ 总秒数」加权（短回复 token 少、秒数也少，天然权重小；
+/// 近 30 天实测 1–49 token 的短回复只占总秒数 0.8%）。只剔除单条耗时 ≤ 0 或 ≥ 30 分钟的
+/// 异常记录：时间戳坏了，或请求途中电脑睡眠，不可能是真实生成过程（近 30 天约 0.6%）。
+public struct GenerationTiming: Codable, Sendable, Equatable {
+    public var output: Int
+    public var millis: Int
+
+    public init(output: Int = 0, millis: Int = 0) {
+        self.output = output
+        self.millis = millis
+    }
+
+    /// 单条回复耗时上限：≥ 30 分钟视为异常（电脑睡眠 / 时间戳错乱）
+    public static let maxMillis = 30 * 60 * 1000
+
+    /// 计入一条回复。耗时不合法（缺失、≤ 0、≥ 30 分钟）则不计，返回是否计入。
+    @discardableResult
+    public mutating func add(output: Int, millis: Int?) -> Bool {
+        guard let ms = millis, ms > 0, ms < Self.maxMillis else { return false }
+        self.output += max(0, output)
+        self.millis += ms
+        return true
+    }
+
+    public mutating func add(_ other: GenerationTiming) {
+        output += other.output
+        millis += other.millis
+    }
+
+    /// 平均每秒输出的 token 数；没有任何计时回复时为 nil（详情页那一格留空）
+    public var tokensPerSecond: Double? {
+        guard millis > 0 else { return nil }
+        return Double(output) * 1000 / Double(millis)
+    }
+
+    /// 两个时间点之间的毫秒数（结束早于开始时为负，交给 `add` 剔除）
+    public static func millis(from start: Date, to end: Date) -> Int {
+        Int((end.timeIntervalSince(start) * 1000).rounded())
+    }
 }
 
 /// 单文件内"某 provider 在某天的总 token"
@@ -113,10 +170,23 @@ public struct FileDetailRecord: Codable, Sendable, Equatable {
     /// 其余 provider 为 nil —— 它们的等效美元由 `UnifiedPricing` 按模型名实时算，存了反而会
     /// 在价目表更新后变成陈旧值。
     public let nativeCost: Double?
+    /// 输出速度的两个可相加分量（v0.3.47）：**有计时**的回复一共输出了多少 token、一共花了多少毫秒。
+    /// 详情页按周期 × 模型把两列分别相加再相除，得到「平均每秒输出的 token 数」。
+    ///
+    /// 口径 = 端到端：从发出请求到回答完（含等第一个字的时间），见 `GenerationTiming`。
+    /// 存成两列而不是存速度本身：速度不能直接相加，两列可以，跨天 / 跨会话合并才不失真。
+    ///
+    /// - `nil`：这条由不记耗时的旧版本解析（或 Cursor / 豆包工作这类拿不到耗时的来源）。
+    ///   旧账本 JSON 没有这两个键，解码出来就是 nil，**不需要 bump `schemaVersion`**
+    ///   ——bump 会让整份账本作废重扫，源日志已被清理的历史就永久丢了（v0.3.33 的教训）。
+    /// - `0`：按新口径解析过，只是没有一条回复拿得到合法耗时。
+    public let timedOutput: Int?
+    public let timedMillis: Int?
 
     public init(provider: String, date: String, sessionId: String, title: String,
                 model: String, lastActivity: Date, tokens: TokenBreakdown,
-                source: String? = nil, nativeCost: Double? = nil) {
+                source: String? = nil, nativeCost: Double? = nil,
+                timing: GenerationTiming? = nil) {
         self.provider = provider
         self.date = date
         self.sessionId = sessionId
@@ -131,6 +201,14 @@ public struct FileDetailRecord: Codable, Sendable, Equatable {
         self.reasoning = tokens.reasoning
         self.source = source
         self.nativeCost = nativeCost
+        self.timedOutput = timing?.output
+        self.timedMillis = timing?.millis
+    }
+
+    /// 输出速度分量；旧版本解析的条目为 nil（见 `timedOutput` 的说明）。
+    public var timing: GenerationTiming? {
+        guard let o = timedOutput, let ms = timedMillis else { return nil }
+        return GenerationTiming(output: o, millis: ms)
     }
 
     /// 还原成统一的 5 列结构

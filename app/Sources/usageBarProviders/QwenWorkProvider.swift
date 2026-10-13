@@ -13,6 +13,16 @@ struct QwenWorkUsageEvent: Sendable, Equatable {
     let date: String
     let model: String
     let tokens: TokenBreakdown
+    /// 从发出请求（`model.request.started`）到回答完（`model.response.completed`）的毫秒数（v0.3.47）。
+    /// 按 request_id 在同一个 segment 文件内配对；配不上为 nil。不参与任何 token 计算。
+    var genMillis: Int? = nil
+
+    /// 写进账本明细的速度分量（输出用这条请求计入的 output）
+    var timing: GenerationTiming {
+        var t = GenerationTiming()
+        t.add(output: tokens.output, millis: genMillis)
+        return t
+    }
 }
 
 /// 千问办公 segment 的唯一解析口径。
@@ -35,8 +45,15 @@ enum QwenWorkSegmentParser {
 
         var events: [QwenWorkUsageEvent] = []
         var seenRequestIds = Set<String>()
+        var startedAt: [String: Date] = [:]     // request_id → 发出请求的时间（v0.3.47，速度列）
 
         try JSONLReader.forEachLine(at: url) { obj in
+            if (obj["type"] as? String) == "model.request.started",
+               let rid = obj["request_id"] as? String, !rid.isEmpty,
+               let ts = (obj["ts"] as? String).flatMap(ISODateParser.parse) {
+                startedAt[rid] = startedAt[rid] ?? ts
+                return
+            }
             guard (obj["type"] as? String) == "model.response.completed",
                   let requestId = obj["request_id"] as? String, !requestId.isEmpty,
                   let tsString = obj["ts"] as? String,
@@ -81,7 +98,8 @@ enum QwenWorkSegmentParser {
                 timestamp: timestamp,
                 date: DailyAggregator.dateString(for: timestamp),
                 model: model,
-                tokens: tokens
+                tokens: tokens,
+                genMillis: startedAt[requestId].map { GenerationTiming.millis(from: $0, to: timestamp) }
             ))
         }
 

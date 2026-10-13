@@ -65,6 +65,7 @@ public actor CodexDetailScanner {
         var sessionFinal: [String: CodexUsage] = [:]   // ownId → 历史最大累计（fork baseline 用）
         var hero = TokenBreakdown(); var heroCost = 0.0
         var byModel: [String: TokenBreakdown] = [:]; var modelCost: [String: Double] = [:]
+        var modelTiming: [String: GenerationTiming] = [:]
         var bySession: [String: TokenBreakdown] = [:]; var sessionCost: [String: Double] = [:]
         var sessMeta: [String: Meta] = [:]
 
@@ -92,6 +93,7 @@ public actor CodexDetailScanner {
                 let c = UnifiedPricing.cost(tb, modelId: model)
                 hero.add(tb); heroCost += c
                 byModel[model, default: TokenBreakdown()].add(tb); modelCost[model, default: 0] += c
+                modelTiming[model, default: GenerationTiming()].add(output: d.delta.output, millis: d.genMillis)
                 bySession[sid, default: TokenBreakdown()].add(tb); sessionCost[sid, default: 0] += c
             }
 
@@ -111,7 +113,8 @@ public actor CodexDetailScanner {
         }
 
         let models = byModel.map { (mid, tb) in
-            ModelDetailRecord(modelId: mid, tokens: tb, cost: modelCost[mid] ?? 0)
+            ModelDetailRecord(modelId: mid, tokens: tb, cost: modelCost[mid] ?? 0,
+                              timing: modelTiming[mid].flatMap { $0.millis > 0 ? $0 : nil })
         }.sorted { $0.tokens.total > $1.tokens.total }
 
         let sessions = bySession.map { (sid, tb) -> SessionDetailRecord in
@@ -149,6 +152,7 @@ public actor CodexDetailScanner {
 
         var sessionFinal: [String: CodexUsage] = [:]
         var acc: [String: TokenBreakdown] = [:]        // key = session|model|date
+        var accTiming: [String: GenerationTiming] = [:] // 同 key 的速度分量（v0.3.47）
         var sessMeta: [String: Meta] = [:]
         var lastAt: [String: Date] = [:]
 
@@ -171,7 +175,10 @@ public actor CodexDetailScanner {
             for d in deltas {
                 let date = DailyAggregator.dateString(for: d.ts)
                 let model = d.model.isEmpty ? meta.firstModel : d.model
-                acc["\(sid)\u{0}\(model)\u{0}\(date)", default: TokenBreakdown()].add(Self.breakdown(d.delta))
+                let key = "\(sid)\u{0}\(model)\u{0}\(date)"
+                acc[key, default: TokenBreakdown()].add(Self.breakdown(d.delta))
+                // 只给「真实计入」的增量计时（继承快照 / replay / 重复事件根本不产出增量），输出用计入的那个数
+                accTiming[key, default: GenerationTiming()].add(output: d.delta.output, millis: d.genMillis)
                 lastAt[sid] = max(lastAt[sid] ?? .distantPast, d.ts)
             }
 
@@ -199,7 +206,7 @@ public actor CodexDetailScanner {
             return FileDetailRecord(provider: providerId, date: date, sessionId: sid,
                                     title: title, model: model,
                                     lastActivity: lastAt[sid] ?? mt?.lastActivity ?? .distantPast,
-                                    tokens: tb)
+                                    tokens: tb, timing: accTiming[key] ?? GenerationTiming())
         }
     }
 
@@ -250,17 +257,46 @@ public actor CodexDetailScanner {
 
     // MARK: - 单文件解析（窗口无关；只收原始事件 + meta）
 
+    /// 模型生成的内容（计入「回答完」时间）
+    private static let generatedItemTypes: Set<String> = [
+        "reasoning", "function_call", "custom_tool_call", "local_shell_call", "web_search_call", "tool_search_call",
+    ]
+    /// 送进模型的输入（计入「请求发出」时间）
+    private static let inputItemTypes: Set<String> = [
+        "function_call_output", "custom_tool_call_output", "local_shell_call_output", "tool_search_output",
+    ]
+
     private func parse(url: URL) -> FileParse? {
         var events: [Ev] = []
         var ownId = ""; var forkedFrom: String? = nil; var isSub = false
         var title: String? = nil; var cwd: String? = nil
         var currentModel = ""; var firstModel = ""
         var lastTs = Date.distantPast
+        // ── 输出速度（v0.3.47）。⚠️ 用量事件（token_count，新版还有 token_usage_record）**不能**当「回答完」：
+        // 实测它常在工具执行完、工具结果写入之后才落盘，拿它当结束会把工具耗时算进去、或算出 1 毫秒。
+        // 结束 = 本次请求最后一个生成内容（思考 / 回答 / 工具调用）写入的时间；
+        // 开始 = 第一个生成内容之前最后一条输入（用户消息 / 工具结果 / 任务开始）的时间，没有就用上一次请求的结束。
+        // 时间先存原串：Codex 一律写 `2026-10-13T06:02:21.649Z` 定长 UTC 串，字典序 == 时间序，
+        // 只在每次请求结束时解析两个，省掉每行一次日期解析（Codex 日志动辄 GB 级）。
+        var genTs: [String] = []
+        var inputTs: [String] = []
+        var prevEnd: String? = nil
 
         try? JSONLReader.forEachLine(at: url) { obj in
             guard let type = obj["type"] as? String,
                   let payload = obj["payload"] as? [String: Any] else { return }
             switch type {
+            case "response_item":
+                guard let ts = obj["timestamp"] as? String else { return }
+                let pt = payload["type"] as? String ?? ""
+                let role = payload["role"] as? String
+                if Self.generatedItemTypes.contains(pt) || (pt == "message" && role == "assistant") {
+                    genTs.append(ts)
+                } else if Self.inputItemTypes.contains(pt)
+                            || (pt == "message" && (role == "user" || role == "developer")) {
+                    inputTs.append(ts)
+                }
+
             case "session_meta":
                 if ownId.isEmpty {
                     ownId = (payload["id"] as? String) ?? (payload["session_id"] as? String) ?? ""
@@ -278,6 +314,9 @@ public actor CodexDetailScanner {
 
             case "event_msg":
                 let pt = payload["type"] as? String
+                if pt == "user_message" || pt == "task_started", let ts = obj["timestamp"] as? String {
+                    inputTs.append(ts)
+                }
                 if pt == "user_message" {
                     if title == nil, let msg = payload["message"] as? String {
                         let t = msg.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -293,7 +332,18 @@ public actor CodexDetailScanner {
                           let ts = ISODateParser.parse(tsStr) {
                     // 与 CodexProvider.parseRawEvents 同一解析（含 total_tokens 回退、last 可缺）
                     let last = (info["last_token_usage"] as? [String: Any]).map(CodexProvider.usageVector)
-                    events.append(Ev(ts: ts, total: CodexProvider.usageVector(usage), last: last, model: currentModel))
+                    var genMillis: Int? = nil
+                    if let first = genTs.min(), let end = genTs.max() {
+                        let start = inputTs.filter { $0 <= first }.max() ?? prevEnd
+                        if let s = start.flatMap(ISODateParser.parse), let e = ISODateParser.parse(end) {
+                            genMillis = GenerationTiming.millis(from: s, to: e)
+                        }
+                        inputTs.removeAll { $0 <= end }   // 晚于结束的输入（本次的工具结果）留给下一次请求
+                        genTs.removeAll()
+                        prevEnd = end
+                    }   // 没有新生成内容 = 重复的用量事件，不计时，缓冲留着
+                    events.append(Ev(ts: ts, total: CodexProvider.usageVector(usage), last: last,
+                                     model: currentModel, genMillis: genMillis))
                     lastTs = max(lastTs, ts)
                 }
 

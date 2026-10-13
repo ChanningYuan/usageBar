@@ -37,6 +37,8 @@ public actor QoderIdeDetailScanner {
         let title: String?
         /// 工程名（`chat_session.project_name`，标题为空时兜底）
         let project: String?
+        /// 从发出请求到这条回复写入的毫秒数（v0.3.47 速度列）：本条 gmt_create − 同会话上一条消息的 gmt_create
+        var genMillis: Int? = nil
     }
 
     private struct CacheEntry {
@@ -61,9 +63,12 @@ public actor QoderIdeDetailScanner {
     /// 全量明细 → 写进持久账本（v0.3.33）。详情页从账本读，SQLite 被清理/锁住也能展开。
     public func allDetails() async -> [FileDetailRecord] {
         load().map { r in
-            FileDetailRecord(provider: "qoder-ide", date: r.date, sessionId: r.sessionId,
-                             title: (r.title?.isEmpty == false ? r.title! : (r.project ?? "")),
-                             model: r.model, lastActivity: r.time, tokens: r.tokens)
+            var timing = GenerationTiming()
+            timing.add(output: r.tokens.output, millis: r.genMillis)
+            return FileDetailRecord(provider: "qoder-ide", date: r.date, sessionId: r.sessionId,
+                                    title: (r.title?.isEmpty == false ? r.title! : (r.project ?? "")),
+                                    model: r.model, lastActivity: r.time, tokens: r.tokens,
+                                    timing: timing)
         }
     }
 
@@ -136,8 +141,11 @@ public actor QoderIdeDetailScanner {
         // LEFT JOIN 而非 INNER：会话记录可能被清理，不能因此丢掉用量。
         let sql = """
         SELECT m.gmt_create, m.token_info, m.session_id, m.model_info,
-               s.session_title, s.project_name
-          FROM chat_message AS m
+               s.session_title, s.project_name, m.prev_create
+          FROM (SELECT gmt_create, token_info, session_id, model_info, role,
+                       LAG(gmt_create) OVER (PARTITION BY session_id
+                                             ORDER BY CAST(gmt_create AS INTEGER)) AS prev_create
+                  FROM chat_message) AS m
           LEFT JOIN chat_session AS s ON s.session_id = m.session_id
          WHERE m.role='assistant'
            AND m.token_info IS NOT NULL
@@ -162,11 +170,14 @@ public actor QoderIdeDetailScanner {
             let project = sqlite3_column_text(stmt, 5).map { String(cString: $0) }
             let ts = Date(timeIntervalSince1970: Double(gmtMs) / 1000.0)
 
+            // 同会话上一条消息（用户输入 / 工具结果）写入的时刻 = 这次请求发出的时刻
+            let prevMs: Int64? = sqlite3_column_type(stmt, 6) == SQLITE_NULL ? nil : sqlite3_column_int64(stmt, 6)
             rows.append(Row(date: DailyAggregator.dateString(for: ts),
                             sessionId: sid.isEmpty ? "(未知会话)" : sid,
                             model: parseModelKey(modelJSON),
                             tokens: tb, time: ts,
-                            title: title, project: project))
+                            title: title, project: project,
+                            genMillis: prevMs.map { Int(gmtMs - $0) }))
         }
         return rows
     }

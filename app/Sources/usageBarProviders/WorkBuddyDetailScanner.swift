@@ -34,6 +34,8 @@ public actor WorkBuddyDetailScanner {
         let tokens: TokenBreakdown
         let credit: Double
         let time: Date
+        /// 从发出请求到这条回复写完的毫秒数（v0.3.47 速度列），见 `parse` 里的说明
+        var genMillis: Int? = nil
     }
 
     /// sessionId → 会话标题的三档来源（优先级从高到低）
@@ -121,9 +123,11 @@ public actor WorkBuddyDetailScanner {
             let m = metas[r.sessionId]
             let title = m?.aiTitle ?? m?.firstUserText
                 ?? m?.cwd.map { ($0 as NSString).lastPathComponent } ?? ""
+            var timing = GenerationTiming()
+            timing.add(output: r.tokens.output, millis: r.genMillis)
             return FileDetailRecord(provider: "workbuddy", date: r.date, sessionId: r.sessionId,
                                     title: title, model: r.model, lastActivity: r.time,
-                                    tokens: r.tokens, nativeCost: r.credit)
+                                    tokens: r.tokens, nativeCost: r.credit, timing: timing)
         }
     }
 
@@ -176,9 +180,18 @@ public actor WorkBuddyDetailScanner {
     static func parse(url: URL) -> FileParse {
         var rows: [Row] = []
         var metas: [String: SessionMeta] = [:]
+        // ── 输出速度（v0.3.47）：每行有 id / parentId / timestamp（epoch 毫秒）。回复行的时间 = 写完的时间；
+        // 开始 = 沿 parentId 往回、跳过 AI 自己生成的行（思考 / 前一段回复），找到的第一条输入（用户消息 /
+        // 工具结果）的时间。实测回复行的父节点常是同一请求的 reasoning 行，两者只差几毫秒，不能直接用父节点。
+        var nodes: [String: (ts: Date?, parent: String?, generated: Bool)] = [:]
+        var rowParents: [(row: Int, parent: String?)] = []
 
         try? JSONLReader.forEachLine(at: url) { obj in
             let type = obj["type"] as? String
+            if let id = obj["id"] as? String, !id.isEmpty {
+                nodes[id] = (parseEpochMillis(obj["timestamp"]), obj["parentId"] as? String,
+                             (obj["role"] as? String) == "assistant" || type == "reasoning")
+            }
             let sid = (obj["sessionId"] as? String) ?? ""
             guard !sid.isEmpty else { return }
 
@@ -232,9 +245,21 @@ public actor WorkBuddyDetailScanner {
             m.cwd = m.cwd ?? (obj["cwd"] as? String)
             metas[sid] = m
 
+            rowParents.append((rows.count, obj["parentId"] as? String))
             rows.append(Row(date: DailyAggregator.dateString(for: ts), sessionId: sid,
                             model: model.isEmpty ? "(未知)" : model,
                             tokens: tb, credit: credit, time: ts))
+        }
+
+        for (i, parent) in rowParents {
+            var p = parent.flatMap { nodes[$0] }
+            var hops = 0
+            while let node = p, node.generated, hops < 50 {
+                p = node.parent.flatMap { nodes[$0] }
+                hops += 1
+            }
+            guard let start = p?.ts, p?.generated == false else { continue }
+            rows[i].genMillis = GenerationTiming.millis(from: start, to: rows[i].time)
         }
         return FileParse(rows: rows, metas: metas)
     }

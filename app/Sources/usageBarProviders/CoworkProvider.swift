@@ -46,7 +46,8 @@ public struct CoworkProvider: UsageProvider {
 
             // 命中缓存还要自检「主列表合计 = 明细合计」，不等就按新口径重算一次（v0.3.41，同 Claude Code）。
             if let entry = await FileMtimeCache.shared.lookup(filePath: path, mtime: meta.mtime, size: meta.size),
-               entry.recordsMatchDetails(provider: "cowork") {
+               entry.recordsMatchDetails(provider: "cowork"),
+               entry.detailsHaveTiming(provider: "cowork") {   // v0.3.47：旧版明细没有耗时 → 重解析一次补上
                 allRecords.append(contentsOf: entry.records)
                 continue
             }

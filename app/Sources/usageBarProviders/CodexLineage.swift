@@ -53,9 +53,12 @@ public struct CodexTokenEvent: Sendable {
     public let total: CodexUsage
     public let last: CodexUsage?
     public let model: String
+    /// 这次请求从发出到回答完的毫秒数（v0.3.47，详情页速度列）。只有详情扫描器会填，
+    /// 主列表不用；拿不到（重复的用量事件 / 旧日志缺输入时间）为 nil。不参与任何 token 计算。
+    public let genMillis: Int?
 
-    public init(ts: Date, total: CodexUsage, last: CodexUsage?, model: String = "") {
-        self.ts = ts; self.total = total; self.last = last; self.model = model
+    public init(ts: Date, total: CodexUsage, last: CodexUsage?, model: String = "", genMillis: Int? = nil) {
+        self.ts = ts; self.total = total; self.last = last; self.model = model; self.genMillis = genMillis
     }
 }
 
@@ -64,6 +67,8 @@ public struct CodexDeltaEvent: Sendable, Equatable {
     public let ts: Date
     public let delta: CodexUsage
     public let model: String
+    /// 透传自产生这条增量的 `CodexTokenEvent.genMillis`（v0.3.47）
+    public var genMillis: Int? = nil
 }
 
 public enum CodexLineage {
@@ -123,7 +128,7 @@ public enum CodexLineage {
                 }
                 d.cached = min(d.cached, d.input)          // 缓存命中 ≤ 输入（浅色段不超总长）
                 d.reasoning = min(d.reasoning, d.output)   // 思考 ≤ 输出
-                out.append(CodexDeltaEvent(ts: ev.ts, delta: d, model: ev.model))
+                out.append(CodexDeltaEvent(ts: ev.ts, delta: d, model: ev.model, genMillis: ev.genMillis))
                 peakTotal = tot.total
             }
             peakC = peakC.componentMax(tot)

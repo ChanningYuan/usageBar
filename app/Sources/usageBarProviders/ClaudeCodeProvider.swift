@@ -60,7 +60,8 @@ public actor ClaudeJsonlScanner {
 
             // 命中缓存还要自检「主列表合计 = 明细合计」：旧版本两套解析各算各的，不等就按新口径重算一次（v0.3.41）。
             if let entry = await FileMtimeCache.shared.lookup(filePath: path, mtime: meta.mtime, size: meta.size),
-               entry.recordsMatchDetails(provider: "claude-code") {
+               entry.recordsMatchDetails(provider: "claude-code"),
+               entry.detailsHaveTiming(provider: "claude-code") {   // v0.3.47：旧版明细没有耗时 → 重解析一次补上
                 allRecords.append(contentsOf: entry.records)
                 continue
             }
