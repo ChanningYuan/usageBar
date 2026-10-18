@@ -51,7 +51,10 @@ public struct QoderIdeProvider: UsageProvider {
         // 实测 bug:2026-05-28 用户在 Qoder IDE 发消息后,db mtime 仍是 5/27,wal mtime 才是 5/28。
         guard let meta = sqliteMetadataWithWAL(dbPath: path) else { return [] }
 
-        if let entry = await FileMtimeCache.shared.lookup(filePath: path, mtime: meta.mtime, size: meta.size) {
+        // 命中但是空的：0.3.47 及以前 IDE 关着时库打不开、存了一条空记录，库没再变过就一直命中它、主列表恒 0
+        // （v0.3.48 发版自检时发现）。空库重读一次很便宜，空就别信缓存。
+        if let entry = await FileMtimeCache.shared.lookup(filePath: path, mtime: meta.mtime, size: meta.size),
+           !entry.records.isEmpty {
 
         // v0.3.33：明细落进持久账本（详情页从此读账本，源被清理/锁住也能展开）。
         // 写成一条**合成条目**（非真实路径 + 每轮覆盖），不参与 mtime 缓存命中。
@@ -61,7 +64,11 @@ public struct QoderIdeProvider: UsageProvider {
             return entry.records
         }
 
-        let records = (try? parseDB(path: path)) ?? []
+        guard let records = parseDB(path: path) else {
+            // 两种方式都打不开：保留上次读到的数。以前存成空 → 主列表清 0、详情页还有数（v0.3.48）
+            await Self.storeDetails(QoderIdeDetailScanner.shared)
+            return await FileMtimeCache.shared.entry(forPath: path)?.records ?? []
+        }
         let entry = FileCacheEntry(filePath: path, mtime: meta.mtime, size: meta.size, records: records)
         await FileMtimeCache.shared.store(entry)
 
@@ -85,20 +92,9 @@ public struct QoderIdeProvider: UsageProvider {
         return (mtime, size)
     }
 
-    /// 用系统 SQLite3 库读取(macOS 自带,无需链接配置)。
-    /// 以 read-only 模式打开(URI),允许 WAL 并发,不干扰 Qoder 自身写入。
-    private func parseDB(path: String) throws -> [FileDailyRecord] {
-        // URI 形式:`file:<path>?mode=ro&immutable=0&nolock=0`(留 nolock=0 让 WAL 工作)
-        // 注意 path 里如果有特殊字符需要 percent-encode,但应用路径稳定,简化处理
-        let uri = "file:\(path)?mode=ro"
-        var db: OpaquePointer?
-        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
-        guard sqlite3_open_v2(uri, &db, flags, nil) == SQLITE_OK, let db else {
-            if let db { sqlite3_close(db) }
-            return []
-        }
-        defer { sqlite3_close(db) }
-
+    /// 用系统 SQLite3 库只读读取(macOS 自带,无需链接配置);IDE 关着时退到快照方式,见 `ReadOnlySQLite`。
+    /// 打不开返回 nil(调用方保留上次的数)。
+    private func parseDB(path: String) -> [FileDailyRecord]? {
         let sql = """
         SELECT gmt_create, token_info
           FROM chat_message
@@ -106,28 +102,19 @@ public struct QoderIdeProvider: UsageProvider {
            AND token_info IS NOT NULL
            AND token_info != ''
         """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
-            if let stmt { sqlite3_finalize(stmt) }
-            return []
-        }
-        defer { sqlite3_finalize(stmt) }
-
         var dailyTotals: [String: Int] = [:]
         var dailyCached: [String: Int] = [:]
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        let opened = ReadOnlySQLite.query(path: path, sql: sql) { stmt in
             let gmtMs = sqlite3_column_int64(stmt, 0)
-            guard let cStr = sqlite3_column_text(stmt, 1) else { continue }
-            let tokenInfoStr = String(cString: cStr)
-
-            guard let parsed = parseTokenInfoTotal(tokenInfoStr) else { continue }
-            if parsed.total == 0 { continue }
+            guard let cStr = sqlite3_column_text(stmt, 1) else { return }
+            guard let parsed = parseTokenInfoTotal(String(cString: cStr)), parsed.total > 0 else { return }
 
             // gmt_create 是 unix ms
             let date = DailyAggregator.dateString(for: Date(timeIntervalSince1970: TimeInterval(gmtMs) / 1000.0))
             dailyTotals[date, default: 0] += parsed.total
             dailyCached[date, default: 0] += parsed.cached   // 浅色：cached_tokens（prompt 子集）
         }
+        guard opened else { return nil }
 
         return dailyTotals.map { (date, token) in
             FileDailyRecord(provider: id, date: date, token: token, cachedToken: dailyCached[date] ?? 0)

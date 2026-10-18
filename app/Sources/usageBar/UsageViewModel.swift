@@ -27,13 +27,22 @@ final class UsageViewModel: ObservableObject {
     @Published private(set) var doubaoCreditDates: Set<String> = []
     /// 本机有没有豆包工作（主列表「去开启」提示、首次运行保留判据用；每次刷新重判）
     @Published private(set) var doubaoWorkInstalled = DoubaoWorkEnv.isInstalled()
+    /// 这台电脑用过豆包工作的日期（v0.3.48，见 `DoubaoWorkLocalUse`）。装了豆包工作或今天有积分时才去算
+    @Published private(set) var doubaoLocalUseDates: Set<String> = []
 
     func hasQoderCredits(in window: TimeWindow) -> Bool {
         let includes = DailyAggregator.windowPredicate(window, weekStartMonday: TabSettings.shared.weekStartMonday)
         return qoderCreditDates.contains(where: includes)
     }
 
+    /// 这台电脑今天用过豆包工作（v0.3.48）。积分是账号级的（手机豆包 App、另一台电脑也扣），
+    /// 今日这一行（含「去开启」）只在本机今天用过时出现，不然一整天没开豆包工作也冒出一行；其它周期照旧按账号看
+    var doubaoUsedHereToday: Bool {
+        doubaoLocalUseDates.contains(DailyAggregator.dateString(for: Date()))
+    }
+
     func hasDoubaoCredits(in window: TimeWindow) -> Bool {
+        if window == .today, !doubaoUsedHereToday { return false }
         let includes = DailyAggregator.windowPredicate(window, weekStartMonday: TabSettings.shared.weekStartMonday)
         return doubaoCreditDates.contains(where: includes)
     }
@@ -198,6 +207,10 @@ final class UsageViewModel: ObservableObject {
             .flatMap(\.details)
             .filter { ($0.nativeCost ?? 0) > 0 }
             .map(\.date))
+        if doubaoWorkInstalled || doubaoCreditDates.contains(DailyAggregator.dateString(for: Date())) {
+            doubaoLocalUseDates = await DoubaoWorkLocalUseStore.shared.activeDates(
+                openForegroundSince: DoubaoWorkForegroundTracker.shared.openSince)
+        }
         let computed = DailyAggregator.aggregate(
             allDailyRecords: allDaily,
             providerIds: providerIds,

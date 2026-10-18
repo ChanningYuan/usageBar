@@ -113,3 +113,5 @@ usageBar 会读取你本地 AI 工具的会话数据。虽然发布版已做 Dev
 ## License
 
 [MIT](LICENSE) © ChanningYuan
+
+内置 [zstd](https://github.com/facebook/zstd) 的解压代码（BSD 许可，原文见 [app/Sources/CZstd/LICENSE](app/Sources/CZstd/LICENSE)），用于读取 Codex 压缩过的对话日志。

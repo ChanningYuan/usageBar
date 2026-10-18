@@ -1,5 +1,6 @@
 import XCTest
 @testable import usageBarProviders
+import usageBarCore
 
 final class QoderUsageEnvGateTests: XCTestCase {
 
@@ -56,6 +57,34 @@ final class QoderUsageEnvGateTests: XCTestCase {
                     .none)
             }
         }
+    }
+
+    /// ⛔ 回归锁（v0.3.48）：千问办公一启动就写 segment，只有启动记录的不算「用过」。
+    /// 0.3.47 现场：10-12 只打开过千问办公、一句没问，segment mtime 是今天 →
+    /// 今日列表冒出「千问办公 0 · 已开启统计，重启千问办公后开始记录」。
+    func testQwenWorkActivityIgnoresStartupOnlySegments() async throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("qwen-activity-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func write(_ session: String, _ lines: [String]) throws {
+            let dir = root.appendingPathComponent("-/\(session)/segments", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try lines.joined(separator: "\n")
+                .write(to: dir.appendingPathComponent("\(UUID().uuidString).jsonl"), atomically: true, encoding: .utf8)
+        }
+
+        try write("startup-only", [#"{"ts":"2026-10-12T09:52:32.496+08:00","type":"session.config.loaded","data":{}}"#])
+        let none = await QoderUsageEnvGate.latestQwenWorkRequest(under: root)
+        XCTAssertNil(none, "只打开、没提问，不算用过")
+
+        // gate 没生效时请求的 token 全是 0，照样算用过（这正是要提示重启的情况）
+        try write("asked", [
+            #"{"ts":"2026-09-12T17:08:57.900+08:00","type":"session.config.loaded","data":{}}"#,
+            #"{"ts":"2026-09-12T17:09:03.120+08:00","type":"model.response.completed","request_id":"r1","data":{"model":"qwen","input_tokens":0,"output_tokens":0}}"#,
+        ])
+        let latest = await QoderUsageEnvGate.latestQwenWorkRequest(under: root)
+        XCTAssertEqual(latest, ISODateParser.parse("2026-09-12T17:09:03.120+08:00"),
+                       "取真实请求的时间，不取启动记录、也不取文件修改时间")
     }
 
     func testManagedBlockEnablesBothSdkPrefixes() {

@@ -69,7 +69,10 @@ ZIP_SIZE="$(stat -f%z "$DIST_DIR/usageBar.zip" 2>/dev/null)"
 grep -A0 "dl/v${VER}/usageBar.zip" "$APPCAST" | grep -q 'sparkle:edSignature="' && pass "带 EdDSA 签名" || fail "这一条没有 EdDSA 签名"
 
 echo "[6] 账本核对（重启正式包，等首轮刷新落盘稳定）"
-pkill -x usageBar 2>/dev/null; sleep 1
+pkill -x usageBar 2>/dev/null
+# 等旧进程真正退出再 open：退出时要落盘账本（1～2 秒），还没退完就 open，系统只会把同 bundle id 的
+# 旧进程切到前台、不启动正式包，旧进程随后退出 → 什么都没在跑（2026-10-19 发 0.3.48 时测试版还开着，实踩）
+for _ in $(seq 1 20); do pgrep -x usageBar >/dev/null || break; sleep 0.5; done
 LAUNCH_TS="$(date +%s)"
 open "$APP"
 if python3 - "$LAUNCH_TS" <<'PY'

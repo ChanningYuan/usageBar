@@ -83,7 +83,22 @@ public struct CodexProvider: UsageProvider {
     }
 
     /// 只读文件头部前几行，取第一条 `session_meta`（mmap，轻量；不读全文件）。
-    func readFirstSessionMeta(url: URL) -> SessionMeta? {
+    static func readFirstSessionMeta(url: URL) -> SessionMeta? {
+        if url.pathExtension == "zst" {
+            // 压缩的旧日志（v0.3.48）：边解压边读，拿到第一条 session_meta 就停，不整份解压
+            var found: SessionMeta?
+            var scanned = 0
+            try? JSONLReader.forEachLine(at: url) { obj in
+                scanned += 1
+                if (obj["type"] as? String) == "session_meta", let payload = obj["payload"] as? [String: Any] {
+                    found = SessionMeta(ownId: (payload["id"] as? String) ?? "",
+                                        forkedFromId: payload["forked_from_id"] as? String,
+                                        isSubagent: (payload["source"] as? [String: Any])?["subagent"] != nil)
+                }
+                if found != nil || scanned >= 5 { throw JSONLReader.StopReading() }
+            }
+            return found
+        }
         guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
         var start = data.startIndex
         var scanned = 0
@@ -236,100 +251,124 @@ public struct CodexProvider: UsageProvider {
         let fm = FileManager.default
         guard fm.fileExists(atPath: sessionsDir.path) || fm.fileExists(atPath: archivedDir.path) else { return [] }
 
-        // 活跃 + 归档两处，按文件名去重、按文件名排序（字典序 == 时间序 → 父会话一定排在它的 fork 之前，
-        // 单遍即可在处理 fork 前把父的 final 填进 sessionFinal；父会话被归档也找得到）。
+        // 活跃 + 归档两处（含 Codex 压缩过的 `.jsonl.zst`），按文件名去重、按文件名排序
+        // （字典序 == 时间序 → 父会话一定排在它的 fork 之前，单遍即可在处理 fork 前把父的 final 填进 sessionFinal）。
         let files = CodexRolloutFiles.list(sessionsDir: sessionsDir)
 
         let migrating = await Self.needsLedgerMigration(cache: cache, sessionsDir: sessionsDir)
         if migrating {
-            await Self.invalidateStaleEntries(cache: cache, sessionsDir: sessionsDir,
-                                              existingFileNames: Set(files.map { $0.url.lastPathComponent }))
+            await Self.invalidateStaleEntries(
+                cache: cache, sessionsDir: sessionsDir,
+                existingFileNames: Set(files.map { CodexRolloutFiles.baseName($0.url.lastPathComponent) }))
         }
 
+        // v0.3.48：明细改成「一个对话文件一条、和主列表的数存在同一条」（见 `CodexDetailScanner.fileDetails`）。
+        // 旧版那条合成明细先删再写新的：中途被杀只会让明细暂时少一些，不会和新明细叠成双份。
+        await cache.removeEntry(forPath: Self.legacyDetailLedgerPath(sessionsDir: sessionsDir))
+
+        let threadNames = await detailScanner.threadNames(sessionsDir: sessionsDir)
         var sessionFinal: [String: CodexUsage] = [:]   // session id → 历史最大累计（fork 基线用）
         var allRecords: [FileDailyRecord] = []
 
         for file in files {
             let url = file.url
-            let key = file.ledgerKey   // 归档前后同一个 key（见 CodexRolloutFiles）
-            let meta = readFirstSessionMeta(url: url)
+            let key = file.ledgerKey   // 归档前后、压缩前后同一个 key（见 CodexRolloutFiles）
+            let meta = await detailScanner.sessionMeta(url: url)
 
             // —— baseline 决策（优先级：subagent 短路 > fork 信号1 > 默认0）——
-            var baseline = CodexUsage.zero
-            if let meta, !meta.isSubagent, let parent = meta.forkedFromId {
-                baseline = sessionFinal[parent] ?? .zero   // 父缺失 → 0 → 按全量算（自愈）
-            }
+            // 是不是分叉看 `forked_from_id`，**不看找没找到原对话**：以前原对话文件不在时把分叉对话当普通对话
+            // 按全量算，原对话复制进来的那段用量又算一遍（2026-09-17 实测主列表虚高 2,200）。
+            var forkParent: String? = nil
+            if let meta, !meta.isSubagent, let parent = meta.forkedFromId { forkParent = parent }
 
-            let isFork = baseline.total > 0
-            let path = url.path
-            let records: [FileDailyRecord]
+            let entry: FileCacheEntry
             let fileFinal: CodexUsage
-
-            if !isFork,
-               let m = FileMetadata.read(at: path),
-               let entry = await cache.lookup(filePath: key, mtime: m.mtime, size: m.size) {
-                // 非 fork 缓存命中：baseline 恒 0 → 用 Σtoken / Σcached 近似历史最大累计
+            if let parent = forkParent {
+                // fork：账本 key 加后缀、mtime 用当前时刻 → 永远不命中缓存，每轮按最新基线重算并覆盖同一条
+                // （解析结果留在内存里，重算只是差分，不重读文件）。
+                if let baseline = sessionFinal[parent],
+                   let computed = await computeEntry(url: url, ledgerKey: key, baseline: baseline, fork: true,
+                                                     threadNames: threadNames) {
+                    (entry, fileFinal) = computed
+                } else if let previous = await cache.entry(forPath: key + "#fork") {
+                    // 原对话找不到（或这次读不了）：沿用上次按基线算好的数
+                    (entry, fileFinal) = (previous, Self.approximateFinal(previous))
+                } else if let computed = await computeEntry(url: url, ledgerKey: key, baseline: .zero, fork: true,
+                                                            threadNames: threadNames) {
+                    // 从来没见过原对话：只能按全量算（保守起见，原对话之后出现会按基线重算回来）
+                    (entry, fileFinal) = computed
+                } else { continue }
+            } else if let m = FileMetadata.read(at: url.path),
+                      let hit = await cache.lookup(filePath: key, mtime: m.mtime, size: m.size),
+                      hit.records.isEmpty || !hit.details.isEmpty {
+                // 非 fork 缓存命中（0.3.47 及以前写的条目没有明细 → 不算命中，重读一次补上）。
+                // baseline 恒 0 → 用 Σtoken / Σcached 近似历史最大累计
                 // （计数器重启过的文件会略大于真值——基线偏大只会让 fork 少算，是保守方向）。
-                records = entry.records
-                fileFinal = CodexUsage(input: entry.records.reduce(0) { $0 + $1.token },
-                                       cached: entry.records.reduce(0) { $0 + $1.cachedToken })
-            } else {
-                let events = parseRawEvents(url: url)
-                let (daily, cachedDaily, maxTotal) = Self.computeDaily(events: events, baseline: baseline)
-                records = daily.map { FileDailyRecord(provider: id, date: $0.key, token: $0.value, cachedToken: cachedDaily[$0.key] ?? 0) }
-                fileFinal = maxTotal
-                if let m = FileMetadata.read(at: path) {
-                    if !isFork {
-                        // 非 fork：正常按 (mtime,size) 缓存，下轮可命中跳过解析。
-                        // 先删同一文件的 fork 身份条目：父会话消失后它从 fork 变回普通文件，两条并存就算两遍。
-                        await cache.removeEntry(forPath: key + "#fork")
-                        await cache.store(
-                            FileCacheEntry(filePath: key, mtime: m.mtime, size: m.size, records: records)
-                        )
-                    } else {
-                        // ⚠️ **fork 文件也必须写账本**（v0.3.33 修）。
-                        //
-                        // 老行为是「fork 一律不写」——理由是它的 records 依赖跨文件 baseline、父会话增长后会失效。
-                        // 但主列表是从 `FileMtimeCache.allEntries()` 聚合的**持久账本**，不写 = 这些 fork 会话的
-                        // 用量在主列表里**根本不存在**。本机实测：8-11 一个 fork 会话的 87 万 token 就这么丢了
-                        // （列表 18.0M vs 详情 18.9M，正是 issue #8 那类「两个数字打架」，只是方向相反）。
-                        //
-                        // 修法：写一个**合成 key**（真实路径 + 后缀），且 `mtime` 用当前时刻、`size` 用记录数——
-                        // 这样它**永远不会被 `lookup` 命中**（下一轮 fork 分支压根不查缓存），每轮都以最新
-                        // baseline 重算并覆盖同一条，既不会失效也不会重复累加。
-                        //
-                        // 先删同一文件的普通身份条目：父会话后出现（例如 v0.3.40 起能扫到被归档的父会话）时，
-                        // 它从普通文件变成 fork，旧的「按全量算」那条若留着就会和这条一起算两遍。
-                        await cache.removeEntry(forPath: key)
-                        await cache.store(
-                            FileCacheEntry(filePath: key + "#fork", mtime: Date(), size: records.count,
-                                           records: records)
-                        )
-                    }
-                }
-            }
+                (entry, fileFinal) = (hit, Self.approximateFinal(hit))
+            } else if let computed = await computeEntry(url: url, ledgerKey: key, baseline: .zero, fork: false,
+                                                        threadNames: threadNames) {
+                (entry, fileFinal) = computed
+            } else if let previous = await cache.entry(forPath: key) {
+                (entry, fileFinal) = (previous, Self.approximateFinal(previous))   // 这次读不了：保留上次的数
+            } else { continue }
 
             if let meta, !meta.ownId.isEmpty {
                 sessionFinal[meta.ownId] = (sessionFinal[meta.ownId] ?? .zero).componentMax(fileFinal)
             }
-            allRecords.append(contentsOf: records)
-        }
-
-        // v0.3.33：把**明细**（会话 / 模型 / 5 列）落进持久账本，详情页从此读账本、不再重扫源日志。
-        // ⚠️ 与 Claude 系不同，这里必须整体扫完再写：Codex 的 fork 差分基线是跨文件状态，
-        // 逐文件独立算会把 replay 段重复计（见 CodexDetailScanner.allDetails 的注释）。
-        // 写成一条合成条目（非真实文件路径），源 rollout 被清理后明细仍在。
-        let details = await detailScanner.allDetails(providerId: id, root: sessionsDir)
-        if !details.isEmpty {
-            await cache.store(FileCacheEntry(
-                filePath: sessionsDir.appendingPathComponent(".usagebar-detail-ledger").path,
-                mtime: Date(), size: details.count,
-                records: [], details: details))
+            allRecords.append(contentsOf: entry.records)
         }
 
         if migrating {
             await Self.markLedgerMigrated(cache: cache, sessionsDir: sessionsDir)
         }
         return allRecords
+    }
+
+    /// 读一个文件、算出明细，主列表的数直接由明细汇总，存进同一条账本（v0.3.48）。读不了返回 nil。
+    ///
+    /// ⚠️ **fork 文件也必须写账本**（v0.3.33 修）：主列表从持久账本聚合，不写 = 这些 fork 会话的用量
+    /// 在主列表里根本不存在（本机 8-11 一个 fork 会话的 87 万 token 就这么丢过）。fork 用合成 key
+    /// （真实路径 + `#fork`），`mtime` 用当前时刻、`size` 用记录数——永远不命中 `lookup`，每轮按最新基线覆盖同一条。
+    /// 写之前删掉同一文件另一种身份的条目，两条并存就算两遍。
+    private func computeEntry(url: URL, ledgerKey: String, baseline: CodexUsage, fork: Bool,
+                              threadNames: [String: String]) async -> (FileCacheEntry, CodexUsage)? {
+        guard let m = FileMetadata.read(at: url.path),
+              let parsed = await detailScanner.fileDetails(url: url, sessionKey: ledgerKey, baseline: baseline,
+                                                           providerId: id, threadNames: threadNames,
+                                                           keepInMemory: fork)
+        else { return nil }
+        let records = Self.dailyRecords(from: parsed.details, provider: id)
+        let entry = fork
+            ? FileCacheEntry(filePath: ledgerKey + "#fork", mtime: Date(), size: records.count,
+                             records: records, details: parsed.details)
+            : FileCacheEntry(filePath: ledgerKey, mtime: m.mtime, size: m.size,
+                             records: records, details: parsed.details)
+        await cache.removeEntry(forPath: fork ? ledgerKey : ledgerKey + "#fork")
+        await cache.store(entry)
+        return (entry, parsed.maxTotal)
+    }
+
+    /// 主列表的数 = 明细按日汇总（与 Claude Code 同一做法，两边永远对得上）
+    static func dailyRecords(from details: [FileDetailRecord], provider: String) -> [FileDailyRecord] {
+        var token: [String: Int] = [:]
+        var cached: [String: Int] = [:]
+        for d in details {
+            token[d.date, default: 0] += d.tokens.total
+            cached[d.date, default: 0] += d.tokens.cacheRead
+        }
+        return token.keys.sorted().map {
+            FileDailyRecord(provider: provider, date: $0, token: token[$0] ?? 0, cachedToken: cached[$0] ?? 0)
+        }
+    }
+
+    /// 账本里的数近似一个文件的历史最大累计（给后面的分叉对话当基线）
+    private static func approximateFinal(_ entry: FileCacheEntry) -> CodexUsage {
+        CodexUsage(input: entry.records.reduce(0) { $0 + $1.token },
+                   cached: entry.records.reduce(0) { $0 + $1.cachedToken })
+    }
+
+    /// 0.3.33～0.3.47 的合成明细条目（全部明细一整条、每轮覆盖），0.3.48 起不再写、见到就删
+    static func legacyDetailLedgerPath(sessionsDir: URL) -> String {
+        sessionsDir.appendingPathComponent(".usagebar-detail-ledger").path
     }
 }

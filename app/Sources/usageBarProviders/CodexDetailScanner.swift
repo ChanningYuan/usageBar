@@ -81,6 +81,7 @@ public actor CodexDetailScanner {
                 cache[path] = CacheEntry(mtime: m.mtime, size: m.size, parse: parsed)
                 fp = parsed
             }
+            guard !fp.events.isEmpty else { continue }
             let meta = fp.meta
             let sid = meta.ownId.isEmpty ? path : meta.ownId
 
@@ -137,77 +138,78 @@ public actor CodexDetailScanner {
     /// 数据可能已变（主刷新后）→ 清缓存，下次重扫。
     public func invalidate() { cache.removeAll() }
 
-    /// 全量扫描并产出**写进持久账本的明细条目**（v0.3.33，issue #8）。
+    // MARK: - 账本明细（v0.3.48：一个对话文件一条，主列表的数由这些行汇总）
+
+    /// 单个 rollout 文件 → 账本明细行（会话 × 模型 × 日期）+ 历史最大累计（给后面的分叉对话当基线）。
     ///
-    /// ⚠️ **不能像 Claude 系那样按单文件独立产明细**：Codex 的 `fork` 会把父会话整段 token
-    /// replay 进新文件，必须拿父会话的 final 当差分基线（见 `CodexProvider` 文件头的
-    /// 「fork / resume 跨文件去重」段）。基线是**跨文件**状态，逐文件各算各的会把 replay 段
-    /// 重复计成新增（同事机实测 2~2.5 倍虚高）。所以这里整体扫一遍、按文件名时间序处理，
-    /// 与主行口径逐字一致。
-    public func allDetails(providerId: String, root: URL,
-                           requirePath: String? = nil) async -> [FileDetailRecord] {
-        let files = allFiles(root: root, requirePath: requirePath)
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        let threadNames = loadThreadNames(sessionsDir: root)
+    /// ⚠️ 0.3.47 及以前是 `allDetails`：全部文件的明细合成**一条**账本、每轮按现存文件整条覆盖——
+    /// 文件被 Codex 压缩（10-16 起）或被手动删掉，明细就跟着没了，主列表却还在（本机 79 天对不上）。
+    /// 现在与 Claude Code 同一做法：明细和主列表存进同一条按文件的账本，文件没了这一条照样留着。
+    /// 差分与归账与 `detail()` 逐字一致（`CodexLineage`）；`baseline` 由调用方按分叉规则给。
+    ///
+    /// 返回 nil = 这次读不了（压缩文件坏了 / 还没写完），调用方应保留上次的数。
+    /// `keepInMemory`：分叉对话每轮要按最新基线重算，解析结果留在内存里；普通对话算完就进账本，不占内存。
+    func fileDetails(url: URL, sessionKey: String, baseline: CodexUsage, providerId: String,
+                     threadNames: [String: String], keepInMemory: Bool)
+        -> (details: [FileDetailRecord], maxTotal: CodexUsage)? {
+        guard let fp = cachedParse(url: url, keep: keepInMemory) else { return nil }
+        let meta = fp.meta
+        let sid = meta.ownId.isEmpty ? sessionKey : meta.ownId
+        let r = CodexLineage.deltas(events: fp.events, baseline: baseline)
 
-        var sessionFinal: [String: CodexUsage] = [:]
-        var acc: [String: TokenBreakdown] = [:]        // key = session|model|date
-        var accTiming: [String: GenerationTiming] = [:] // 同 key 的速度分量（v0.3.47）
-        var sessMeta: [String: Meta] = [:]
-        var lastAt: [String: Date] = [:]
-
-        for url in files {
-            let path = url.path
-            guard let m = FileMetadata.read(at: path) else { continue }
-
-            let fp: FileParse
-            if let c = cache[path], c.mtime == m.mtime, c.size == m.size {
-                fp = c.parse
-            } else {
-                guard let parsed = parse(url: url) else { continue }
-                cache[path] = CacheEntry(mtime: m.mtime, size: m.size, parse: parsed)
-                fp = parsed
-            }
-            let meta = fp.meta
-            let sid = meta.ownId.isEmpty ? path : meta.ownId
-
-            let (deltas, maxTotal) = Self.lineage(fp, sessionFinal: sessionFinal)
-            for d in deltas {
-                let date = DailyAggregator.dateString(for: d.ts)
-                let model = d.model.isEmpty ? meta.firstModel : d.model
-                let key = "\(sid)\u{0}\(model)\u{0}\(date)"
-                acc[key, default: TokenBreakdown()].add(Self.breakdown(d.delta))
-                // 只给「真实计入」的增量计时（继承快照 / replay / 重复事件根本不产出增量），输出用计入的那个数
-                accTiming[key, default: GenerationTiming()].add(output: d.delta.output, millis: d.genMillis)
-                lastAt[sid] = max(lastAt[sid] ?? .distantPast, d.ts)
-            }
-
-            if !meta.ownId.isEmpty {
-                sessionFinal[meta.ownId] = (sessionFinal[meta.ownId] ?? .zero).componentMax(maxTotal)
-            }
-            if let existing = sessMeta[sid] {
-                sessMeta[sid] = Meta(ownId: existing.ownId, forkedFromId: existing.forkedFromId,
-                                     isSubagent: existing.isSubagent,
-                                     title: existing.title ?? meta.title,
-                                     cwd: existing.cwd ?? meta.cwd,
-                                     firstModel: existing.firstModel.isEmpty ? meta.firstModel : existing.firstModel,
-                                     lastActivity: max(existing.lastActivity, meta.lastActivity))
-            } else {
-                sessMeta[sid] = meta
-            }
+        var acc: [String: TokenBreakdown] = [:]          // key = model|date
+        var accTiming: [String: GenerationTiming] = [:]
+        var lastAt = Date.distantPast
+        for d in r.deltas where d.delta.total > 0 {
+            let date = DailyAggregator.dateString(for: d.ts)
+            let model = d.model.isEmpty ? meta.firstModel : d.model
+            let key = "\(model)\u{0}\(date)"
+            acc[key, default: TokenBreakdown()].add(Self.breakdown(d.delta))
+            // 只给「真实计入」的增量计时（继承快照 / replay / 重复事件根本不产出增量），输出用计入的那个数
+            accTiming[key, default: GenerationTiming()].add(output: d.delta.output, millis: d.genMillis)
+            lastAt = max(lastAt, d.ts)
         }
-
-        return acc.map { (key, tb) in
+        let title = threadNames[sid] ?? meta.title
+            ?? meta.cwd.map { ($0 as NSString).lastPathComponent } ?? ""
+        let details = acc.map { key, tb -> FileDetailRecord in
             let parts = key.components(separatedBy: "\u{0}")
-            let sid = parts[0], model = parts[1], date = parts[2]
-            let mt = sessMeta[sid]
-            let title = threadNames[sid] ?? mt?.title
-                ?? mt?.cwd.map { ($0 as NSString).lastPathComponent } ?? ""
-            return FileDetailRecord(provider: providerId, date: date, sessionId: sid,
-                                    title: title, model: model,
-                                    lastActivity: lastAt[sid] ?? mt?.lastActivity ?? .distantPast,
+            return FileDetailRecord(provider: providerId, date: parts[1], sessionId: sid,
+                                    title: title, model: parts[0],
+                                    lastActivity: lastAt == .distantPast ? meta.lastActivity : lastAt,
                                     tokens: tb, timing: accTiming[key] ?? GenerationTiming())
+        }.sorted { ($0.date, $0.model) < ($1.date, $1.model) }
+        return (details, r.maxTotal)
+    }
+
+    /// 侧栏标题（每轮现读，改名后下一轮就跟上）
+    func threadNames(sessionsDir: URL) -> [String: String] {
+        loadThreadNames(sessionsDir: sessionsDir)
+    }
+
+    /// 文件头的 session_meta（是不是分叉、原对话是谁），按修改时间 + 大小缓存在内存里。
+    /// 压缩文件每次读都要解压开头一段，209 个文件每轮约 0.14 秒（v0.3.48 实测），文件没变就别再解。
+    func sessionMeta(url: URL) -> CodexProvider.SessionMeta? {
+        let path = url.path
+        guard let m = FileMetadata.read(at: path) else { return nil }
+        if let c = metaCache[path], c.mtime == m.mtime, c.size == m.size { return c.meta }
+        let meta = CodexProvider.readFirstSessionMeta(url: url)
+        metaCache[path] = (m.mtime, m.size, meta)
+        return meta
+    }
+
+    private var metaCache: [String: (mtime: Date, size: Int, meta: CodexProvider.SessionMeta?)] = [:]
+
+    private func cachedParse(url: URL, keep: Bool) -> FileParse? {
+        let path = url.path
+        guard let m = FileMetadata.read(at: path) else { return nil }
+        if let c = cache[path], c.mtime == m.mtime, c.size == m.size { return c.parse }
+        let parsed = parse(url: url)
+        if keep, let parsed {
+            cache[path] = CacheEntry(mtime: m.mtime, size: m.size, parse: parsed)
+        } else {
+            cache.removeValue(forKey: path)
         }
+        return parsed
     }
 
     // MARK: - 差分（与 CodexProvider 同一状态机）
@@ -282,7 +284,7 @@ public actor CodexDetailScanner {
         var inputTs: [String] = []
         var prevEnd: String? = nil
 
-        try? JSONLReader.forEachLine(at: url) { obj in
+        do { try JSONLReader.forEachLine(at: url) { obj in
             guard let type = obj["type"] as? String,
                   let payload = obj["payload"] as? [String: Any] else { return }
             switch type {
@@ -350,9 +352,11 @@ public actor CodexDetailScanner {
             default:
                 break
             }
+        } } catch {
+            return nil   // 压缩文件坏了 / 还没写完：这次读不了，别拿读了一半的数入账
         }
 
-        guard !events.isEmpty else { return nil }
+        // 没有用量事件（刚建的对话等）照样返回：调用方据此写一条空账本，下轮文件不变就不用重读
         let meta = Meta(ownId: ownId, forkedFromId: forkedFrom, isSubagent: isSub,
                         title: title, cwd: cwd, firstModel: firstModel, lastActivity: lastTs)
         return FileParse(events: events, meta: meta)

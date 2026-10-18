@@ -1,4 +1,5 @@
 import Foundation
+import CZstd
 
 /// JSONL 流式读取辅助。
 ///
@@ -24,8 +25,12 @@ public enum JSONLReader {
         body: (_ obj: [String: Any]) throws -> Void
     ) throws {
         guard FileManager.default.fileExists(atPath: url.path) else { return }
-        let data = try Data(contentsOf: url, options: .mappedIfSafe)
         let needle: [UInt8] = lineNeedle.map { Array($0.utf8) } ?? []
+        if url.pathExtension == "zst" {
+            try forEachZstdLine(at: url, needle: needle, body: body)
+            return
+        }
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
         try data.withUnsafeBytes { raw in
             guard let base = raw.baseAddress else { return }
             let bytes = base.assumingMemoryBound(to: UInt8.self)
@@ -56,6 +61,74 @@ public enum JSONLReader {
             // 尾行无换行
             try handle(lineStart, data.count - lineStart)
         }
+    }
+
+    /// 回调里抛它 = 提前停（只读文件头几行时用，压缩文件不必整份解压）。调用方用 `try?` 吞掉即可。
+    public struct StopReading: Error { public init() {} }
+
+    /// 压缩文件坏了或没写完（最后一帧不完整）。调用方应当成「这次读不了」，别拿读了一半的数入账。
+    public struct CorruptCompressedFile: Error {}
+
+    /// `.jsonl.zst`（zstd 压缩的 JSONL）：Codex 桌面版 2026-10-16 起把旧对话日志压成这样（本机 209 个，
+    /// 压缩后 474 MB、解压后 1.46 GB）。边解压边按行处理，不把整份解压结果放进内存；
+    /// 预筛 / 解析 / 回调与未压缩文件完全一致。
+    private static func forEachZstdLine(
+        at url: URL, needle: [UInt8], body: (_ obj: [String: Any]) throws -> Void
+    ) throws {
+        let file = try FileHandle(forReadingFrom: url)
+        defer { try? file.close() }
+        guard let dctx = ZSTD_createDCtx() else { throw CorruptCompressedFile() }
+        defer { ZSTD_freeDCtx(dctx) }
+
+        var out = [UInt8](repeating: 0, count: ZSTD_DStreamOutSize())
+        var pending: [UInt8] = []
+        var searchFrom = 0          // pending 里已确认没有换行的前缀长度（长行跨很多块时不重复扫）
+        var lastResult = 0          // 0 = 一帧刚好解完；非 0 = 帧还没完
+
+        func emit(_ line: ArraySlice<UInt8>) throws {
+            guard !line.isEmpty else { return }
+            try line.withUnsafeBufferPointer { buf in
+                guard let base = buf.baseAddress else { return }
+                if !needle.isEmpty {
+                    guard buf.count >= needle.count,
+                          needle.withUnsafeBytes({ memmem(base, buf.count, $0.baseAddress!, needle.count) }) != nil
+                    else { return }
+                }
+                if let obj = try? JSONSerialization.jsonObject(with: Data(buffer: buf)) as? [String: Any] {
+                    try body(obj)
+                }
+            }
+        }
+
+        while let chunk = try file.read(upToCount: ZSTD_DStreamInSize()), !chunk.isEmpty {
+            try chunk.withUnsafeBytes { raw in
+                var input = ZSTD_inBuffer(src: raw.baseAddress, size: raw.count, pos: 0)
+                while input.pos < input.size {
+                    let produced = try out.withUnsafeMutableBytes { ob -> Int in
+                        var output = ZSTD_outBuffer(dst: ob.baseAddress, size: ob.count, pos: 0)
+                        let rc = ZSTD_decompressStream(dctx, &output, &input)
+                        if ZSTD_isError(rc) != 0 { throw CorruptCompressedFile() }
+                        lastResult = rc
+                        return output.pos
+                    }
+                    guard produced > 0 else { continue }
+                    pending.append(contentsOf: out[0..<produced])
+                    var lineStart = 0
+                    var i = searchFrom
+                    while i < pending.count {
+                        if pending[i] == 0x0A {
+                            try emit(pending[lineStart..<i])
+                            lineStart = i + 1
+                        }
+                        i += 1
+                    }
+                    pending.removeSubrange(0..<lineStart)
+                    searchFrom = pending.count
+                }
+            }
+        }
+        guard lastResult == 0 else { throw CorruptCompressedFile() }   // 文件在压缩途中被读到：这次不算
+        try emit(pending[...])                                         // 尾行无换行
     }
 
     /// 对 glob 路径下所有 jsonl 文件逐行遍历。

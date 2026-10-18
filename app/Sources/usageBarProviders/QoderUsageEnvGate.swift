@@ -153,16 +153,27 @@ public enum QoderUsageEnvGate {
     /// ⚠️ 别退回成「gate 已开 + 装过 + token=0」就提示：那会对**今天没用过**的产品误报
     /// （2026-08-04 验收现场：用户当天没开千问办公，却被提示「重启千问办公」）。
     ///
-    /// 只取最新 mtime、不解析内容。调用方应在每次刷新时取一次缓存起来（见 `QoderUsageStatus`），
+    /// ⚠️ 千问办公不能看日志 mtime（v0.3.48 修）：它**一启动就写** segment（`session.config.loaded`
+    /// 等启动记录），没提问也会刷新 mtime——2026-10-19 本机 542 个 segment 只有 2 个真发过请求。
+    /// 只看 mtime 会把「打开过」当成「用过」，gate 开着、token 0 → 误挂「重启千问办公后开始记录」。
+    /// 改取最近一次**真实请求**（`model.response.completed`，含 gate 没生效时的 0 token 请求），
+    /// 与主列表共用 `QwenWorkEventStore` 同一份事件（按文件缓存，稳态只 stat 不重读）。
+    /// Qoder CLI 的 `~/.qoder/projects` transcript 只在真对话时才写（本机 2/2 都有请求），仍看 mtime。
+    ///
+    /// 调用方应在每次刷新时取一次缓存起来（见 `QoderUsageStatus`），
     /// **别放进 SwiftUI body 里按需调用**——那会每次重绘都扫盘。
-    public static func latestSessionActivity(for productId: String) -> Date? {
-        let root: URL
+    public static func latestSessionActivity(for productId: String) async -> Date? {
         switch productId {
-        case "qoder-cli":  root = home.appendingPathComponent(".qoder/projects")
-        case "qwen-work":  root = home.appendingPathComponent(".qwenworkcn/logs/sessions")
+        case "qoder-cli":
+            return newestLogDate(under: home.appendingPathComponent(".qoder/projects"))
+        case "qwen-work":
+            return await latestQwenWorkRequest(under: home.appendingPathComponent(".qwenworkcn/logs/sessions"))
         default: return nil
         }
-        return newestLogDate(under: root)
+    }
+
+    static func latestQwenWorkRequest(under root: URL) async -> Date? {
+        await QwenWorkEventStore.shared.events(under: root).last?.timestamp
     }
 
     private static func newestLogDate(under root: URL) -> Date? {

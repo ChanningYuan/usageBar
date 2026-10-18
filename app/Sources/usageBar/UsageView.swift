@@ -294,12 +294,15 @@ struct UsageRootView: View {
     private func showsRestartHint(for pid: String) -> Bool { gateHint(for: pid) == .needsRestart }
 
     /// 豆包工作「去开启」（用户 09-24 拍板 1a）：装了豆包工作、从没开过「豆包工作额度与积分」
-    /// （开关关着、也没走完过引导）→ 这一行常驻（不分周期，数字「—」）+ 下面挂一行提示。
+    /// （开关关着、也没走完过引导）→ 这一行常驻（数字「—」）+ 下面挂一行提示。
     /// 开过一次后就按当期有没有积分决定显示——豆包工作没有本地日志，开关关着就一个数都没有，
     /// 不挂这一行用户根本不知道它能统计。
+    /// v0.3.48（用户 10-19 定）：**今日**只在这台电脑今天用过豆包工作时才挂，与开过开关的人同一条规则；
+    /// 本周 / 本月 / 累计照旧常驻。
     private func showsDoubaoEnableHint(for pid: String) -> Bool {
         pid == "doubao-work" && visibleProviderIds.contains(pid) && viewModel.doubaoWorkInstalled
             && !quotaSettings.isEnabled("doubao-work") && !quotaSettings.isConfigured("doubao-work")
+            && (viewModel.window != .today || viewModel.doubaoUsedHereToday)
     }
 
     /// 某个时间点是否落在当前选中的周期内（复用聚合层的窗口判定，避免另写一套日期逻辑）。

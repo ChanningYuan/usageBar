@@ -20,6 +20,11 @@ import usageBarCore
 /// （本机 168 个文件实测目录日期 == 文件名日期，所以这就是它在活跃目录时的真实路径，老账本条目 key 不变）。
 /// 归档 / 取消归档来回挪：key 不变、mtime 不变 → 直接命中旧条目，不会多出一条。
 /// 两处同时有同名文件（取消归档没清干净等）只取一份：修改时间新的优先，再比大小，再优先活跃目录。
+///
+/// ── 压缩的旧日志（v0.3.48）──
+/// Codex 桌面版 2026-10-16 起把旧对话日志压成 `rollout-….jsonl.zst`（保留原修改时间，本机 209 个）。
+/// 压缩前后是同一个对话：账本 key 去掉 `.zst` 后与原文件相同；两种同时存在时只取一份，
+/// 修改时间相同则用没压缩的那份（读起来省事）。读取由 `JSONLReader` 按后缀自动解压。
 enum CodexRolloutFiles {
     struct File: Sendable {
         /// 文件现在的真实位置（读它）
@@ -34,8 +39,9 @@ enum CodexRolloutFiles {
     }
 
     /// `rollout-2026-08-11T21-17-10-<uuid>.jsonl` → `<sessionsDir>/2026/08/11/<文件名>`；文件名不合此格式返回 nil。
-    static func ledgerKey(fileName: String, sessionsDir: URL) -> String? {
+    static func ledgerKey(fileName rawName: String, sessionsDir: URL) -> String? {
         let prefix = "rollout-"
+        let fileName = baseName(rawName)
         guard fileName.hasPrefix(prefix), fileName.hasSuffix(".jsonl") else { return nil }
         let c = Array(fileName.dropFirst(prefix.count).prefix(11))   // "2026-08-11T"
         guard c.count == 11, c[4] == "-", c[7] == "-", c[10] == "T",
@@ -48,30 +54,41 @@ enum CodexRolloutFiles {
             .appendingPathComponent(fileName).path
     }
 
+    /// `….jsonl.zst` → `….jsonl`（压缩前的文件名）
+    static func baseName(_ fileName: String) -> String {
+        fileName.hasSuffix(".jsonl.zst") ? String(fileName.dropLast(4)) : fileName
+    }
+
     /// 活跃 + 归档两处的 rollout 文件：按文件名去重，按文件名排序
     /// （`rollout-{ISO时间}-{uuid}` 字典序 == 时间序 → 父会话一定排在它的 fork 之前）。
     static func list(sessionsDir: URL, requirePath: String? = nil) -> [File] {
         let fm = FileManager.default
         func isRollout(_ url: URL) -> Bool {
-            guard url.pathExtension == "jsonl", url.lastPathComponent.hasPrefix("rollout-") else { return false }
+            let name = url.lastPathComponent
+            guard name.hasPrefix("rollout-"), name.hasSuffix(".jsonl") || name.hasSuffix(".jsonl.zst") else { return false }
             if let req = requirePath, !url.path.contains(req) { return false }
             return true
         }
-        struct Candidate { let url: URL; let mtime: Date; let size: Int; let archived: Bool }
+        struct Candidate {
+            let url: URL; let mtime: Date; let size: Int; let archived: Bool
+            var compressed: Bool { url.pathExtension == "zst" }
+        }
 
         var best: [String: Candidate] = [:]
         func consider(_ url: URL, archived: Bool) {
             let m = FileMetadata.read(at: url.path)
             let cand = Candidate(url: url, mtime: m?.mtime ?? .distantPast, size: m?.size ?? 0, archived: archived)
-            guard let cur = best[url.lastPathComponent] else {
-                best[url.lastPathComponent] = cand
+            let name = baseName(url.lastPathComponent)
+            guard let cur = best[name] else {
+                best[name] = cand
                 return
             }
             let better: Bool
             if cand.mtime != cur.mtime { better = cand.mtime > cur.mtime }
+            else if cand.compressed != cur.compressed { better = !cand.compressed }
             else if cand.size != cur.size { better = cand.size > cur.size }
             else { better = !cand.archived && cur.archived }
-            if better { best[url.lastPathComponent] = cand }
+            if better { best[name] = cand }
         }
 
         if fm.fileExists(atPath: sessionsDir.path) {

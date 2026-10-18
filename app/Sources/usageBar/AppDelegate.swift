@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 首次启动自动登记开机自启（仅一次，之后尊重用户开关）
         LaunchAtLoginSettings.shared.autoEnableOnce()
         statusBarController = StatusBarController()
+        // 记豆包工作在本机最前面的时段：今日判断「本机用过没」要用（v0.3.48）
+        DoubaoWorkForegroundTracker.shared.start()
     }
 
     /// 退出前把 mtime 缓存 dump 到磁盘

@@ -125,16 +125,8 @@ public actor QoderIdeDetailScanner {
         return (mtime, db.size + (wal?.size ?? 0))
     }
 
+    /// IDE 关着时退到快照方式读（见 `ReadOnlySQLite`），与主列表同一个读法。
     static func query(dbPath: String) -> [Row] {
-        let uri = "file:\(dbPath)?mode=ro"
-        var db: OpaquePointer?
-        guard sqlite3_open_v2(uri, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK,
-              let db else {
-            if let db { sqlite3_close(db) }
-            return []
-        }
-        defer { sqlite3_close(db) }
-
         // LEFT JOIN chat_session 取会话标题 —— Qoder IDE 把侧栏那个会话名存在 `session_title` 里
         // （样例："你好"），还有 `project_name` 可作兜底。主行 `QoderIdeProvider` 只读 chat_message，
         // 详情页要标题就必须 join（v0.3.22 首版漏了，会话名显示成 sessionId 前缀）。
@@ -151,18 +143,11 @@ public actor QoderIdeDetailScanner {
            AND m.token_info IS NOT NULL
            AND m.token_info != ''
         """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
-            if let stmt { sqlite3_finalize(stmt) }
-            return []
-        }
-        defer { sqlite3_finalize(stmt) }
-
         var rows: [Row] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        ReadOnlySQLite.query(path: dbPath, sql: sql) { stmt in
             let gmtMs = sqlite3_column_int64(stmt, 0)
-            guard gmtMs > 0, let tokenC = sqlite3_column_text(stmt, 1) else { continue }
-            guard let tb = parseTokenInfo(String(cString: tokenC)) else { continue }
+            guard gmtMs > 0, let tokenC = sqlite3_column_text(stmt, 1) else { return }
+            guard let tb = parseTokenInfo(String(cString: tokenC)) else { return }
 
             let sid = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
             let modelJSON = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
