@@ -5,27 +5,27 @@
         <item>
             <description><![CDATA[
 <style>a{color:#8a8a8e;text-decoration:none}a:hover{text-decoration:underline}hr{border:none;border-top:1px solid rgba(128,128,128,.28);margin:16px 0 12px}.full-log{font-size:.92em}</style>
-<h3>usageBar 0.3.47</h3>
-<p><b>新增</b></p>
-<ul>
-<li><b>详情页「按模型」显示输出速度</b>：每个模型新增一列「xx tok/s」——从发出请求到回答完，平均每秒输出多少 token。看得出哪个模型快、换了渠道有没有变慢；鼠标停在数字上有说明。跟着顶部周期（今日 / 昨日 / 本周 / 本月 / 累计）重算。</li>
-<li>支持 Claude Code、Cowork、Codex、Qoder CLI、Qoder IDE、千问办公、OpenCode、WorkBuddy。Cursor 与豆包工作的本地记录没有 token 数或耗时，这两家不显示这一列。</li>
-<li>升级后第一次刷新会重新读一遍现存日志补上耗时；日志已被各工具自己清理的早期用量照常保留，只是没有速度。</li>
-</ul>
+<h3>usageBar 0.3.48</h3>
 <p><b>修复</b></p>
 <ul>
-<li>Codex 的「积分」药丸与详情页「按量积分」不再显示 $ 符号：这是积分（信用点）余额，不是美元，避免误解。</li>
+<li><b>Codex 详情页只剩最近几个对话</b>：Codex 桌面版 10 月中旬起会把旧对话的日志压缩保存，usageBar 以前读不了，详情页「按模型 / 按会话」只剩还没压缩的几个对话（主列表的总数不受影响）。现在能读压缩的日志，丢掉的明细会找回来；新装 usageBar 也能算到压缩前的历史。</li>
+<li>Codex 的明细改成和主列表存在一起：手动删掉对话文件、或 Codex 压缩旧日志之后，详情页照样保留，两边的数始终对得上；删掉原对话后，从它分叉出来的对话也不会再被多算。</li>
+<li>升级后第一次刷新要把压缩的旧日志读一遍（实测 1.46 GB 约 10 秒，后台进行），之后照常。</li>
+<li><b>Qoder IDE 关掉后主列表变成 0</b>：Qoder IDE 没在运行时，它的数据库按原来的方式打不开，主列表被清成 0、详情页却还有数。现在关着也能读；实在读不了时保留上次的数，不再清零。</li>
+<li><b>今日里冒出没在用的「千问办公」</b>：只打开过千问办公、没有提问时，不再挂「已开启统计，重启千问办公后开始记录」。「用过」改看真正发出去的提问——千问办公一启动就会写日志，以前只看日志有没有更新，打开一下就被当成用过。</li>
+<li><b>今日里冒出「豆包工作」，其实是在手机上问的</b>：豆包工作的积分是整个账号共用的，手机豆包 App、另一台电脑的消耗都算在里面。现在「今日」只在这台电脑今天用过豆包工作时才显示这一行（还没开启额度与积分时的「去开启」提示也一样）；本周 / 本月 / 累计照旧显示整个账号的积分。</li>
+<li>「这台电脑用过」读的是豆包工作保存在本机的对话记录，不联网、不需要授权：本机的任务对话直接算；普通聊天会在多台电脑之间同步，只有当时豆包工作正在这台电脑最前面才算。</li>
 </ul>
 <hr>
 <p class="full-log"><a href="https://usagebar.cn/changelog.html">查看完整更新历史 →</a></p>
             ]]></description>
-            <title>0.3.47</title>
-            <pubDate>Wed, 14 Oct 2026 00:43:39 +0800</pubDate>
-            <sparkle:version>0.3.47</sparkle:version>
-            <sparkle:shortVersionString>0.3.47</sparkle:shortVersionString>
+            <title>0.3.48</title>
+            <pubDate>Mon, 19 Oct 2026 05:21:27 +0800</pubDate>
+            <sparkle:version>0.3.48</sparkle:version>
+            <sparkle:shortVersionString>0.3.48</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://usagebar.cn/dl/v0.3.47/usageBar.zip" length="3041544" type="application/octet-stream" sparkle:edSignature="4vRjR7+qFA2Ge5WuXPy7ZG74lKS8EFQ14/RgarvUWAJZj0pSESS7NEwtVZgcuC/bhV2jsrOKy/lQwj4OvfajDQ=="/>
+            <enclosure url="https://usagebar.cn/dl/v0.3.48/usageBar.zip" length="3145027" type="application/octet-stream" sparkle:edSignature="viH8vsVAEvwrBwkkjnz+D9BFvNxk1tynpIgeMqNlkIzcBNo5SHdRC8QSyyaiBSMv1MCpDKlDhlHvjUFm/+iqAg=="/>
         </item>
     </channel>
 </rss>
